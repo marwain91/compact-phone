@@ -177,6 +177,32 @@ Item {
                                     implicitWidth: 110
                                 }
                             }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Theme.s10
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 0
+                                    Text {
+                                        text: qsTr("Always on top")
+                                        color: Theme.textPrimary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fbody
+                                        font.weight: Font.Medium
+                                    }
+                                    Text {
+                                        text: qsTr("Keep the window above other apps")
+                                        color: Theme.textTertiary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fxs
+                                    }
+                                }
+                                AppSwitch {
+                                    checked: PhoneController.alwaysOnTop
+                                    onToggled: PhoneController.alwaysOnTop = checked
+                                }
+                            }
                         }
                     }
 

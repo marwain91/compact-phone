@@ -202,6 +202,8 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
             this, &PhoneController::enterpriseFeaturesEnabledChanged);
     connect(m_settingsController.get(), &SettingsController::crashReportingEnabledChanged,
             this, &PhoneController::crashReportingEnabledChanged);
+    connect(m_settingsController.get(), &SettingsController::alwaysOnTopChanged,
+            this, &PhoneController::alwaysOnTopChanged);
 
     connect(&m_noticeTimer, &QTimer::timeout, this, &PhoneController::dismissNotice);
     m_noticeTimer.setSingleShot(true);
@@ -567,6 +569,16 @@ void PhoneController::setCrashReportingEnabled(bool enabled)
 {
     if (m_settingsController)
         m_settingsController->setCrashReportingEnabled(enabled);
+}
+
+bool PhoneController::alwaysOnTop() const
+{
+    return m_settingsController && m_settingsController->alwaysOnTop();
+}
+
+void PhoneController::setAlwaysOnTop(bool enabled)
+{
+    if (m_settingsController) m_settingsController->setAlwaysOnTop(enabled);
 }
 
 QAbstractListModel *PhoneController::conversationsModel() const

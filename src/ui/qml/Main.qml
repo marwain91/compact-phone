@@ -12,7 +12,14 @@ ApplicationWindow {
     maximumWidth: 410
     minimumHeight: 440
     maximumHeight: 440
-    flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint
+    // alwaysOnTop is a user setting; ringingLift transiently forces on-top
+    // while a call is ringing so the call dialog can't be hidden behind a
+    // fullscreen app. Either being true pins the window above siblings.
+    property bool ringingLift: PhoneController.incomingCallId >= 0
+    flags: (Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint
+            | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
+           | ((PhoneController.alwaysOnTop || ringingLift)
+              ? Qt.WindowStaysOnTopHint : 0)
     Component.onCompleted: {
         Theme.setTheme(PhoneController.themeId)
         window.width = 410
