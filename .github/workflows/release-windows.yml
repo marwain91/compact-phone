@@ -1,0 +1,92 @@
+name: Release · Windows
+
+# Fires on every v* tag. Builds the MSI, signs it if the cert secrets are
+# present, and uploads to the matching GitHub Release. The signing step
+# is a no-op when CODE_SIGN_THUMBPRINT is empty, which keeps unsigned dev
+# tags working.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # needed to attach assets to the release
+
+jobs:
+  build-sign-publish:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg
+          key: vcpkg-windows-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
+
+      - name: Setup vcpkg
+        shell: pwsh
+        run: |
+          if (-not (Test-Path vcpkg)) {
+            git clone https://github.com/microsoft/vcpkg.git
+            .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          }
+          "VCPKG_ROOT=$pwd/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install WiX 4
+        shell: pwsh
+        run: dotnet tool install --global wix
+
+      - name: Configure
+        shell: pwsh
+        run: cmake --preset windows -DVCPKG_MANIFEST_FEATURES="windows-pjsip"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build --preset windows
+
+      - name: Stage runtime
+        shell: pwsh
+        run: |
+          $stage = "build\windows\stage"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item build\windows\src\compactphone.exe $stage
+          $deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" -Path vcpkg | Select-Object -First 1
+          if ($deploy) {
+            & $deploy.FullName --qmldir src\ui\qml --release `
+                --no-translations --no-system-d3d-compiler `
+                "$stage\compactphone.exe"
+          }
+
+      - name: Build MSI
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $version = $env:REF_NAME -replace '^v', ''
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          wix build packaging\windows\installer.wxs -arch x64 `
+              -d Version=$version `
+              -d StageDir=build\windows\stage `
+              -out "dist\compactphone-$version.msi"
+
+      - name: Sign MSI (gated on cert secret)
+        shell: pwsh
+        env:
+          CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
+          TIMESTAMP_URL: ${{ vars.TIMESTAMP_URL }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CODE_SIGN_THUMBPRINT)) {
+            Write-Host "CODE_SIGN_THUMBPRINT not set — uploading unsigned MSI"
+            exit 0
+          }
+          $ts = if ([string]::IsNullOrEmpty($env:TIMESTAMP_URL)) {
+            "http://timestamp.digicert.com" } else { $env:TIMESTAMP_URL }
+          & "signtool" sign /v /sha1 $env:CODE_SIGN_THUMBPRINT `
+              /tr $ts /td sha256 /fd sha256 dist\*.msi
+
+      - name: Upload MSI to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.msi
+          fail_on_unmatched_files: true

@@ -1,0 +1,31 @@
+#include "core/CrashReporting.h"
+
+#include <gtest/gtest.h>
+
+namespace crash = compactphone::crash;
+
+// Without COMPACTPHONE_ENABLE_SENTRY, both functions are no-ops by
+// construction. These tests just confirm they don't crash under any
+// argument combination — the build flag itself is the contract.
+
+TEST(CrashReportingTest, InitWithoutDsnIsSafe)
+{
+    crash::initSentry(QString(), false);
+    crash::initSentry(QString(), true);
+    crash::shutdown();
+}
+
+TEST(CrashReportingTest, InitWithDsnButNoConsentIsNoOp)
+{
+    crash::initSentry(QStringLiteral("https://abc@sentry.example/1"), false);
+    crash::shutdown();
+    // Repeating is also safe.
+    crash::shutdown();
+}
+
+TEST(CrashReportingTest, RepeatedInitIsIdempotent)
+{
+    crash::initSentry(QStringLiteral("https://abc@sentry.example/1"), true);
+    crash::initSentry(QStringLiteral("https://abc@sentry.example/1"), true);
+    crash::shutdown();
+}

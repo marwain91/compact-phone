@@ -1,0 +1,47 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: compactphone-dev:latest
+    container_name: compactphone-dev
+    working_dir: /workspace
+    environment:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    volumes:
+      - ../..:/workspace
+      - vcpkg-archives:/root/.cache/vcpkg
+    command: sleep infinity
+    tty: true
+    stdin_open: true
+    networks:
+      - compactphone-net
+
+  asterisk:
+    image: andrius/asterisk:20
+    container_name: compactphone-asterisk
+    volumes:
+      - ../../tests/integration/docker/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ../../tests/integration/docker/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ../../tests/integration/docker/rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ../../tests/integration/docker/tls:/etc/asterisk/tls:ro
+    restart: unless-stopped
+    # Publish SIP + a chunk of RTP to the host so a macOS-host build can
+    # register at 127.0.0.1:5060 and place real audio calls.
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "5061:5061/tcp"
+      - "10000-10100:10000-10100/udp"
+    networks:
+      compactphone-net:
+        aliases:
+          - asterisk
+
+networks:
+  compactphone-net:
+    driver: bridge
+
+volumes:
+  vcpkg-archives:

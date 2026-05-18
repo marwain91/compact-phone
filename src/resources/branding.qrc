@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/branding">
+        <file alias="mark-light.svg">../../branding/compactphone-mark-light.svg</file>
+        <file alias="mark-dark.svg">../../branding/compactphone-mark-dark.svg</file>
+        <file alias="appicon.svg">../../branding/compactphone-appicon.svg</file>
+        <file alias="daktela-mark-light.svg">../../branding/daktela-mark-light.svg</file>
+        <file alias="daktela-mark-dark.svg">../../branding/daktela-mark-dark.svg</file>
+    </qresource>
+</RCC>

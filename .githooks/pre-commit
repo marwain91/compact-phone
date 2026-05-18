@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Pre-commit secret scanner. Refuses commits containing API keys, private
+# keys, SSH keys, AWS creds, OAuth tokens, etc. Activated by running:
+#
+#     git config core.hooksPath .githooks
+#
+# (once per clone — committed config doesn't override your local git config).
+#
+# Requires `gitleaks` on $PATH:  brew install gitleaks   |   apt install gitleaks
+# If gitleaks isn't installed the hook degrades to a much narrower built-in
+# scan and warns you to install the real thing.
+
+set -e
+
+if command -v gitleaks >/dev/null 2>&1; then
+    # `protect` scans only the staged diff — fast, runs on every commit.
+    gitleaks protect --staged --redact --no-banner
+    exit $?
+fi
+
+echo "⚠️  gitleaks not installed — falling back to a narrow built-in scan."
+echo "    Install it for full coverage:  brew install gitleaks"
+
+# Minimal fallback: catch the most embarrassing patterns.
+patterns=(
+    'AKIA[0-9A-Z]{16}'                          # AWS access key
+    'ghp_[0-9A-Za-z]{36,}'                      # GitHub PAT
+    'github_pat_[0-9A-Za-z_]{82}'               # fine-grained GitHub PAT
+    'xox[bpars]-[0-9A-Za-z-]{10,}'              # Slack token
+    'sk-[A-Za-z0-9]{48}'                        # OpenAI key
+    'sk-ant-[A-Za-z0-9-]{40,}'                  # Anthropic key
+    '-----BEGIN [A-Z ]*PRIVATE KEY-----'        # any PEM private key
+    'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\..+'  # JWT
+)
+
+violations=0
+for p in "${patterns[@]}"; do
+    if git diff --cached --no-color -U0 -- ':(exclude).githooks' \
+         | grep -E -- "$p" > /dev/null; then
+        echo "✖ staged diff matches secret pattern: $p"
+        violations=$((violations + 1))
+    fi
+done
+
+if [ $violations -gt 0 ]; then
+    echo
+    echo "Aborting commit. Remove the secret, or if it's a false positive add"
+    echo "an inline gitleaks:allow comment / update .gitleaks.toml."
+    exit 1
+fi

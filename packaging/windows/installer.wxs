@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX 4 source for the Compact Phone MSI.
+
+  Build pipeline (run from packaging/windows after the executable is staged):
+    wix build installer.wxs -arch x64 -d Version=$(version) \
+        -d StageDir=$(stage) -out compactphone-$(version).msi
+
+  After build, sign with signtool using an EV code-signing cert:
+    signtool sign /v /tr http://timestamp.digicert.com /td sha256 \
+        /fd sha256 /sha1 $env:CODE_SIGN_THUMBPRINT compactphone-*.msi
+
+  The MSI ships:
+    • compactphone.exe (with the embedded .ico from src/compactphone.rc)
+    • Qt6 runtime + plugins (deployed by windeployqt)
+    • Visual C++ runtime (chained via Visual C++ redistributable merge module)
+    • Start-menu shortcut
+    • Desktop shortcut (default off, opt-in)
+    • Registry entries for sip:/sips:/tel:/callto: URL handlers
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+    <Package Name="Compact Phone"
+             Manufacturer="Havliczech"
+             Version="$(Version)"
+             UpgradeCode="b86c4ddf-1c5e-44b3-93d2-d8b71ee05a44"
+             Scope="perMachine"
+             Codepage="1252">
+
+        <MajorUpgrade DowngradeErrorMessage="A newer version of Compact Phone is already installed." />
+
+        <MediaTemplate EmbedCab="yes" />
+
+        <Icon Id="CompactPhoneIcon" SourceFile="..\..\branding\compactphone.ico" />
+        <Property Id="ARPPRODUCTICON" Value="CompactPhoneIcon" />
+        <Property Id="ARPHELPLINK" Value="https://github.com/marwain91/compact-phone" />
+        <Property Id="ARPNOMODIFY" Value="1" />
+
+        <Feature Id="MainFeature" Title="Compact Phone" Level="1">
+            <ComponentGroupRef Id="MainComponents" />
+            <ComponentRef Id="StartMenuShortcut" />
+            <ComponentRef Id="UrlHandlerRegistration" />
+        </Feature>
+
+        <Feature Id="DesktopShortcut"
+                 Title="Place a shortcut on the desktop"
+                 Level="1000">
+            <ComponentRef Id="DesktopShortcutComp" />
+        </Feature>
+
+        <StandardDirectory Id="ProgramFiles64Folder">
+            <Directory Id="INSTALLFOLDER" Name="Compact Phone" />
+        </StandardDirectory>
+
+        <StandardDirectory Id="ProgramMenuFolder">
+            <Directory Id="StartMenuDir" Name="Compact Phone" />
+        </StandardDirectory>
+
+        <StandardDirectory Id="DesktopFolder" />
+
+        <!-- Files are harvested into the MainComponents group by `heat` in
+             the CI pipeline, then included here. The "$(StageDir)" variable
+             points at the post-windeployqt directory. -->
+        <ComponentGroup Id="MainComponents" Directory="INSTALLFOLDER">
+            <Files Include="$(StageDir)\**" />
+        </ComponentGroup>
+
+        <Component Id="StartMenuShortcut" Directory="StartMenuDir" Guid="*">
+            <Shortcut Id="StartMenuShortcut"
+                      Name="Compact Phone"
+                      Description="A compact SIP softphone"
+                      Target="[#compactphone.exe]"
+                      WorkingDirectory="INSTALLFOLDER"
+                      Icon="CompactPhoneIcon" />
+            <RemoveFolder Id="RemoveStartMenuDir" On="uninstall" />
+            <RegistryValue Root="HKCU"
+                           Key="Software\Havliczech\Compact Phone"
+                           Name="StartMenuShortcut"
+                           Type="integer"
+                           Value="1"
+                           KeyPath="yes" />
+        </Component>
+
+        <Component Id="DesktopShortcutComp" Directory="DesktopFolder" Guid="*">
+            <Shortcut Id="DesktopShortcut"
+                      Name="Compact Phone"
+                      Target="[#compactphone.exe]"
+                      WorkingDirectory="INSTALLFOLDER"
+                      Icon="CompactPhoneIcon" />
+            <RegistryValue Root="HKCU"
+                           Key="Software\Havliczech\Compact Phone"
+                           Name="DesktopShortcut"
+                           Type="integer"
+                           Value="1"
+                           KeyPath="yes" />
+        </Component>
+
+        <Component Id="UrlHandlerRegistration" Directory="INSTALLFOLDER" Guid="*">
+            <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\sip">
+                <RegistryValue Type="string" Value="URL:SIP Protocol" />
+                <RegistryValue Name="URL Protocol" Type="string" Value="" />
+                <RegistryValue Key="DefaultIcon" Type="string"
+                               Value="[INSTALLFOLDER]compactphone.exe,0" />
+                <RegistryValue Key="shell\open\command" Type="string"
+                               Value="&quot;[INSTALLFOLDER]compactphone.exe&quot; &quot;%1&quot;" />
+            </RegistryKey>
+            <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\sips">
+                <RegistryValue Type="string" Value="URL:SIPS Protocol" />
+                <RegistryValue Name="URL Protocol" Type="string" Value="" />
+                <RegistryValue Key="shell\open\command" Type="string"
+                               Value="&quot;[INSTALLFOLDER]compactphone.exe&quot; &quot;%1&quot;" />
+            </RegistryKey>
+            <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\tel">
+                <RegistryValue Type="string" Value="URL:Telephone Protocol" />
+                <RegistryValue Name="URL Protocol" Type="string" Value="" />
+                <RegistryValue Key="shell\open\command" Type="string"
+                               Value="&quot;[INSTALLFOLDER]compactphone.exe&quot; &quot;%1&quot;" />
+            </RegistryKey>
+            <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\callto">
+                <RegistryValue Type="string" Value="URL:Callto Protocol" />
+                <RegistryValue Name="URL Protocol" Type="string" Value="" />
+                <RegistryValue Key="shell\open\command" Type="string"
+                               Value="&quot;[INSTALLFOLDER]compactphone.exe&quot; &quot;%1&quot;" />
+            </RegistryKey>
+        </Component>
+
+    </Package>
+</Wix>

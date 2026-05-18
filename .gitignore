@@ -1,0 +1,51 @@
+build/
+build-*/
+out/
+.vs/
+.vscode/
+.idea/
+CMakeUserPresets.json
+vcpkg_installed/
+*.user
+.DS_Store
+Thumbs.db
+
+# Generated ringtone (regenerated at build time)
+src/resources/ringtone.wav
+
+# --- Internal-only working docs --------------------------------------------
+# Claude Code's superpowers skill drops design specs + implementation plans
+# under docs/superpowers/. They're working scaffolds, not user-facing docs;
+# kept out of the public repo so internal planning notes don't leak.
+docs/superpowers/
+
+# --- Never commit credentials / signing material ---------------------------
+# These patterns are pre-emptive: nothing matches today, but if you ever copy
+# a real .env, code-signing cert, or SSH key into the tree, git will refuse
+# to stage it instead of silently picking it up.
+.env
+.env.*
+!.env.example          # canonical "fill me in" templates stay tracked
+*.pem
+*.key
+!tests/integration/docker/tls/server.key  # documented test-only cert
+*.p12
+*.pfx
+*.keystore
+*.jks
+*.cer.priv
+secrets.json
+secrets.yaml
+secrets.yml
+credentials*
+*.gpg
+*.asc.priv
+# Sparkle / appcast EdDSA private key — keep it in a password manager, not here.
+ed25519.priv*
+sparkle_priv*
+# Local provisioning fixtures with real customer creds
+provisioning.local.json
+provisioning.private.json
+# IDE-stashed test creds
+*.local.conf
+*.local.cfg

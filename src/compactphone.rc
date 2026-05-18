@@ -1,0 +1,47 @@
+// Windows resource script — embeds the application icon and version metadata
+// into compactphone.exe so Explorer (Properties → Details), the Taskbar tooltip,
+// and the Add/Remove Programs entry all show "Compact Phone".
+//
+// COMPACTPHONE_VERSION_RC is fed in from CMake (set_source_files_properties on
+// this file) as four comma-separated numbers, e.g. 0,1,0,0.  If unset it falls
+// back to 0,0,0,0 so the .rc still compiles standalone.
+
+#include <winver.h>
+
+#ifndef COMPACTPHONE_VERSION_RC
+#define COMPACTPHONE_VERSION_RC 0,0,0,0
+#endif
+#ifndef COMPACTPHONE_VERSION_STR
+#define COMPACTPHONE_VERSION_STR "0.0.0.0"
+#endif
+
+IDI_ICON1 ICON "../branding/compactphone.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    COMPACTPHONE_VERSION_RC
+PRODUCTVERSION COMPACTPHONE_VERSION_RC
+FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+FILEFLAGS      0
+FILEOS         VOS_NT_WINDOWS32
+FILETYPE       VFT_APP
+FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Havliczech"
+            VALUE "FileDescription",  "Compact Phone — SIP softphone"
+            VALUE "FileVersion",      COMPACTPHONE_VERSION_STR
+            VALUE "InternalName",     "compactphone"
+            VALUE "LegalCopyright",   "Copyright (c) Jiri Havlicek"
+            VALUE "OriginalFilename", "compactphone.exe"
+            VALUE "ProductName",      "Compact Phone"
+            VALUE "ProductVersion",   COMPACTPHONE_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

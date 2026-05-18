@@ -1,0 +1,46 @@
+# Compact Phone — gitleaks config. Extends the default ruleset with
+# project-specific allowlists. See https://github.com/gitleaks/gitleaks.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-safe test fixtures and example values"
+
+# Test fixtures: dockerized Asterisk only accepts these locally; no risk if
+# they end up public.
+#
+# build/ and vcpkg_installed/ are .gitignored — they can't reach the repo —
+# but `gitleaks detect --no-git` still scans them by default and trips on
+# things like sqlite3's `#define sqlite3_uri_key` macro. Excluding them keeps
+# worktree scans noise-free.
+paths = [
+    "tests/integration/docker/.*",
+    "build/.*",
+    "build-.*",
+    "vcpkg_installed/.*",
+    ".*/vcpkg_installed/.*",
+    "out/.*",
+]
+
+# Inline allowlist for strings we know are public-by-design.
+regexes = [
+    # Sentry DSNs are client keys, intentionally public; the test value below
+    # uses the .example TLD which is reserved per RFC 2606.
+    '''https://[a-z0-9]+@sentry\.example/\d+''',
+
+    # Example placeholders shown in docs/CLI help text.
+    '''YOUR[_-]?(?:TOKEN|API[_-]?KEY|PASSWORD)[_-]?HERE''',
+    '''\bexample\.com\b''',
+    '''\bcompactphone1[0-9]{3}\b''',  # local test Asterisk passwords
+]
+
+# Per-rule overrides, e.g. for build-system tokens that look like secrets
+# but aren't. Add entries here if gitleaks fires on a known-safe pattern.
+[[rules]]
+id = "github-actions-secrets-reference"
+description = "Allow ${{ secrets.* }} substitutions in workflows — those are not the secret, just references."
+regex = '''\$\{\{\s*secrets\.[A-Z_][A-Z0-9_]*\s*\}\}'''
+keywords = ["secrets"]
+[rules.allowlist]
+regexes = ['''\$\{\{\s*secrets\.''']

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Compact Phone
+GenericName=SIP Softphone
+Comment=A compact SIP softphone for everyday calling
+Exec=compactphone %U
+Icon=compactphone
+Terminal=false
+Categories=Network;Telephony;
+Keywords=SIP;VoIP;Phone;Telephony;Softphone;
+MimeType=x-scheme-handler/sip;x-scheme-handler/sips;x-scheme-handler/tel;x-scheme-handler/callto;
+StartupNotify=true
+StartupWMClass=compactphone

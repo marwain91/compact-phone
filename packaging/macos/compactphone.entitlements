@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened runtime requirements for Developer-ID signed apps that
+         must pass notarization. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Microphone access for SIP audio capture. The user-facing prompt
+         text comes from NSMicrophoneUsageDescription in Info.plist. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Outbound TCP/UDP for SIP signaling + RTP. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Inbound listening for SIP REGISTER replies and RTP sockets. -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+</dict>
+</plist>

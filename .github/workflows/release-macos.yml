@@ -1,0 +1,105 @@
+name: Release · macOS
+
+# Fires on every v* tag. Builds the .app, signs + notarizes + staples
+# the DMG when the Apple Developer ID secrets are present, and uploads
+# to the matching GitHub Release. Skips signing/notarization (uploads
+# unsigned DMG) when the secrets are empty.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-sign-publish:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: brew install cmake ninja pkg-config create-dmg
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json') }}
+
+      - name: Setup vcpkg
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          if [ ! -d vcpkg ]; then
+            git clone https://github.com/microsoft/vcpkg.git
+            ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          fi
+          echo "VCPKG_ROOT=$WORKSPACE/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Build PJSIP
+        run: |
+          curl -sL https://github.com/pjsip/pjproject/archive/refs/tags/2.17.tar.gz | tar -xz
+          cd pjproject-2.17
+          ./aconfigure --prefix="$HOME/pjproject" \
+            --disable-shared --enable-static --with-ssl=yes \
+            --disable-video --disable-libwebrtc --disable-libyuv \
+            --disable-opencore-amr --disable-bcg729 --disable-sdl \
+            --disable-ffmpeg --disable-v4l2 --disable-openh264
+          make dep && make -j"$(sysctl -n hw.ncpu)" && make install
+          echo "PKG_CONFIG_PATH=$HOME/pjproject/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: cmake --preset macos
+
+      - name: Build
+        run: cmake --build --preset macos
+
+      - name: Import signing identity
+        env:
+          P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          if [ -z "$P12_BASE64" ]; then
+            echo "APPLE_DEVELOPER_ID_P12_BASE64 not set — skipping import"
+            exit 0
+          fi
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASS="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 3600 "$KEYCHAIN_PATH"
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" \
+            -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH" >/dev/null
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build, sign, notarize DMG
+        env:
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ -z "$DEVELOPER_ID_APP" ]; then
+            echo "Signing identity missing — producing unsigned DMG"
+            mkdir -p dist
+            STAGE=$(mktemp -d)
+            cp -R build/macos/src/compactphone.app "$STAGE/"
+            ln -s /Applications "$STAGE/Applications"
+            VERSION="${REF_NAME#v}"
+            hdiutil create -volname "Compact Phone" -srcfolder "$STAGE" \
+              -ov -format UDZO "dist/compactphone-$VERSION-unsigned.dmg"
+          else
+            ./packaging/macos/build-dmg.sh
+          fi
+
+      - name: Upload DMG to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+          fail_on_unmatched_files: true

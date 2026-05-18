@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compact Phone — Documentation</title>
+    <meta name="description" content="Documentation for Compact Phone, the free open-source SIP softphone.">
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+    <div class="docs-layout">
+        <aside class="docs-nav">
+            <a href="/" class="docs-nav-brand">
+                <img src="/icon.svg" alt="">
+                <span>Compact Phone</span>
+            </a>
+            <ul id="docs-nav-list">
+                <!-- Populated by docs.js from PAGES below -->
+            </ul>
+        </aside>
+
+        <main class="docs-content" id="docs-content">
+            <div class="docs-loading">Loading…</div>
+        </main>
+    </div>
+
+    <script>
+        // Sidebar / routing table.  Add new docs by:
+        //   1. dropping the .md file in /docs/pages/
+        //   2. appending the entry below.
+        // `section` headings group items in the sidebar; null = top-level.
+        const PAGES = [
+            { slug: "introduction",    title: "Introduction",   section: null },
+            { slug: "installation",    title: "Installation",   section: "Getting started" },
+            { slug: "getting-started", title: "First call",     section: "Getting started" },
+            { slug: "configuration",   title: "Configuration",  section: "Using" },
+            { slug: "provisioning",    title: "Provisioning",   section: "Using" },
+            { slug: "troubleshooting", title: "Troubleshooting", section: "Help" },
+            { slug: "faq",             title: "FAQ",            section: "Help" },
+        ];
+        const DEFAULT_SLUG = "introduction";
+    </script>
+    <script src="/docs/markdown.js"></script>
+    <script src="/docs/docs.js"></script>
+
+</body>
+</html>
