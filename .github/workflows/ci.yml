@@ -33,6 +33,24 @@ jobs:
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash -c "cd /workspace/build/linux && ctest --output-on-failure -L unit"
 
+      # vcpkg writes per-port logs inside the container under
+      # /opt/vcpkg/buildtrees/<port>/. Surfacing them on failure means
+      # the next debug round does not need a fresh 1-hour build.
+      - name: Collect vcpkg logs on failure
+        if: failure()
+        run: |
+          docker compose -f tools/dev/docker-compose.yml exec -T dev \
+            bash -c 'mkdir -p /workspace/vcpkg-logs && \
+              find /opt/vcpkg/buildtrees -maxdepth 2 -name "*.log" -size -2M \
+                -exec cp --parents {} /workspace/vcpkg-logs/ \;' || true
+      - name: Upload vcpkg logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-logs-linux
+          path: vcpkg-logs/
+          if-no-files-found: ignore
+
   build-macos:
     name: macOS native build
     runs-on: macos-14
