@@ -56,6 +56,11 @@ QtObject {
     readonly property color violet:      "#6600FF"
     readonly property color violetSoft:  isDark ? "#6600FF22" : "#6600FF14"
 
+    readonly property color call:        "#FF5C42"
+    readonly property color callHi:      "#FF7861"
+    readonly property color callLo:      "#E64428"
+    readonly property color callGlow:    isDark ? "#FF5C4255" : "#FF5C4233"
+
     readonly property color success:     "#22C55E"
     readonly property color successSoft: isDark ? "#22C55E22" : "#22C55E1A"
     readonly property color warning:     "#F59E0B"
@@ -90,10 +95,10 @@ QtObject {
 
     property QtObject _palLight: QtObject {
         property bool dark: false
-        property color bg:           "#F4F6FA"
+        property color bg:           "#FFFFFF"
         property color bgElevated:   "#FFFFFF"
         property color surface:      "#FFFFFF"
-        property color surfaceHi:    "#EEF2F7"
+        property color surfaceHi:    "#F2F4F8"
         property color border:       "#E1E5EC"
         property color borderStrong: "#C8CED7"
         property color overlay:      "#0F172A66"
@@ -106,7 +111,7 @@ QtObject {
         property color accentLo:   "#002247"
         property color accentSoft: "#E6ECF3"
         property color accentInk:  "#FFFFFF"
-        property color gradTint:   Qt.rgba(0.0, 0.2, 0.4, 0.04)
+        property color gradTint:   "transparent"
     }
 
     // Midnight = the dock icon, large. Dark navy ground (the phone glyph's

@@ -6,12 +6,12 @@ import CompactPhone
 
 ApplicationWindow {
     id: window
-    width: 410
-    height: 440
-    minimumWidth: 410
-    maximumWidth: 410
-    minimumHeight: 440
-    maximumHeight: 440
+    width: 380
+    height: 500
+    minimumWidth: 380
+    maximumWidth: 380
+    minimumHeight: 500
+    maximumHeight: 500
     // alwaysOnTop is a user setting; ringingLift transiently forces on-top
     // while a call is ringing so the call dialog can't be hidden behind a
     // fullscreen app. Either being true pins the window above siblings.
@@ -22,12 +22,31 @@ ApplicationWindow {
               ? Qt.WindowStaysOnTopHint : 0)
     Component.onCompleted: {
         Theme.setTheme(PhoneController.themeId)
-        window.width = 410
-        window.height = 440
+        window.width = 380
+        window.height = 500
     }
     visible: false
     title: qsTr("Compact Phone")
     color: Theme.bg
+
+    property bool sidebarExpanded: true
+
+    Action {
+        id: toggleSidebarAction
+        text: qsTr("Toggle Sidebar")
+        shortcut: "Ctrl+B"
+        onTriggered: window.sidebarExpanded = !window.sidebarExpanded
+    }
+
+    // Native macOS menu bar (Qt also renders this on platforms that have
+    // a window-attached menu bar). The action carries the shortcut so it
+    // shows up in the menu *and* fires from anywhere in the window.
+    menuBar: MenuBar {
+        Menu {
+            title: qsTr("View")
+            MenuItem { action: toggleSidebarAction }
+        }
+    }
 
     onClosing: (close) => {
         // Close X = hide to tray, not quit. PhoneController.requestQuit()
@@ -96,11 +115,17 @@ ApplicationWindow {
             spacing: 0
 
             Rectangle {
-                Layout.preferredWidth: 58
-                Layout.minimumWidth: 58
-                Layout.maximumWidth: 58
+                id: sidebar
+                readonly property int expandedWidth: 58
+                Layout.preferredWidth: window.sidebarExpanded ? expandedWidth : 0
+                Layout.minimumWidth: Layout.preferredWidth
+                Layout.maximumWidth: Layout.preferredWidth
                 Layout.fillHeight: true
                 color: "transparent"
+                clip: true
+                Behavior on Layout.preferredWidth {
+                    NumberAnimation { duration: 180; easing.type: Easing.OutQuad }
+                }
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -109,11 +134,27 @@ ApplicationWindow {
                     anchors.leftMargin: Theme.s6
                     anchors.rightMargin: Theme.s6
                     spacing: Theme.s4
+                    opacity: window.sidebarExpanded ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
 
-                    BrandMark {
+                    Item {
                         Layout.alignment: Qt.AlignHCenter
                         Layout.bottomMargin: Theme.s8
-                        size: 28
+                        implicitWidth: 36
+                        implicitHeight: 36
+                        BrandMark {
+                            anchors.centerIn: parent
+                            size: 28
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            ToolTip.visible: containsMouse
+                            ToolTip.delay: 380
+                            ToolTip.text: qsTr("Collapse sidebar (⌘B)")
+                            onClicked: window.sidebarExpanded = false
+                        }
                     }
 
                     NavItem {
@@ -176,7 +217,7 @@ ApplicationWindow {
                         color: PhoneController.registeredAccountCount > 0
                                ? Theme.success : Theme.textTertiary
                         ToolTip.visible: regHover.containsMouse
-                        ToolTip.delay: 400
+                        ToolTip.delay: 380
                         ToolTip.text: PhoneController.registeredAccountCount > 0
                               ? qsTr("%1 account registered").arg(PhoneController.registeredAccountCount)
                               : (PhoneController.accounts.rowCount() === 0
@@ -188,9 +229,12 @@ ApplicationWindow {
             }
 
             Rectangle {
-                Layout.preferredWidth: 1
+                Layout.preferredWidth: window.sidebarExpanded ? 1 : 0
                 Layout.fillHeight: true
                 color: Theme.border
+                Behavior on Layout.preferredWidth {
+                    NumberAnimation { duration: 180; easing.type: Easing.OutQuad }
+                }
             }
 
             StackLayout {
@@ -214,6 +258,7 @@ ApplicationWindow {
             Layout.preferredHeight: 36
         }
     }
+
 
     IncomingCallDialog { id: incomingDialog }
 
