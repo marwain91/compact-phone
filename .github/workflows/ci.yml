@@ -110,12 +110,6 @@ jobs:
   build-windows:
     name: Windows native build + unsigned MSI
     runs-on: windows-2022
-    # The windows-pjsip vcpkg feature references a `pjsip` port that
-    # does not exist in vcpkg upstream — this job has never produced a
-    # working MSI. Continuing on error so the failure stays visible in
-    # CI without blocking PR merges. Re-enable strict mode after the
-    # Windows PJSIP integration is sorted; see the project backlog.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -138,9 +132,56 @@ jobs:
         shell: pwsh
         run: dotnet tool install --global wix
 
-      - name: Configure (PJSIP via vcpkg)
+      # PJSIP is built from source instead of via vcpkg because pjsip is
+      # not in the vcpkg registry. macOS and Linux do the same — see
+      # the build-macos job and tools/dev/Dockerfile respectively.
+      # cmake/FindPJSIP.cmake reads PJSIP_ROOT to locate the result.
+      - name: Cache PJSIP build
+        id: pjsip-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/pjproject-2.17
+          key: pjsip-windows-2.17-v1
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build PJSIP
+        if: steps.pjsip-cache.outputs.cache-hit != 'true'
         shell: pwsh
-        run: cmake --preset windows -DVCPKG_MANIFEST_FEATURES="windows-pjsip"
+        run: |
+          # Download + extract pjproject 2.17 (same version as macOS/Linux).
+          Invoke-WebRequest `
+              -Uri "https://github.com/pjsip/pjproject/archive/refs/tags/2.17.tar.gz" `
+              -OutFile pjproject-2.17.tar.gz
+          tar -xzf pjproject-2.17.tar.gz
+
+          # PJSIP requires a config_site.h before build — same content as
+          # Dockerfile/macOS. PJSUA_MAX_CALLS=32 bumps the default 4 so
+          # the app can hold multiple lines / conference calls.
+          $cfg = "pjproject-2.17/pjlib/include/pj/config_site.h"
+          "#pragma once`n#define PJSUA_MAX_CALLS 32`n" `
+              | Set-Content -NoNewline -Encoding ascii $cfg
+
+          # Build static libs, Release config, x64.  PJSIP ships a VS2015
+          # solution (.sln); modern msbuild auto-retargets to the runner's
+          # v143 toolset on first invocation. /m enables parallel build.
+          # Without OpenSSL for now — SIP-TLS / SRTP will be disabled on
+          # Windows in this first iteration; tracked as a follow-up.
+          Push-Location pjproject-2.17
+          msbuild pjproject-vs14.sln /p:Configuration=Release-Static `
+              /p:Platform=x64 /m /v:m
+          Pop-Location
+
+      - name: Export PJSIP_ROOT
+        shell: pwsh
+        run: |
+          $root = "$pwd/pjproject-2.17"
+          "PJSIP_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Configure
+        shell: pwsh
+        run: cmake --preset windows
 
       - name: Build
         shell: pwsh
