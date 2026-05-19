@@ -3,8 +3,9 @@
 //
 // Verifies that:
 //   1. QNetworkAccessManager actually does TLS (catches the cert-only bug).
-//   2. /internal/globalsettings.json returns a parseable authentications block.
-//   3. DaktelaProvider::parseAuthMethods picks up Google / Azure / Daktela SSO.
+//   2. /internal/globalsettings.json returns a parseable payload.
+//   3. DaktelaProvider::defaultAuthMethods returns the password + token
+//      methods we always offer (Daktela has no desktop-friendly OAuth).
 //
 // Exits 0 on success, non-zero with a diagnostic on the first failure.
 
@@ -57,9 +58,10 @@ int main(int argc, char **argv)
             a.quit();
             return;
         }
-        const auto methods = DaktelaProvider::parseAuthMethods(
-            result, DaktelaProvider::normalizeHost(host));
-        std::fprintf(stderr, "Parsed %lld auth methods:\n", (long long)methods.size());
+        Q_UNUSED(result);
+        const auto methods = DaktelaProvider::defaultAuthMethods(
+            DaktelaProvider::normalizeHost(host));
+        std::fprintf(stderr, "Default auth methods (should be password + token):\n");
         for (const auto &m : methods) {
             const auto map = m.toMap();
             std::fprintf(stderr, "  - id=%s  kind=%s  displayName=%s\n",
@@ -67,7 +69,7 @@ int main(int argc, char **argv)
                          map.value("kind").toString().toUtf8().constData(),
                          map.value("displayName").toString().toUtf8().constData());
         }
-        rc = methods.size() > 1 ? 0 : 2;
+        rc = methods.size() == 2 ? 0 : 2;
         a.quit();
     });
     QObject::connect(&a, &QCoreApplication::aboutToQuit, [&] { std::fflush(stderr); });

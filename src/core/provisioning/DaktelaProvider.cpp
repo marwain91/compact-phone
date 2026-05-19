@@ -218,62 +218,28 @@ QVariantMap DaktelaProvider::buildAccountParams(const QUrl &host,
     return p;
 }
 
-QVariantList DaktelaProvider::passwordOnlyMethods(const QUrl &host)
+QVariantList DaktelaProvider::defaultAuthMethods(const QUrl &host)
 {
     QVariantMap pw;
-    pw[QStringLiteral("id")]          = QStringLiteral("password");
-    pw[QStringLiteral("kind")]        = QStringLiteral("password");
-    pw[QStringLiteral("displayName")] = QObject::tr("Username & password");
-    pw[QStringLiteral("openUrl")]     = QString();
+    pw[QStringLiteral("id")]           = QStringLiteral("password");
+    pw[QStringLiteral("kind")]         = QStringLiteral("password");
+    pw[QStringLiteral("displayName")]  = QObject::tr("Username & password");
+    pw[QStringLiteral("openUrl")]      = QString();
     pw[QStringLiteral("instructions")] = QString();
-    Q_UNUSED(host);
-    return { pw };
-}
 
-QVariantList DaktelaProvider::parseAuthMethods(const QJsonValue &result,
-                                               const QUrl &host)
-{
-    // Password is always available as a fallback, even on instances that also
-    // expose SSO — the PBX accepts /api/v6/login.json regardless.
-    auto methods = passwordOnlyMethods(host);
-
-    if (!result.isObject()) return methods;
-    const auto auths = result.toObject()
-                         .value(QStringLiteral("authentications")).toObject();
-    if (auths.isEmpty()) return methods;
-
-    // Generic web-login fallback URL — the Daktela web UI itself drives the
-    // OAuth dance and lands the user in their authenticated session, after
-    // which they can fetch a personal API token to paste back into us.
-    const QString webUrl = host.toString();
-    const QString instr  =
-        QObject::tr("Sign in via your browser, then create a Personal API token "
-                    "in Daktela (Account → API tokens) and paste it below.");
-
-    auto addAll = [&](const QString &key, const QString &kindLabel,
-                      const QString &idPrefix) {
-        const auto arr = auths.value(key).toArray();
-        for (int i = 0; i < arr.size(); ++i) {
-            const auto e = arr.at(i).toObject();
-            const auto title = e.value(QStringLiteral("title")).toString();
-            QVariantMap m;
-            m[QStringLiteral("id")] = arr.size() > 1
-                ? QStringLiteral("%1-%2").arg(idPrefix).arg(i)
-                : idPrefix;
-            m[QStringLiteral("kind")]        = QStringLiteral("sso");
-            m[QStringLiteral("displayName")] = title.isEmpty()
-                ? QObject::tr("Sign in with %1").arg(kindLabel)
-                : QObject::tr("Sign in with %1").arg(title);
-            m[QStringLiteral("openUrl")]     = webUrl;
-            m[QStringLiteral("instructions")] = instr;
-            methods.push_back(m);
-        }
-    };
-    addAll(QStringLiteral("google_auth"),     QObject::tr("Google"),       QStringLiteral("google"));
-    addAll(QStringLiteral("azure_auth"),      QObject::tr("Microsoft"),    QStringLiteral("azure"));
-    addAll(QStringLiteral("genericsso_auth"), QObject::tr("SSO"),          QStringLiteral("genericsso"));
-    addAll(QStringLiteral("daktela_auth"),    QObject::tr("Daktela SSO"),  QStringLiteral("daktelasso"));
-    return methods;
+    QVariantMap tok;
+    tok[QStringLiteral("id")]           = QStringLiteral("token");
+    tok[QStringLiteral("kind")]         = QStringLiteral("token");
+    tok[QStringLiteral("displayName")]  = QObject::tr("Access token");
+    // openUrl points at the tenant's web UI so the wizard's
+    // "Open in browser" button lands the user in their Daktela session,
+    // from which they can navigate to Account → API tokens.
+    tok[QStringLiteral("openUrl")]      = host.toString();
+    tok[QStringLiteral("instructions")] =
+        QObject::tr("Open Daktela in your browser, sign in, then create a "
+                    "personal access token under Account → API tokens. "
+                    "Paste it below to provision this device.");
+    return { pw, tok };
 }
 
 // --- Network flow ---
@@ -309,28 +275,25 @@ void DaktelaProvider::onDiscoveryReply(QNetworkReply *r, const QUrl &host)
     spdlog::info("Daktela discovery: GET {} -> http {} (err={})",
                  r->url().toString().toStdString(), httpStatus,
                  r->error() == QNetworkReply::NoError ? "none" : r->errorString().toStdString());
-    // Discovery is best-effort: if the host is unreachable or the endpoint
-    // is missing, we still let the user proceed via password — the V6 login
-    // endpoint is universally available even when this internal one is not.
+    // Discovery is best-effort: we use it to confirm the host is a real
+    // Daktela instance (catches typos early), but the auth method list
+    // we hand back is always the same — Daktela's SSO methods aren't
+    // drivable from a desktop client, so we only ever offer
+    // username/password and access token paste.
     if (r->error() != QNetworkReply::NoError) {
-        spdlog::info("Daktela discovery soft-failed ({}); offering password only",
+        spdlog::info("Daktela discovery soft-failed ({}); proceeding anyway",
                      r->errorString().toStdString());
-        emit authMethodsDiscovered(host.toString(), passwordOnlyMethods(host));
-        return;
+    } else {
+        const auto body = r->readAll();
+        spdlog::info("Daktela discovery body size = {} bytes", body.size());
+        QString err;
+        const auto result = unwrapResult(body, &err);
+        if (!err.isEmpty()) {
+            spdlog::info("Daktela discovery payload soft-failed ({}); proceeding anyway",
+                         err.toStdString());
+        }
     }
-    const auto body = r->readAll();
-    spdlog::info("Daktela discovery body size = {} bytes", body.size());
-    QString err;
-    const auto result = unwrapResult(body, &err);
-    if (!err.isEmpty()) {
-        spdlog::info("Daktela discovery payload soft-failed ({}); offering password only",
-                     err.toStdString());
-        emit authMethodsDiscovered(host.toString(), passwordOnlyMethods(host));
-        return;
-    }
-    const auto methods = parseAuthMethods(result, host);
-    spdlog::info("Daktela discovery: parsed {} auth method(s)", methods.size());
-    emit authMethodsDiscovered(host.toString(), methods);
+    emit authMethodsDiscovered(host.toString(), defaultAuthMethods(host));
 }
 
 void DaktelaProvider::provisionWithToken(const QString &rawHost,
