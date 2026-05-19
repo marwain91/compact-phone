@@ -113,20 +113,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache vcpkg
+      # vcpkg's qtdeclarative buildtree adds ~200 chars to its install
+      # path. Combined with the default GitHub workspace path
+      # (D:\a\compact-phone\compact-phone\), some files exceed Windows'
+      # 260-char MAX_PATH and cl.exe fails to find generated .moc files.
+      # vcpkg's own portfile emits a warning recommending a short path —
+      # we use C:\v\. Same fix applies to PJSIP under C:\p\.
+      - name: Cache vcpkg (short path)
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/vcpkg
-          key: vcpkg-windows-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
+          path: C:\v
+          key: vcpkg-windows-shortpath-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
 
-      - name: Setup vcpkg
+      - name: Setup vcpkg (at C:\v)
         shell: pwsh
         run: |
-          if (-not (Test-Path vcpkg)) {
-            git clone https://github.com/microsoft/vcpkg.git
-            .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          if (-not (Test-Path C:\v)) {
+            git clone https://github.com/microsoft/vcpkg.git C:\v
+            C:\v\bootstrap-vcpkg.bat -disableMetrics
           }
-          "VCPKG_ROOT=$pwd/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_ROOT=C:\v" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install WiX 4
         shell: pwsh
@@ -136,24 +142,28 @@ jobs:
       # not in the vcpkg registry. macOS and Linux do the same — see
       # the build-macos job and tools/dev/Dockerfile respectively.
       # cmake/FindPJSIP.cmake reads PJSIP_ROOT to locate the result.
-      - name: Cache PJSIP build
+      - name: Cache PJSIP build (short path)
         id: pjsip-cache
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/pjproject-2.17
-          key: pjsip-windows-2.17-v1
+          path: C:\p
+          key: pjsip-windows-2.17-v2
 
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
 
-      - name: Build PJSIP
+      - name: Build PJSIP (at C:\p)
         if: steps.pjsip-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           # Download + extract pjproject 2.17 (same version as macOS/Linux).
+          # Short path matters here too — PJSIP's MSVC build also generates
+          # deep paths and benefits from a short prefix.
+          New-Item -ItemType Directory -Path C:\p -Force | Out-Null
           Invoke-WebRequest `
               -Uri "https://github.com/pjsip/pjproject/archive/refs/tags/2.17.tar.gz" `
-              -OutFile pjproject-2.17.tar.gz
+              -OutFile C:\p\pjproject-2.17.tar.gz
+          Push-Location C:\p
           tar -xzf pjproject-2.17.tar.gz
 
           # PJSIP requires a config_site.h before build — same content as
@@ -172,12 +182,12 @@ jobs:
           msbuild pjproject-vs14.sln /p:Configuration=Release-Static `
               /p:Platform=x64 /m /v:m
           Pop-Location
+          Pop-Location
 
       - name: Export PJSIP_ROOT
         shell: pwsh
         run: |
-          $root = "$pwd/pjproject-2.17"
-          "PJSIP_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PJSIP_ROOT=C:\p\pjproject-2.17" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Configure
         shell: pwsh
@@ -199,7 +209,7 @@ jobs:
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
           Copy-Item build\windows\src\compactphone.exe $stage
           $deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" `
-              -Path vcpkg | Select-Object -First 1
+              -Path C:\v | Select-Object -First 1
           if ($deploy) {
             & $deploy.FullName --qmldir src\ui\qml --release `
                 --no-translations --no-system-d3d-compiler `
