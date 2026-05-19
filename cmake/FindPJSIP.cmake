@@ -77,6 +77,15 @@ if(WIN32)
         # Windows system libs PJSIP needs that aren't in the .lib glob.
         ws2_32 winmm ole32 dsound wsock32
     )
+    # Qt defines UNICODE/_UNICODE on Windows (Win32 API uses 16-bit char).
+    # PJSIP's pj/compat/string.h sees that and enables a wide-char codepath
+    # that requires wcsicmp/etc. defines PJSIP doesn't ship — leading to
+    # `#error "Implement Unicode string functions"` at compile time. We
+    # tell PJSIP to treat its internal strings as ANSI regardless. Standard
+    # workaround for Qt+PJSIP on Windows.
+    target_compile_definitions(PJSIP::PJSIP INTERFACE
+        PJ_NATIVE_STRING_IS_UNICODE=0
+    )
 
 else()
     # --- Linux / macOS: pkg-config ---
