@@ -36,6 +36,13 @@ Copy-Item build\windows\src\compactphone.exe $stage
     --release --no-translations --no-system-d3d-compiler `
     "$stage\compactphone.exe"
 
+# 2a. Stage licence notices alongside the binary so the MSI ships them
+#     under Program Files\Compact Phone. This is what makes the install
+#     compliant with GPLv3 §6 and LGPLv3 §4 — the notices must travel with
+#     the binary, not just live in the repo. Do NOT skip this step.
+Copy-Item LICENSE $stage
+Copy-Item THIRD_PARTY_LICENSES.md $stage
+
 # 3. Build MSI
 cd packaging\windows
 wix build installer.wxs -arch x64 `

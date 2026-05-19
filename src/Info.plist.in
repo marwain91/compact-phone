@@ -12,6 +12,8 @@
     <key>CFBundlePackageType</key>                <string>APPL</string>
     <key>CFBundleShortVersionString</key>         <string>${PROJECT_VERSION}</string>
     <key>CFBundleVersion</key>                    <string>${PROJECT_VERSION}</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Jiri Havlicek. Distributed under the GNU GPL v3 or later. Source: https://github.com/marwain91/compact-phone</string>
     <key>LSMinimumSystemVersion</key>             <string>12.0</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Compact Phone needs microphone access to make and receive SIP calls.</string>

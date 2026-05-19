@@ -14,6 +14,10 @@
     • compactphone.exe (with the embedded .ico from src/compactphone.rc)
     • Qt6 runtime + plugins (deployed by windeployqt)
     • Visual C++ runtime (chained via Visual C++ redistributable merge module)
+    • LICENSE and THIRD_PARTY_LICENSES.md — the build pipeline copies
+      these from the repo root into $(StageDir) before harvesting, so
+      they end up under Program Files\Compact Phone alongside the .exe.
+      This satisfies GPLv3 §6 (notices travel with the binary).
     • Start-menu shortcut
     • Desktop shortcut (default off, opt-in)
     • Registry entries for sip:/sips:/tel:/callto: URL handlers
@@ -34,7 +38,16 @@
         <Icon Id="CompactPhoneIcon" SourceFile="..\..\branding\compactphone.ico" />
         <Property Id="ARPPRODUCTICON" Value="CompactPhoneIcon" />
         <Property Id="ARPHELPLINK" Value="https://github.com/marwain91/compact-phone" />
+        <Property Id="ARPURLINFOABOUT" Value="https://github.com/marwain91/compact-phone" />
+        <Property Id="ARPCOMMENTS" Value="Distributed under the GNU GPL v3 or later. Source code: https://github.com/marwain91/compact-phone" />
         <Property Id="ARPNOMODIFY" Value="1" />
+
+        <!-- LICENSE and THIRD_PARTY_LICENSES.md are harvested into the
+             install directory via the staged-files pattern below (the CI
+             pipeline drops them into $(StageDir) before running `wix
+             build`), so they sit next to compactphone.exe under Program
+             Files\Compact Phone. No separate EULA dialog. -->
+
 
         <Feature Id="MainFeature" Title="Compact Phone" Level="1">
             <ComponentGroupRef Id="MainComponents" />

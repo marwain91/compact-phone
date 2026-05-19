@@ -912,7 +912,7 @@ Item {
                                         font.weight: Font.Bold
                                     }
                                     Text {
-                                        text: qsTr("Version 0.3 • GPL-3.0-or-later")
+                                        text: qsTr("Version %1 • GPL-3.0-or-later").arg(Qt.application.version)
                                         color: Theme.textTertiary
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fxs
@@ -924,6 +924,25 @@ Item {
                                 color: Theme.textTertiary
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fxs
+                            }
+                            Text {
+                                text: qsTr("Copyright © 2026 Jiri Havlicek. Distributed under the GNU GPL v3 or later. Uses Qt (LGPLv3), PJSIP (GPLv2+), OpenSSL (Apache-2.0), spdlog (MIT) and SQLite (public domain).")
+                                color: Theme.textTertiary
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fxs
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                textFormat: Text.RichText
+                                text: qsTr("Source code: <a href=\"https://github.com/marwain91/compact-phone\">github.com/marwain91/compact-phone</a> · <a href=\"https://github.com/marwain91/compact-phone/blob/main/THIRD_PARTY_LICENSES.md\">Third-party licences</a>")
+                                color: Theme.textTertiary
+                                linkColor: Theme.accent
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fxs
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                                onLinkActivated: (link) => Qt.openUrlExternally(link)
                             }
                             AppButton {
                                 Layout.topMargin: Theme.s4
