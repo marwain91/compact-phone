@@ -144,6 +144,12 @@ jobs:
         with:
           path: C:\v
           key: vcpkg-windows-shortpath-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
+          # save-always: the qtdeclarative cold build is ~2 hours on
+          # the Windows runner. If a later step in this job fails
+          # (e.g. our own compile), the default post-step skip would
+          # throw away that cache. With save-always:true we keep it
+          # so the next iteration restores in seconds.
+          save-always: true
 
       - name: Setup vcpkg (at C:\v)
         shell: pwsh
@@ -168,6 +174,7 @@ jobs:
         with:
           path: C:\p
           key: pjsip-windows-2.17-v2
+          save-always: true
 
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
