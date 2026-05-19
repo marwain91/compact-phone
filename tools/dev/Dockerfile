@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         tar \
         pkg-config \
         autoconf \
+        autoconf-archive \
         automake \
         libtool \
         python3 \
