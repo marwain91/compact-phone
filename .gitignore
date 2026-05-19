@@ -25,7 +25,10 @@ docs/superpowers/
 # to stage it instead of silently picking it up.
 .env
 .env.*
-!.env.example          # canonical "fill me in" templates stay tracked
+# canonical "fill me in" templates stay tracked
+!.env.example
+# remote-build host template; .env.local itself stays ignored
+!.env.local.example
 *.pem
 *.key
 !tests/integration/docker/tls/server.key  # documented test-only cert
