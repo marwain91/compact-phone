@@ -31,7 +31,12 @@
         //   1. dropping the .md file in /docs/pages/
         //   2. appending the entry below.
         // `section` headings group items in the sidebar; null = top-level.
-        const PAGES = [
+        //
+        // Assigned onto `window` (not bare `const`) because docs.js reads
+        // them as `window.PAGES` / `window.DEFAULT_SLUG`. Top-level `const`
+        // in a classic script lives in the global lexical environment but
+        // is not exposed as a `window` property.
+        window.PAGES = [
             { slug: "introduction",    title: "Introduction",   section: null },
             { slug: "installation",    title: "Installation",   section: "Getting started" },
             { slug: "getting-started", title: "First call",     section: "Getting started" },
@@ -40,7 +45,7 @@
             { slug: "troubleshooting", title: "Troubleshooting", section: "Help" },
             { slug: "faq",             title: "FAQ",            section: "Help" },
         ];
-        const DEFAULT_SLUG = "introduction";
+        window.DEFAULT_SLUG = "introduction";
     </script>
     <script src="/docs/markdown.js"></script>
     <script src="/docs/docs.js"></script>

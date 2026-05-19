@@ -1,0 +1,37 @@
+name: Trigger MyWebs docs deploy
+
+# Fire a repository_dispatch at the MyWebs repo whenever the docs source
+# under web/docs/ changes on main. MyWebs handles the actual rsync to the
+# VPS — see https://github.com/marwain91/my-webs/blob/main/.github/workflows/deploy.yml
+# (the "Stage CompactPhone docs" step + the redeploy-site event).
+#
+# Required secret: MYWEBS_DEPLOY_TOKEN
+#   Fine-grained PAT scoped to repo marwain91/my-webs with the
+#   "Contents: write" permission (minimum needed for POST /dispatches).
+#   Generate at https://github.com/settings/personal-access-tokens.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/docs/**'
+  workflow_dispatch: {}
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch redeploy-site to MyWebs
+        env:
+          GH_TOKEN:  ${{ secrets.MYWEBS_DEPLOY_TOKEN }}
+          FROM_REPO: ${{ github.repository }}
+          FROM_SHA:  ${{ github.sha }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::MYWEBS_DEPLOY_TOKEN secret is not set" >&2
+            exit 1
+          fi
+          gh api repos/marwain91/my-webs/dispatches \
+            -f event_type=redeploy-site \
+            -F 'client_payload[site]=compactphone.app' \
+            -F "client_payload[from]=${FROM_REPO}@${FROM_SHA}"
