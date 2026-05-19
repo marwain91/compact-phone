@@ -32,7 +32,10 @@
       "name": "linux",
       "inherits": "base",
       "generator": "Ninja",
-      "description": "Used inside the tools/dev/ container. Triplet is auto-detected (arm64-linux on Apple Silicon, x64-linux elsewhere)."
+      "description": "Used inside the tools/dev/ container. Triplet auto-detected (arm64-linux on Apple Silicon, x64-linux elsewhere). Overlay triplets in tools/dev/triplets/ force VCPKG_BUILD_TYPE=release on deps to halve disk + time on cold builds — see tools/dev/triplets/README.md.",
+      "cacheVariables": {
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/tools/dev/triplets"
+      }
     }
   ],
   "buildPresets": [
