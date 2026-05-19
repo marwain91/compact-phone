@@ -98,10 +98,15 @@ directly.
 (`curl -fsSL https://get.docker.com | sh`); the make targets assume it
 exists.
 
-**Slow first build** — vcpkg's binary cache on the VPS is empty on first
-run, so Qt gets built from source (~30 min on a single fast core, much
-less with parallelism). Subsequent builds hit the cache and finish in
-under a minute for our delta. This is one-time per VPS.
+**Slow first build** — vcpkg's binary cache on the VPS is empty on
+first run, so Qt builds from source (~20 min on a 6-core VPS with
+the release-only triplet, longer on smaller boxes). Subsequent builds
+hit the cache and finish in under a minute for our delta. One-time
+tax per VPS.
 
 **Out of disk on the VPS** — the build tree + vcpkg cache + Qt
-buildtrees can easily reach 20 GB. Plan for at least 40 GB free.
+buildtrees peak around 12–15 GB during a cold first build, thanks
+to the release-only Linux triplet at `tools/dev/triplets/`. Plan
+for at least 25 GB free to leave comfortable headroom. Without the
+triplet (legacy default debug+release), peak was ~22 GB and full
+builds hit ENOSPC on smaller boxes.
