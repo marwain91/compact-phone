@@ -159,6 +159,92 @@ acceptance-macos: up build-macos ## full acceptance: Asterisk up, app launched, 
 vcpkg-status: up ## show vcpkg installed packages in the dev container
 	$(DEV) bash -c "ls /opt/vcpkg/installed/arm64-linux/share 2>/dev/null | head -30"
 
+# ----- remote build (offload to a VPS) ---------------------------------------
+# Heavy compile workloads can run on a powerful Linux VPS instead of the
+# laptop. The flow: rsync the workspace to the VPS, then docker compose
+# up + build there. Source of truth is your laptop; the VPS keeps an
+# incrementally-updated mirror at $(REMOTE_BUILD_PATH).
+#
+# Configuration is read from .env.local (gitignored) — see
+# .env.local.example. Required: REMOTE_BUILD_HOST. Optional:
+# REMOTE_BUILD_PATH (default /srv/compactphone-build).
+#
+# Public-repo discipline: never commit the actual hostname. The Makefile
+# refuses to run remote-* targets unless REMOTE_BUILD_HOST is set, so a
+# clean clone can't accidentally hit anyone else's VPS.
+
+# Sourced silently — file is optional. If it doesn't exist, env vars from
+# the user's shell still win.
+-include .env.local
+
+REMOTE_BUILD_HOST ?=
+REMOTE_BUILD_PATH ?= /srv/compactphone-build
+
+# Files we do NOT want to ship to the VPS: build artifacts (the VPS has
+# its own), vcpkg's local install tree (rebuilt remotely), local-only
+# secrets, IDE state, and the .git history (the VPS doesn't need to push
+# anywhere — it just builds whatever source we send).
+_RSYNC_EXCLUDES := \
+	--exclude=build/ \
+	--exclude=build-*/ \
+	--exclude=vcpkg_installed/ \
+	--exclude=.git/ \
+	--exclude=.env.local \
+	--exclude=.vscode/ \
+	--exclude=.idea/ \
+	--exclude=.DS_Store
+
+# Guard target — every remote-* target depends on this so we fail fast
+# with a useful message instead of running ssh with an empty host.
+.PHONY: _remote-guard
+_remote-guard:
+	@if [ -z "$(REMOTE_BUILD_HOST)" ]; then \
+	    echo "REMOTE_BUILD_HOST is unset. Copy .env.local.example to"; \
+	    echo ".env.local and fill in your VPS host (or export the var"; \
+	    echo "in your shell). See tools/dev/remote-builds.md."; \
+	    exit 1; \
+	fi
+
+.PHONY: remote-sync
+remote-sync: _remote-guard ## rsync workspace to $(REMOTE_BUILD_HOST):$(REMOTE_BUILD_PATH)
+	@echo ">> syncing workspace to $(REMOTE_BUILD_HOST):$(REMOTE_BUILD_PATH)"
+	@ssh $(REMOTE_BUILD_HOST) "mkdir -p $(REMOTE_BUILD_PATH)"
+	rsync -az --delete $(_RSYNC_EXCLUDES) ./ $(REMOTE_BUILD_HOST):$(REMOTE_BUILD_PATH)/
+
+# The VPS needs only docker + docker compose; we invoke compose directly
+# over SSH rather than depending on `make` being installed there.
+_REMOTE_COMPOSE := docker compose -f tools/dev/docker-compose.yml
+_REMOTE_DEV     := $(_REMOTE_COMPOSE) exec -T dev
+
+.PHONY: remote-up
+remote-up: remote-sync ## start dev container + Asterisk on the VPS
+	ssh $(REMOTE_BUILD_HOST) "cd $(REMOTE_BUILD_PATH) && $(_REMOTE_COMPOSE) up -d"
+
+.PHONY: remote-rebuild-image
+remote-rebuild-image: remote-sync ## rebuild the dev container image on the VPS (after Dockerfile change)
+	ssh $(REMOTE_BUILD_HOST) "cd $(REMOTE_BUILD_PATH) && $(_REMOTE_COMPOSE) build dev && $(_REMOTE_COMPOSE) up -d --force-recreate dev"
+
+.PHONY: remote-build
+remote-build: remote-up ## build inside the dev container on the VPS
+	ssh $(REMOTE_BUILD_HOST) "cd $(REMOTE_BUILD_PATH) && $(_REMOTE_DEV) bash -c 'cd /workspace && cmake --preset linux && cmake --build --preset linux'"
+
+.PHONY: remote-test
+remote-test: remote-build ## run unit + integration tests on the VPS
+	ssh $(REMOTE_BUILD_HOST) "cd $(REMOTE_BUILD_PATH) && $(_REMOTE_DEV) bash -c 'cd /workspace/build/linux && ctest --output-on-failure'"
+
+.PHONY: remote-shell
+remote-shell: remote-up ## interactive shell inside the dev container on the VPS
+	ssh -t $(REMOTE_BUILD_HOST) "cd $(REMOTE_BUILD_PATH) && $(_REMOTE_COMPOSE) exec dev bash"
+
+.PHONY: remote-down
+remote-down: _remote-guard ## stop dev container + Asterisk on the VPS
+	ssh $(REMOTE_BUILD_HOST) "cd $(REMOTE_BUILD_PATH) && $(_REMOTE_COMPOSE) down"
+
+.PHONY: remote-status
+remote-status: _remote-guard ## show docker + build status on the VPS
+	@echo ">> $(REMOTE_BUILD_HOST):$(REMOTE_BUILD_PATH)"
+	@ssh $(REMOTE_BUILD_HOST) "cd $(REMOTE_BUILD_PATH) 2>/dev/null && $(_REMOTE_COMPOSE) ps 2>/dev/null || echo '(workspace not synced yet)'"
+
 # ----- documentation (web/docs/) --------------------------------------------
 # The compactphone.app landing page lives in the MyWebs site repo. Only the
 # Markdown-based docs under web/docs/ live here; MyWebs's own deploy
