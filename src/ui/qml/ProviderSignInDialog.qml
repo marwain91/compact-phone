@@ -5,29 +5,28 @@ import QtQuick.Window
 import CompactPhone
 
 // Multi-step provisioning wizard.
-//   1. host        — user enters the server URL
-//   2. discover    — we probe /internal/globalsettings.json mostly as a
-//                    hostname-validity check (catches typos early)
-//   3. methods     — user picks Username/Password or Access Token
-//   4a. password   — username + password form
-//   4b. token      — opens the Daktela web UI in the browser so the user
-//                    can sign in and generate a personal access token,
-//                    which they paste back into Compact Phone
-//   5. provisioning — spinner while we fetch the SIP extension
+//   1. host         — user enters the server URL
+//   2. methods      — user picks Username/Password or Access Token
+//   3a. password    — username + password form
+//   3b. token       — opens the Daktela web UI in the browser so the user
+//                     can sign in and generate a personal access token,
+//                     which they paste back into Compact Phone
+//   4. provisioning — spinner while we fetch the SIP extension
 //
-// Discovery is best-effort: a network failure doesn't block the wizard.
 // We don't surface Daktela's SSO methods (Google / Azure / Daktela SSO)
 // because the redirect_uri is hardcoded to Daktela's web frontend, so
 // a desktop client cannot drive the OAuth handshake honestly. Token paste
-// is what users would do anyway after a browser SSO round-trip.
+// is what users would do anyway after a browser SSO round-trip. The auth
+// method list is therefore static — no /internal/globalsettings.json
+// probe needed before showing it.
 Window {
     id: dialog
-    width: 480
-    height: 520
-    minimumWidth: 480
-    maximumWidth: 480
-    minimumHeight: 520
-    maximumHeight: 520
+    width: 380
+    height: 380
+    minimumWidth: 380
+    maximumWidth: 380
+    minimumHeight: 380
+    maximumHeight: 380
     modality: Qt.ApplicationModal
     flags: Qt.Dialog
     color: Theme.bgElevated
@@ -35,11 +34,34 @@ Window {
 
     property string providerId: ""
     property var    providerDescriptor: ({ id: "", displayName: "", hostPlaceholder: "", markPath: "" })
-    property string step: "host"     // host | discover | methods | password | token | provisioning
+    property string step: "host"     // host | methods | password | token | provisioning
     property string normalizedHost: ""
+    // Methods are static — Daktela has no desktop-friendly OAuth, so we
+    // always offer the same two paths regardless of what /internal/
+    // globalsettings.json advertises. Hardcoded here so the wizard doesn't
+    // need a network round-trip before the user picks a method.
     property var    methods: []
     property var    selectedMethod: ({})
     property string errorMessage: ""
+
+    function staticMethodsFor(host) {
+        return [
+            {
+                "id": "password",
+                "kind": "password",
+                "displayName": qsTr("Username & password"),
+                "openUrl": "",
+                "instructions": ""
+            },
+            {
+                "id": "token",
+                "kind": "token",
+                "displayName": qsTr("Access token"),
+                "openUrl": host,
+                "instructions": qsTr("Open Daktela, sign in, generate a personal access token under Account → API tokens, then paste it below.")
+            }
+        ]
+    }
 
     function openFor(id) {
         const list = PhoneController.provisioningProviders()
@@ -67,19 +89,6 @@ Window {
 
     Connections {
         target: PhoneController
-        function onAuthMethodsDiscovered(provId, host, methods) {
-            if (provId !== dialog.providerId || dialog.step !== "discover") return
-            dialog.normalizedHost = host
-            dialog.methods = methods
-            dialog.step = "methods"
-        }
-        function onAuthMethodsFailed(provId, host, err) {
-            if (provId !== dialog.providerId || dialog.step !== "discover") return
-            // Soft-fall to password — DaktelaProvider already does this for
-            // network errors, but invalid hosts still bubble up here.
-            dialog.errorMessage = err
-            dialog.step = "host"
-        }
         function onProvisioningProgress(provId, stage) {
             if (provId !== dialog.providerId) return
             // Once provisioning starts, ignore any further user interactions.
@@ -102,7 +111,7 @@ Window {
 
     Shortcut {
         sequences: ["Esc"]
-        enabled: dialog.step !== "provisioning" && dialog.step !== "discover"
+        enabled: dialog.step !== "provisioning"
         onActivated: dialog.close()
     }
 
@@ -195,7 +204,6 @@ Window {
                     : dialog.step === "methods"       ? qsTr("How would you like to sign in?")
                     : dialog.step === "password"      ? qsTr("Sign in to %1").arg(dialog.normalizedHost)
                     : dialog.step === "token"           ? dialog.selectedMethod.displayName || qsTr("Sign in")
-                    : dialog.step === "discover"      ? qsTr("Connecting to %1…").arg(hostField.text)
                     : qsTr("Setting up your account…")
                 color: Theme.textPrimary
                 font.family: Theme.fontFamily
@@ -241,33 +249,24 @@ Window {
                     enabled: hostField.text.length > 0
                     onClicked: {
                         dialog.errorMessage = ""
-                        dialog.step = "discover"
-                        PhoneController.discoverAuthMethods(
-                            dialog.providerId, hostField.text)
+                        // Static methods, no server probe — Daktela has no
+                        // desktop-friendly OAuth so the auth method list
+                        // doesn't depend on the tenant. We do normalize the
+                        // host via the provider so http(s):// and trailing
+                        // slashes are handled consistently downstream.
+                        dialog.normalizedHost = hostField.text
+                        dialog.methods = dialog.staticMethodsFor(hostField.text)
+                        dialog.step = "methods"
                     }
                 }
             }
         }
 
-        // ===== STEP: discover =================================================
-        ColumnLayout {
-            visible: dialog.step === "discover"
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: Theme.s12
-            Item { Layout.fillHeight: true }
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: Theme.s10
-                BusyIndicator { running: dialog.step === "discover"; implicitWidth: 22; implicitHeight: 22 }
-                Text {
-                    text: qsTr("Looking up sign-in methods…")
-                    color: Theme.textSecondary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fbody
-                }
-            }
-            Item { Layout.fillHeight: true }
+        // (No "discover" step — kept the placeholder ColumnLayout out so
+        //  the layout doesn't reserve vertical space for a step we never
+        //  enter.)
+        Item {
+            visible: false
         }
 
         // ===== STEP: methods ==================================================
@@ -316,10 +315,16 @@ Window {
                         anchors.leftMargin: Theme.s12
                         anchors.rightMargin: Theme.s12
                         spacing: Theme.s10
+                        // AppIcon is an Image; inside a RowLayout we need
+                        // Layout.preferredWidth/Height to force the box, otherwise
+                        // RowLayout uses the SVG's intrinsic size and icons render
+                        // at different sizes depending on the source SVG.
                         AppIcon {
-                            path: modelData.kind === "token" ? Icons.globe : Icons.user
+                            path: modelData.kind === "token" ? Icons.key : Icons.user
                             color: Theme.textSecondary
-                            width: 16; height: 16
+                            Layout.preferredWidth: 16
+                            Layout.preferredHeight: 16
+                            Layout.alignment: Qt.AlignVCenter
                         }
                         Text {
                             Layout.fillWidth: true
@@ -332,7 +337,9 @@ Window {
                         AppIcon {
                             path: Icons.chevronRight
                             color: Theme.textTertiary
-                            width: 14; height: 14
+                            Layout.preferredWidth: 14
+                            Layout.preferredHeight: 14
+                            Layout.alignment: Qt.AlignVCenter
                         }
                     }
                 }
