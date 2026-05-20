@@ -216,6 +216,18 @@ jobs:
         run: |
           "PJSIP_ROOT=C:\p\pjproject-2.17" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      # The windows-2022 runner has both MSVC and MinGW gcc installed.
+      # CMake's auto-detection picks whichever is first in PATH — and by
+      # default that's MinGW gcc, which would link against vcpkg's MSVC-
+      # built Qt with mismatched ABI (and triggers PJSIP's non-MSVC
+      # codepath that requires wide-char string functions). Run
+      # vcvarsall.bat to put cl.exe + the MSVC env first in PATH for
+      # the rest of the job.
+      - name: Set up MSVC dev environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
       - name: Configure
         shell: pwsh
         run: cmake --preset windows
