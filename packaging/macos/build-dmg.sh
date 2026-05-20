@@ -8,7 +8,7 @@
 #   NOTARY_PASSWORD     app-specific password (Apple ID Security settings)
 #
 # Optional:
-#   APP_BUNDLE          path to compactphone.app (default: build/macos/src/compactphone.app)
+#   APP_BUNDLE          path to the .app (default: build/macos/src/Compact Phone.app)
 #   DIST_DIR            output directory (default: dist)
 #
 # Steps:
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-APP_BUNDLE="${APP_BUNDLE:-$REPO_ROOT/build/macos/src/compactphone.app}"
+APP_BUNDLE="${APP_BUNDLE:-$REPO_ROOT/build/macos/src/Compact Phone.app}"
 DIST_DIR="${DIST_DIR:-$REPO_ROOT/dist}"
 ENTITLEMENTS="$REPO_ROOT/packaging/macos/compactphone.entitlements"
 VERSION="$(grep -E 'VERSION [0-9]' "$REPO_ROOT/CMakeLists.txt" | head -1 | awk '{print $2}')"
@@ -67,8 +67,8 @@ if command -v create-dmg >/dev/null; then
         --window-pos 200 120 \
         --window-size 600 360 \
         --icon-size 100 \
-        --icon "compactphone.app" 160 160 \
-        --hide-extension "compactphone.app" \
+        --icon "Compact Phone.app" 160 160 \
+        --hide-extension "Compact Phone.app" \
         --app-drop-link 440 160 \
         "$DMG_PATH" \
         "$APP_BUNDLE"

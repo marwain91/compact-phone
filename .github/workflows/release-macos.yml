@@ -89,7 +89,7 @@ jobs:
             echo "Signing identity missing — producing unsigned DMG"
             mkdir -p dist
             STAGE=$(mktemp -d)
-            cp -R build/macos/src/compactphone.app "$STAGE/"
+            cp -R "build/macos/src/Compact Phone.app" "$STAGE/"
             ln -s /Applications "$STAGE/Applications"
             VERSION="${REF_NAME#v}"
             hdiutil create -volname "Compact Phone" -srcfolder "$STAGE" \
