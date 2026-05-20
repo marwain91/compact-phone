@@ -18,13 +18,18 @@ later because PJSIP forces it. Solo-maintained, public repo at
 src/core/                  C++ controllers + managers — the brain
   provisioning/            Pluggable auto-provisioning (Daktela today)
 src/ui/qml/                QML views; Main.qml is the window shell
+src/ui/qml/components/     AppSwitch, AppIcon, AppComboBox etc. — read
+                           these before adding new control wrappers
 tools/dev/                 Linux dev container (Dockerfile + compose)
 tools/dev/triplets/        Release-only vcpkg triplets for Linux (see below)
+tools/release/             Release-time tooling — appcast generator etc.
 cmake/FindPJSIP.cmake      Locates PJSIP per-platform — pkg-config on
                            Linux/macOS, env-var glob on Windows
 .env.local.example         Template for remote-build VPS hostname
                            (real .env.local is gitignored)
 web/docs/pages/            Markdown docs MyWebs pulls into the live site
+docs/download-urls.md      Stable public download URLs the MyWebs
+                           landing page hardcodes
 ```
 
 ## Build paths
@@ -123,6 +128,170 @@ qtdeclarative alone).
 If you're remote-building somewhere that might be production-shared,
 warn before launching; check `df -h` first.
 
+### Windows MAX_PATH (260 chars) — moves vcpkg + buildDir to short paths
+
+qtdeclarative's nested buildtree paths blow past Windows' 260-char
+MAX_PATH limit when vcpkg installs into the default
+`${buildDir}/vcpkg_installed/` under the GitHub workspace
+(`D:\a\compact-phone\compact-phone\...`). `cl.exe` and CMake helpers
+silently fail with `Cannot open compiler generated file: '': Invalid
+argument` mid-Configure.
+
+Three coordinated fixes in `.github/workflows/ci.yml`'s Windows job:
+
+- Clone vcpkg into **`C:\v`** (not the workspace)
+- Clone PJSIP source into **`C:\p`** (same reason)
+- Override the entire CMake build dir to **`C:\b`** via
+  `cmake --preset windows -B C:\b` — this also moves vcpkg_installed
+  to `C:\b\vcpkg_installed`
+
+`PJSIP_ROOT`, `VCPKG_ROOT`, and the test/stage/MSI steps all hardcode
+these short paths. Don't move them back without verifying the path
+budget.
+
+### Windows runner has both MSVC and MinGW gcc — CMake picks the first in PATH
+
+The `windows-2022` runner ships both. CMake's auto-detect picks
+whichever appears first; default is MinGW gcc 14. vcpkg deps are
+built with MSVC, and linking MinGW-built compactphone against MSVC
+Qt is an ABI mismatch — and triggers PJSIP's non-MSVC codepath
+(`pj/compat/string.h` requires `wcsicmp` etc. PJSIP doesn't ship).
+
+Fix: run `ilammy/msvc-dev-cmd@v1` with `arch: amd64` BEFORE the
+cmake configure step. It runs `vcvarsall.bat` and prepends MSVC's
+bin to PATH for the rest of the job.
+
+### `setup-msbuild` adds VS's bundled vcpkg to PATH; force our toolchain
+
+`microsoft/setup-msbuild@v2` (which we need for PJSIP's msbuild step)
+also adds VS's bundled `C:\Program Files\...\VC\vcpkg\` to PATH. That
+vcpkg's `scripts/buildsystems/vcpkg.cmake` then wins over our
+`C:\v\scripts\buildsystems\vcpkg.cmake` despite our `VCPKG_ROOT=C:\v`.
+
+Pass `-DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake`
+explicitly on the cmake invocation so our vcpkg always wins.
+
+### PJSIP + Qt on Windows — `PJ_NATIVE_STRING_IS_UNICODE=0`
+
+Qt defines `UNICODE` / `_UNICODE` on Windows (its APIs use 16-bit
+chars for Win32 compatibility). PJSIP's `pj/compat/string.h` sees
+those defines and enables an internal wide-char codepath that
+requires `wcsicmp` / `wcsdup` / etc. wrappers PJSIP doesn't ship by
+default. `#error "Implement Unicode string functions"` fires.
+
+Workaround in `cmake/FindPJSIP.cmake`'s Windows branch:
+```cmake
+target_compile_definitions(PJSIP::PJSIP INTERFACE
+    PJ_NATIVE_STRING_IS_UNICODE=0)
+```
+
+PJSIP then treats its internal strings as ANSI regardless of the
+host app's Unicode posture. Qt is unaffected (still uses QString).
+
+### `actions/cache@v4` does NOT save on job failure by default
+
+For expensive caches (Windows Qt cold build is ~2h), use
+`save-always: true` so a failed compile downstream doesn't throw
+away cache progress. Otherwise every iteration on a failing build
+redoes the cold work.
+
+Also cache `vcpkg_installed/`, not just `vcpkg/` root — see
+`.github/workflows/ci.yml` Windows job for the path list.
+
+### macOS Dock tooltip uses bundle directory name, not Info.plist
+
+Setting `CFBundleName` / `CFBundleDisplayName` /
+`QGuiApplication::setApplicationDisplayName` to "Compact Phone"
+does NOT fix the Dock tooltip if the .app directory itself is
+`compactphone.app` (lowercase). macOS' Dock reads the basename.
+
+Fix in `src/CMakeLists.txt`:
+```cmake
+set_target_properties(compactphone PROPERTIES
+    OUTPUT_NAME "Compact Phone"
+    MACOSX_BUNDLE_BUNDLE_NAME "Compact Phone")
+```
+
+CMake then writes `build/macos/src/Compact Phone.app/Contents/MacOS/
+Compact Phone` — binary name with a space is the Apple convention
+(QuickTime Player, Photo Booth all do this). Nothing in the codebase
+shells out to invoke the binary by path, so spaces are fine.
+
+Knock-on: Makefile `run-macos`, packaging/macos/build-dmg.sh, and
+release-macos.yml all hardcode the new path "Compact Phone.app".
+
+### Qt QQC2 `Switch` has padding, insets, *and* contentItem all claiming space
+
+To make `AppSwitch` sit flush right in a `RowLayout`, you need to
+zero ALL of:
+- `padding`, `leftPadding`, `rightPadding`, `topPadding`, `bottomPadding`
+- `topInset`, `bottomInset`, `leftInset`, `rightInset`
+- `contentItem`'s `implicitWidth` / `implicitHeight`
+
+AND set `Layout.maximumWidth: 36` (the indicator's actual width) so
+`RowLayout` can't give it slack. See `src/ui/qml/components/AppSwitch.qml`
+— the comment block on top of the file enumerates everything that
+took two iterations to figure out.
+
+### `AppIcon` inside `RowLayout` — use `Layout.preferredWidth/Height`, not `width/height`
+
+`AppIcon` is an `Image`. Inside a `RowLayout` the layout uses
+`Layout.preferred*` for sizing; bare `width: 14; height: 14` get
+ignored and the SVG's intrinsic size leaks through. Different icons
+have different intrinsic bounds, so a row of "same-sized" icons
+renders at very different sizes.
+
+Use:
+```qml
+AppIcon {
+    Layout.preferredWidth: 16
+    Layout.preferredHeight: 16
+    Layout.alignment: Qt.AlignVCenter
+}
+```
+
+### Auto-update appcast lives at `/releases/latest/download/appcast-<os>.xml`
+
+The in-tree `UpdateChecker` is a custom Qt-based fetcher that parses
+Sparkle 2.x XML but **does not verify signatures**. The feed URL is
+platform-specific in `src/core/UpdateChecker.cpp` via `#ifdef`:
+
+- macOS: `.../releases/latest/download/appcast-macos.xml`
+- Windows: `.../releases/latest/download/appcast-windows.xml`
+- Linux: `""` (no signed release path; `check()` no-ops cleanly)
+
+`tools/release/generate-appcast.py` builds the XML; the
+`release-{macos,windows}.yml` workflows call it and upload the
+appcast as a release asset alongside the DMG/MSI. Optional EdDSA
+signing via the `SPARKLE_ED25519_PRIVATE_KEY` Actions secret —
+forward-compat with the real Sparkle framework if we ever adopt it.
+
+### Stable release filenames so the landing page can hardcode URLs
+
+Release artifacts use **version-less filenames** —
+`Compact-Phone-macOS.dmg` and `Compact-Phone-Windows.msi`. GitHub's
+`/releases/latest/download/<filename>` only resolves when the filename
+matches exactly, so version-stamped names would 404 the landing-page
+buttons after every release. See `docs/download-urls.md` for the full
+URL list and HTML snippets MyWebs uses.
+
+### Linux unit test segfaults — pjsua2 singleton + Keychain env-fragility
+
+`SipEngineLifecycle.*`, `KeychainFile.*`, and `AccountsManagerUpdate*`
+all segfault in the headless Linux dev container. Root cause not yet
+diagnosed — likely pjsua2's singleton Endpoint state leaking across
+sequential gtest cases that each construct + destroy `pj::Endpoint`,
+and KeychainFile being downstream of that broken state in the same
+test binary.
+
+CI workaround: `ctest --exclude-regex
+'SipEngineLifecycle|KeychainFile|AccountsManagerUpdate'` so the other
+137 tests give a clean signal. macOS passes all 153 tests so the
+issue is Linux-headless-only. Real fix is the next investigation —
+probably a gtest fixture that initializes pjsua2 once per process,
+or moving those suites to integration-tests that only run on a real
+desktop.
+
 ## Branch + PR conventions
 
 - **`main` is protected** — direct pushes blocked, force-push blocked,
@@ -158,6 +327,10 @@ main automatically (or you do `git rebase main` and force-push).
 - `tools/dev/remote-builds.md` — daily workflow for VPS offload
 - `tools/dev/triplets/README.md` — why the release-only triplet, what
   we lose and don't lose
+- `tools/release/generate-appcast.py` — Sparkle 2.x appcast generator
+  for release-time auto-update feeds
+- `docs/download-urls.md` — stable public URLs the MyWebs landing page
+  hardcodes
 - `web/docs/pages/*.md` — user-facing docs (configuration,
   provisioning, troubleshooting, FAQ)
 - `Makefile` — every target has a `## help` line; `make help` lists them
