@@ -126,10 +126,10 @@ build-macos: prereqs-macos vcpkg-macos pjsip-macos ## configure + build the macO
 
 .PHONY: run-macos
 run-macos: ## launch the macOS .app (must be built first)
-	@if [ ! -d build/macos/src/compactphone.app ]; then \
+	@if [ ! -d "build/macos/src/Compact Phone.app" ]; then \
 	    echo "Not built yet — run 'make build-macos' first."; exit 1; \
 	fi
-	open build/macos/src/compactphone.app
+	open "build/macos/src/Compact Phone.app"
 
 .PHONY: acceptance-macos
 acceptance-macos: up build-macos ## full acceptance: Asterisk up, app launched, prints test plan

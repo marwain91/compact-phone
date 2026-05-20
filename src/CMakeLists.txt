@@ -268,7 +268,17 @@ set_target_properties(compactphone PROPERTIES
 )
 
 if(APPLE)
+    # OUTPUT_NAME drives the bundle directory ("Compact Phone.app") AND the
+    # binary inside Contents/MacOS/ ("Compact Phone"). Both with a space
+    # follows Apple convention — QuickTime Player.app/Contents/MacOS/QuickTime
+    # Player, Photo Booth.app/Contents/MacOS/Photo Booth, etc. The Dock and
+    # Finder show the bundle directory name, so this is what fixes the
+    # "compactphone" tooltip. CFBundleExecutable in Info.plist comes from
+    # MACOSX_BUNDLE_EXECUTABLE_NAME which CMake defaults to OUTPUT_NAME, so
+    # the plist entry will say "Compact Phone" — matches the on-disk binary.
     set_target_properties(compactphone PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
+        MACOSX_BUNDLE_BUNDLE_NAME "Compact Phone"
+        OUTPUT_NAME "Compact Phone"
     )
 endif()
