@@ -63,12 +63,14 @@ jobs:
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
+          # Stable filename — landing page can hardcode
+          # .../releases/latest/download/Compact-Phone-Windows.msi
           $version = $env:REF_NAME -replace '^v', ''
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           wix build packaging\windows\installer.wxs -arch x64 `
               -d Version=$version `
               -d StageDir=build\windows\stage `
-              -out "dist\compactphone-$version.msi"
+              -out "dist\Compact-Phone-Windows.msi"
 
       - name: Sign MSI (gated on cert secret)
         shell: pwsh
