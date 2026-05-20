@@ -66,6 +66,18 @@ app needs:
 JIT and unsigned executable memory remain **off** — Qt does not need either
 and keeping them off shrinks the attack surface.
 
+## Licence notices in the bundle
+
+The top-level `CMakeLists.txt` attaches `LICENSE` and
+`THIRD_PARTY_LICENSES.md` to the `compactphone` target with
+`MACOSX_PACKAGE_LOCATION = Resources`, so they end up inside
+`compactphone.app/Contents/Resources/` automatically. `Info.plist`
+also carries `NSHumanReadableCopyright` with the GPL notice and
+source-code URL — that line shows in the Finder Get-Info panel.
+
+`build-dmg.sh` does not need to do anything extra; the licence files
+ride along inside the bundle into the DMG.
+
 ## What's still missing
 
 - The `release-macos.yml` workflow.

@@ -34,7 +34,7 @@ BEGIN
             VALUE "FileDescription",  "Compact Phone — SIP softphone"
             VALUE "FileVersion",      COMPACTPHONE_VERSION_STR
             VALUE "InternalName",     "compactphone"
-            VALUE "LegalCopyright",   "Copyright (c) Jiri Havlicek"
+            VALUE "LegalCopyright",   "Copyright (c) 2026 Jiri Havlicek. GPL-3.0-or-later."
             VALUE "OriginalFilename", "compactphone.exe"
             VALUE "ProductName",      "Compact Phone"
             VALUE "ProductVersion",   COMPACTPHONE_VERSION_STR

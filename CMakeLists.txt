@@ -53,3 +53,37 @@ if(COMPACTPHONE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# ---------------------------------------------------------------------------
+# Licence-compliance file plumbing
+#
+# GPL-3.0-or-later (§5/§6) and LGPLv3 §4 both require that the licence
+# notices and the "where to get source" information travel with the binary.
+# We do that two ways:
+#
+#   1. macOS: copy LICENSE and THIRD_PARTY_LICENSES.md into Contents/Resources
+#      of the .app bundle, so they end up inside the .dmg by construction.
+#   2. install(): emit them to ${CMAKE_INSTALL_PREFIX} so packagers (the
+#      Windows WiX harvest, Linux .deb / AppImage scripts) pick them up
+#      automatically.
+# ---------------------------------------------------------------------------
+set(COMPACTPHONE_LICENCE_FILES
+    "${CMAKE_SOURCE_DIR}/LICENSE"
+    "${CMAKE_SOURCE_DIR}/THIRD_PARTY_LICENSES.md"
+)
+
+if(APPLE)
+    # MACOSX_PACKAGE_LOCATION places the file under Contents/Resources/ in
+    # the bundle. We attach the sources to the executable target so they
+    # are copied during the normal build, before codesign/notarisation.
+    target_sources(compactphone PRIVATE ${COMPACTPHONE_LICENCE_FILES})
+    set_source_files_properties(${COMPACTPHONE_LICENCE_FILES} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources"
+    )
+endif()
+
+include(GNUInstallDirs)
+install(FILES ${COMPACTPHONE_LICENCE_FILES}
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+    COMPONENT licences
+)
