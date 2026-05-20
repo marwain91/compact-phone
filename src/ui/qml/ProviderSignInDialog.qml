@@ -6,16 +6,20 @@ import CompactPhone
 
 // Multi-step provisioning wizard.
 //   1. host        — user enters the server URL
-//   2. discover    — we probe /internal/globalsettings.json for SSO methods
-//   3. methods     — user picks Password or one of the SSO buttons
+//   2. discover    — we probe /internal/globalsettings.json mostly as a
+//                    hostname-validity check (catches typos early)
+//   3. methods     — user picks Username/Password or Access Token
 //   4a. password   — username + password form
-//   4b. sso        — opens the host in the browser, then asks the user to
-//                    paste their access token back into Compact Phone
+//   4b. token      — opens the Daktela web UI in the browser so the user
+//                    can sign in and generate a personal access token,
+//                    which they paste back into Compact Phone
 //   5. provisioning — spinner while we fetch the SIP extension
 //
-// If discovery fails the wizard falls back to password-only. Each provider in
-// PhoneController.provisioningProviders() can drive this same wizard; today
-// the only one is Daktela.
+// Discovery is best-effort: a network failure doesn't block the wizard.
+// We don't surface Daktela's SSO methods (Google / Azure / Daktela SSO)
+// because the redirect_uri is hardcoded to Daktela's web frontend, so
+// a desktop client cannot drive the OAuth handshake honestly. Token paste
+// is what users would do anyway after a browser SSO round-trip.
 Window {
     id: dialog
     width: 480
@@ -31,7 +35,7 @@ Window {
 
     property string providerId: ""
     property var    providerDescriptor: ({ id: "", displayName: "", hostPlaceholder: "", markPath: "" })
-    property string step: "host"     // host | discover | methods | password | sso | provisioning
+    property string step: "host"     // host | discover | methods | password | token | provisioning
     property string normalizedHost: ""
     property var    methods: []
     property var    selectedMethod: ({})
@@ -85,8 +89,8 @@ Window {
             if (provId !== dialog.providerId) return
             dialog.errorMessage = err
             // Hop back to whichever input screen we came from.
-            if (dialog.selectedMethod && dialog.selectedMethod.kind === "sso")
-                dialog.step = "sso"
+            if (dialog.selectedMethod && dialog.selectedMethod.kind === "token")
+                dialog.step = "token"
             else
                 dialog.step = "password"
         }
@@ -190,7 +194,7 @@ Window {
                 text: dialog.step === "host"          ? qsTr("Where is your %1?").arg(dialog.providerDescriptor.displayName)
                     : dialog.step === "methods"       ? qsTr("How would you like to sign in?")
                     : dialog.step === "password"      ? qsTr("Sign in to %1").arg(dialog.normalizedHost)
-                    : dialog.step === "sso"           ? dialog.selectedMethod.displayName || qsTr("Sign in")
+                    : dialog.step === "token"           ? dialog.selectedMethod.displayName || qsTr("Sign in")
                     : dialog.step === "discover"      ? qsTr("Connecting to %1…").arg(hostField.text)
                     : qsTr("Setting up your account…")
                 color: Theme.textPrimary
@@ -300,8 +304,8 @@ Window {
                         onClicked: {
                             dialog.errorMessage = ""
                             dialog.selectedMethod = modelData
-                            if (modelData.kind === "sso") {
-                                dialog.step = "sso"
+                            if (modelData.kind === "token") {
+                                dialog.step = "token"
                             } else {
                                 dialog.step = "password"
                             }
@@ -313,7 +317,7 @@ Window {
                         anchors.rightMargin: Theme.s12
                         spacing: Theme.s10
                         AppIcon {
-                            path: modelData.kind === "sso" ? Icons.globe : Icons.user
+                            path: modelData.kind === "token" ? Icons.globe : Icons.user
                             color: Theme.textSecondary
                             width: 16; height: 16
                         }
@@ -393,16 +397,16 @@ Window {
             }
         }
 
-        // ===== STEP: sso ======================================================
+        // ===== STEP: token ====================================================
         ColumnLayout {
-            visible: dialog.step === "sso"
+            visible: dialog.step === "token"
             Layout.fillWidth: true
             spacing: Theme.s12
 
             Text {
                 Layout.fillWidth: true
                 text: dialog.selectedMethod.instructions ||
-                      qsTr("After signing in, paste your access token below.")
+                      qsTr("Open Daktela, sign in, generate a personal access token under Account → API tokens, then paste it below.")
                 color: Theme.textTertiary
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fsm
@@ -411,7 +415,7 @@ Window {
 
             AppButton {
                 variant: "secondary"
-                text: qsTr("Open %1 in browser").arg(dialog.normalizedHost)
+                text: qsTr("Open %1").arg(dialog.normalizedHost)
                 Layout.fillWidth: true
                 onClicked: {
                     if (dialog.selectedMethod.openUrl)
@@ -422,7 +426,7 @@ Window {
             AppField {
                 id: tokenField
                 label: qsTr("ACCESS TOKEN")
-                placeholder: qsTr("Paste your Daktela API token here")
+                placeholder: qsTr("Paste the token from Daktela here")
             }
 
             Item { Layout.fillHeight: true }

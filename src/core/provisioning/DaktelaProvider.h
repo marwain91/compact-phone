@@ -62,13 +62,19 @@ public:
                                           const QJsonValue &sipDevice,
                                           const QString &displayName);
 
-    // Translate /internal/globalsettings.json's `authentications` block into
-    // the wizard-facing method list. The password method is always prepended.
-    static QVariantList parseAuthMethods(const QJsonValue &globalSettingsResult,
-                                         const QUrl &host);
-
-    // Single source of truth for "we couldn't discover, so password-only".
-    static QVariantList passwordOnlyMethods(const QUrl &host);
+    // The wizard-facing method list. Daktela does not expose a
+    // desktop-friendly OAuth client (its OAuth redirect_uri is
+    // hardcoded to the web frontend), so we only offer:
+    //   1. Username + password — calls /api/v6/login.json
+    //   2. Access token — user generates one in Daktela's web UI
+    //                     and pastes it back here
+    //
+    // The /internal/globalsettings.json discovery probe is still
+    // used to validate the hostname is a real Daktela instance, but
+    // the auth method list is the same regardless of what SSO methods
+    // the tenant has enabled — we can't drive any of them honestly
+    // from a desktop client.
+    static QVariantList defaultAuthMethods(const QUrl &host);
 
 private:
     void onLoginReply(QNetworkReply *r);

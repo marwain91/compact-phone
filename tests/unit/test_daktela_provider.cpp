@@ -217,65 +217,25 @@ TEST(DaktelaProviderTest, GlobalSettingsUrlPath)
               "/internal/globalsettings.json");
 }
 
-TEST(DaktelaProviderTest, ParseAuthMethodsAlwaysIncludesPassword)
+TEST(DaktelaProviderTest, DefaultAuthMethodsOffersPasswordAndToken)
 {
+    // Daktela does not expose a desktop-friendly OAuth client (redirect_uri
+    // is hardcoded to the web frontend), so we always offer exactly two
+    // honest methods: username+password and access-token paste. SSO method
+    // tiles parsed from /internal/globalsettings.json's `authentications`
+    // block are intentionally not surfaced.
     const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
-    QJsonObject empty;
-    const auto methods = DaktelaProvider::parseAuthMethods(empty, host);
-    ASSERT_EQ(methods.size(), 1);
+    const auto methods = DaktelaProvider::defaultAuthMethods(host);
+    ASSERT_EQ(methods.size(), 2);
     EXPECT_EQ(methods.at(0).toMap().value("id").toString(), "password");
     EXPECT_EQ(methods.at(0).toMap().value("kind").toString(), "password");
-}
-
-TEST(DaktelaProviderTest, ParseAuthMethodsAppendsEnabledSso)
-{
-    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
-    QJsonObject auths{
-        {"google_auth", QJsonArray{
-            QJsonObject{ {"title", "Google account"}, {"client_id", "g-id"} }
-        }},
-        {"azure_auth", QJsonArray{
-            QJsonObject{ {"title", "My Azure"}, {"client_id", "a-id"}, {"tenant_id", "t-id"} }
-        }},
-        {"genericsso_auth", QJsonArray{}},  // empty: no entry expected
-        {"daktela_auth", QJsonArray{
-            QJsonObject{ {"title", "Daktela SSO"}, {"client_id", "compact-phone"} }
-        }}
-    };
-    QJsonObject result{ {"authentications", auths} };
-    const auto methods = DaktelaProvider::parseAuthMethods(result, host);
-    ASSERT_EQ(methods.size(), 4); // password + google + azure + daktela
-    EXPECT_EQ(methods.at(0).toMap().value("id").toString(), "password");
-    EXPECT_EQ(methods.at(1).toMap().value("id").toString(), "google");
-    EXPECT_EQ(methods.at(2).toMap().value("id").toString(), "azure");
-    EXPECT_EQ(methods.at(3).toMap().value("id").toString(), "daktelasso");
-    EXPECT_EQ(methods.at(1).toMap().value("kind").toString(), "sso");
-    EXPECT_TRUE(methods.at(1).toMap().value("openUrl").toString().startsWith("https://acme.daktela.com"));
-}
-
-TEST(DaktelaProviderTest, ParseAuthMethodsAddsSuffixForMultiTenant)
-{
-    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
-    QJsonObject auths{
-        {"azure_auth", QJsonArray{
-            QJsonObject{ {"title", "Tenant A"}, {"client_id", "a1"} },
-            QJsonObject{ {"title", "Tenant B"}, {"client_id", "a2"} }
-        }}
-    };
-    QJsonObject result{ {"authentications", auths} };
-    const auto methods = DaktelaProvider::parseAuthMethods(result, host);
-    ASSERT_EQ(methods.size(), 3);
-    EXPECT_EQ(methods.at(1).toMap().value("id").toString(), "azure-0");
-    EXPECT_EQ(methods.at(2).toMap().value("id").toString(), "azure-1");
-}
-
-TEST(DaktelaProviderTest, PasswordOnlyMethodsHasPasswordEntry)
-{
-    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
-    const auto methods = DaktelaProvider::passwordOnlyMethods(host);
-    ASSERT_EQ(methods.size(), 1);
-    EXPECT_EQ(methods.at(0).toMap().value("id").toString(), "password");
-    EXPECT_EQ(methods.at(0).toMap().value("kind").toString(), "password");
+    EXPECT_EQ(methods.at(1).toMap().value("id").toString(), "token");
+    EXPECT_EQ(methods.at(1).toMap().value("kind").toString(), "token");
+    // Token method's openUrl should be the tenant's web URL so the wizard's
+    // "Open in browser" button lands the user where they can generate one.
+    EXPECT_TRUE(methods.at(1).toMap().value("openUrl").toString()
+                .startsWith("https://acme.daktela.com"));
+    EXPECT_FALSE(methods.at(1).toMap().value("instructions").toString().isEmpty());
 }
 
 TEST(DaktelaProviderTest, EndToEndPayloadParsing)

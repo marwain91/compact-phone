@@ -52,8 +52,9 @@ public:
                            const QString &username,
                            const QString &password) = 0;
 
-    // Kick off provisioning from an already-issued access token (e.g. obtained
-    // by the user via SSO in the system browser). Default = unsupported.
+    // Kick off provisioning from an access token the user generated
+    // themselves in the provider's web UI (e.g. Daktela's Account →
+    // API tokens). Default = unsupported.
     virtual void provisionWithToken(const QString &host,
                                     const QString &accessToken)
     {
@@ -63,17 +64,17 @@ public:
             tr("This provider does not support token-based sign-in."));
     }
 
-    // Probe the host to discover which sign-in methods it has enabled.
-    // Subclasses must always emit either authMethodsDiscovered or
-    // authMethodsFailed in response.
+    // Probe the host to confirm it's reachable and is the kind of
+    // backend this provider expects (typo guard). Subclasses must
+    // always emit either authMethodsDiscovered or authMethodsFailed.
     //
     // Each entry in the emitted list is a QVariantMap with:
-    //   id            stable machine id, e.g. "password" / "google" / "azure"
+    //   id            stable machine id, e.g. "password" / "token"
     //   displayName   localized button label
-    //   kind          "password" | "sso"
-    //   openUrl       for SSO: a URL the wizard opens in the system browser
-    //                 (typically the host's web login page — the actual OAuth
-    //                 dance happens there)
+    //   kind          "password" | "token"
+    //   openUrl       for token: a URL the wizard opens in the system
+    //                 browser so the user can sign in and create a
+    //                 personal access token
     //   instructions  short text shown next to the token paste field
     virtual void discoverAuthMethods(const QString &host) = 0;
 
