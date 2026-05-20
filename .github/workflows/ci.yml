@@ -119,10 +119,17 @@ jobs:
       # 260-char MAX_PATH and cl.exe fails to find generated .moc files.
       # vcpkg's own portfile emits a warning recommending a short path —
       # we use C:\v\. Same fix applies to PJSIP under C:\p\.
-      - name: Cache vcpkg (short path)
+      - name: Cache vcpkg + installed deps (short paths)
         uses: actions/cache@v4
         with:
-          path: C:\v
+          # C:\v               vcpkg itself (source tree, downloads/, archives)
+          # C:\b\vcpkg_installed  per-project install tree — Qt headers + libs
+          #                       land here after the cold ~2h Configure step.
+          #                       Caching it means subsequent runs skip the
+          #                       compile and just restore the install tree.
+          path: |
+            C:\v
+            C:\b\vcpkg_installed
           key: vcpkg-windows-shortpath-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
           # save-always: the qtdeclarative cold build is ~2 hours on
           # the Windows runner. If a later step in this job fails
