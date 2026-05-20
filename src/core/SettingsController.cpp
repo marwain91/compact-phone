@@ -60,6 +60,7 @@ SettingsController::SettingsController(sip::SipEngine *engine,
         m_autoRecordEnabled = m_settings->getOr("auto_record_enabled", "0") == "1";
         m_enterpriseFeaturesEnabled = m_settings->getOr("enterprise_features_enabled", "0") == "1";
         m_crashReportingEnabled = m_settings->getOr("crash_reporting_enabled", "0") == "1";
+        m_alwaysOnTop = m_settings->getOr("always_on_top", "0") == "1";
         m_recordingsPath = QString::fromStdString(
             m_settings->getOr("recordings_path", ""));
     }
@@ -234,6 +235,14 @@ void SettingsController::setCrashReportingEnabled(bool enabled)
     if (m_settings) m_settings->set("crash_reporting_enabled",
                                     enabled ? "1" : "0");
     emit crashReportingEnabledChanged();
+}
+
+void SettingsController::setAlwaysOnTop(bool enabled)
+{
+    if (m_alwaysOnTop == enabled) return;
+    m_alwaysOnTop = enabled;
+    if (m_settings) m_settings->set("always_on_top", enabled ? "1" : "0");
+    emit alwaysOnTopChanged();
 }
 
 QVariantList SettingsController::audioInputs() const

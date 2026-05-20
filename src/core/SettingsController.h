@@ -83,6 +83,13 @@ public:
     bool enterpriseFeaturesEnabled() const { return m_enterpriseFeaturesEnabled; }
     void setEnterpriseFeaturesEnabled(bool enabled);
 
+    // Pins the main window above other application windows. When off
+    // (default), the window behaves like any other. The incoming-call
+    // dialog briefly forces on-top regardless of this setting so the
+    // user notices the call even over a fullscreen app.
+    bool alwaysOnTop() const { return m_alwaysOnTop; }
+    void setAlwaysOnTop(bool enabled);
+
     // Sentry / crash-report opt-in. Off by default; only honored when the
     // build was configured with -DCOMPACTPHONE_ENABLE_SENTRY=ON.
     bool crashReportingEnabled() const { return m_crashReportingEnabled; }
@@ -113,6 +120,7 @@ signals:
     void recordingsPathChanged();
     void enterpriseFeaturesEnabledChanged();
     void crashReportingEnabledChanged();
+    void alwaysOnTopChanged();
 
 private:
     sip::SipEngine *m_engine = nullptr;
@@ -136,6 +144,7 @@ private:
     QString m_recordingsPath;
     bool m_enterpriseFeaturesEnabled = false;
     bool m_crashReportingEnabled = false;
+    bool m_alwaysOnTop = false;
     std::unique_ptr<sip::RingtonePlayer> m_ringtone;
 
     void applyRingtoneState();

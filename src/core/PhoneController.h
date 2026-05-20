@@ -92,6 +92,7 @@ class PhoneController : public QObject {
     Q_PROPERTY(bool autoRecordEnabled READ autoRecordEnabled WRITE setAutoRecordEnabled NOTIFY autoRecordEnabledChanged)
     Q_PROPERTY(bool enterpriseFeaturesEnabled READ enterpriseFeaturesEnabled WRITE setEnterpriseFeaturesEnabled NOTIFY enterpriseFeaturesEnabledChanged)
     Q_PROPERTY(bool crashReportingEnabled READ crashReportingEnabled WRITE setCrashReportingEnabled NOTIFY crashReportingEnabledChanged)
+    Q_PROPERTY(bool alwaysOnTop READ alwaysOnTop WRITE setAlwaysOnTop NOTIFY alwaysOnTopChanged)
     QML_ELEMENT
     QML_SINGLETON
 public:
@@ -137,6 +138,8 @@ public:
     void setEnterpriseFeaturesEnabled(bool enabled);
     bool crashReportingEnabled() const;
     void setCrashReportingEnabled(bool enabled);
+    bool alwaysOnTop() const;
+    void setAlwaysOnTop(bool enabled);
 
     // Returns the first held confirmed call other than excludeCallId, or
     // -1 if none — used by the UI to enable the Merge button.
@@ -283,6 +286,7 @@ signals:
     void autoRecordEnabledChanged();
     void enterpriseFeaturesEnabledChanged();
     void crashReportingEnabledChanged();
+    void alwaysOnTopChanged();
     void unreadMessageCountChanged();
 
     // Tray-initiated requests bubbled up to QML.
