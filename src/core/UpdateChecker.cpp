@@ -5,14 +5,28 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QXmlStreamReader>
+#include <QtGlobal>
 
 #include <spdlog/spdlog.h>
 
 namespace compactphone {
 
 namespace {
+// Per-OS appcast lives as an asset on every GitHub Release; /latest/
+// redirects to whatever the newest tag is, so the URL never changes
+// even as versions roll. release-macos.yml / release-windows.yml
+// generate and upload these via tools/release/generate-appcast.py.
 constexpr const char *kDefaultFeed =
-    "https://compactphone.eu/appcast.xml";
+#if defined(Q_OS_MACOS)
+    "https://github.com/marwain91/compact-phone/releases/latest/download/appcast-macos.xml";
+#elif defined(Q_OS_WIN)
+    "https://github.com/marwain91/compact-phone/releases/latest/download/appcast-windows.xml";
+#else
+    // Linux has no signed-release path yet; UpdateChecker silently
+    // 404s on these platforms until that exists. Pointing it at the
+    // macOS feed would lie about what artifact is downloadable.
+    "";
+#endif
 }
 
 UpdateChecker::UpdateChecker(QObject *parent)
@@ -34,6 +48,14 @@ void UpdateChecker::setFeedUrl(const QString &url)
 
 void UpdateChecker::check()
 {
+    if (m_feedUrl.isEmpty()) {
+        // No appcast URL configured (Linux today). Treat as "up to
+        // date" so the UI doesn't loop on an error state and the
+        // user just doesn't get an offer to update.
+        spdlog::info("UpdateChecker: no feed URL configured, skipping");
+        emit upToDate();
+        return;
+    }
     QUrl url(m_feedUrl);
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::UserAgentHeader,
