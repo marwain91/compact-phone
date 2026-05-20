@@ -98,8 +98,32 @@ jobs:
             ./packaging/macos/build-dmg.sh
           fi
 
-      - name: Upload DMG to release
+      # Generate the appcast that UpdateChecker fetches at
+      # https://github.com/marwain91/compact-phone/releases/latest/download/appcast-macos.xml
+      # Sparkle 2.x format. Signed with EdDSA when the secret is set
+      # (it's not strictly required by our in-tree UpdateChecker yet,
+      # but it's the right hygiene for when we adopt the real Sparkle
+      # framework).
+      - name: Generate macOS appcast
+        env:
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 -m pip install --quiet --user cryptography || true
+          VERSION="${REF_NAME#v}"
+          DMG=$(ls dist/*.dmg | head -1)
+          DMG_NAME=$(basename "$DMG")
+          python3 tools/release/generate-appcast.py \
+            --version "$VERSION" \
+            --asset-url "https://github.com/marwain91/compact-phone/releases/download/${REF_NAME}/${DMG_NAME}" \
+            --asset-file "$DMG" \
+            --os macos \
+            --output dist/appcast-macos.xml
+
+      - name: Upload DMG + appcast to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.dmg
+          files: |
+            dist/*.dmg
+            dist/appcast-macos.xml
           fail_on_unmatched_files: true
