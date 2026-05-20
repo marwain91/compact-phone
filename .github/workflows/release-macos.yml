@@ -85,15 +85,19 @@ jobs:
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
           REF_NAME: ${{ github.ref_name }}
         run: |
+          # Stable filename (no version) so the landing-page Download
+          # button can hardcode .../releases/latest/download/Compact-Phone-macOS.dmg
+          # and never need updating per release. The version is still
+          # carried in the appcast's sparkle:shortVersionString and
+          # inside the .app's Info.plist.
           if [ -z "$DEVELOPER_ID_APP" ]; then
             echo "Signing identity missing — producing unsigned DMG"
             mkdir -p dist
             STAGE=$(mktemp -d)
             cp -R "build/macos/src/Compact Phone.app" "$STAGE/"
             ln -s /Applications "$STAGE/Applications"
-            VERSION="${REF_NAME#v}"
             hdiutil create -volname "Compact Phone" -srcfolder "$STAGE" \
-              -ov -format UDZO "dist/compactphone-$VERSION-unsigned.dmg"
+              -ov -format UDZO "dist/Compact-Phone-macOS.dmg"
           else
             ./packaging/macos/build-dmg.sh
           fi

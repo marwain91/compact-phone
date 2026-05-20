@@ -25,7 +25,10 @@ APP_BUNDLE="${APP_BUNDLE:-$REPO_ROOT/build/macos/src/Compact Phone.app}"
 DIST_DIR="${DIST_DIR:-$REPO_ROOT/dist}"
 ENTITLEMENTS="$REPO_ROOT/packaging/macos/compactphone.entitlements"
 VERSION="$(grep -E 'VERSION [0-9]' "$REPO_ROOT/CMakeLists.txt" | head -1 | awk '{print $2}')"
-DMG_NAME="compactphone-${VERSION}.dmg"
+# Stable filename so .../releases/latest/download/Compact-Phone-macOS.dmg
+# always resolves regardless of version — landing page can hardcode that
+# URL. Version still surfaces inside the .app and in the appcast entry.
+DMG_NAME="Compact-Phone-macOS.dmg"
 
 require() {
     if [[ -z "${!1:-}" ]]; then
