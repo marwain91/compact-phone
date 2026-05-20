@@ -208,27 +208,41 @@ jobs:
         with:
           arch: amd64
 
+      # vcpkg installs its per-project deps to ${buildDir}/vcpkg_installed/.
+      # Even with vcpkg itself at C:\v, the install dir would be under the
+      # ~40-char workspace path and qtdeclarative's nested paths blow past
+      # MAX_PATH again. Override the build dir entirely to C:\b so the
+      # buildtree paths stay short.
+      #
+      # Also force the toolchain file to OUR vcpkg: setup-msbuild +
+      # vsdevcmd add VS's bundled vcpkg to PATH, and cmake's auto-detect
+      # was picking that up instead of $env:VCPKG_ROOT (which is C:\v).
       - name: Configure
         shell: pwsh
-        run: cmake --preset windows
+        run: |
+          cmake --preset windows -B C:\b `
+              -DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake
 
       - name: Build
         shell: pwsh
-        run: cmake --build --preset windows
+        run: cmake --build C:\b
 
       - name: Run unit tests
-        working-directory: build/windows
+        working-directory: C:\b
         shell: pwsh
         run: ctest --output-on-failure -L unit
 
       - name: Stage runtime (windeployqt)
         shell: pwsh
         run: |
-          $stage = "build\windows\stage"
+          $stage = "C:\b\stage"
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item build\windows\src\compactphone.exe $stage
+          Copy-Item C:\b\src\compactphone.exe $stage
+          # vcpkg installs Qt's tools under C:\b\vcpkg_installed (since we
+          # moved the buildDir). Fall back to C:\v just in case.
           $deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" `
-              -Path C:\v | Select-Object -First 1
+              -Path C:\b\vcpkg_installed,C:\v -ErrorAction SilentlyContinue `
+              | Select-Object -First 1
           if ($deploy) {
             & $deploy.FullName --qmldir src\ui\qml --release `
                 --no-translations --no-system-d3d-compiler `
