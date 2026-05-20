@@ -61,6 +61,35 @@ jobs:
               ctest --output-on-failure -L unit \
                 --exclude-regex 'SipEngineLifecycle'"
 
+      # When the segfaulting suites are *not* excluded (i.e. running
+      # locally or on a future opt-in job), this captures a real x86_64
+      # backtrace so we can fix the underlying root cause instead of
+      # just excluding tests. No-op when no excluded test actually
+      # segfaults — runs the excluded set under gdb and dumps frames.
+      - name: Diagnose Linux segfaults (gdb backtrace)
+        if: always()
+        continue-on-error: true
+        run: |
+          docker compose -f tools/dev/docker-compose.yml exec -T dev \
+            bash -c 'set -e
+              cd /workspace/build/linux
+              ulimit -c unlimited
+              for T in \
+                "KeychainFactoryTest.ProducesAWorkingBackend" \
+                "KeychainFile.RoundTripsAcrossInstances" \
+                "SipEngineLifecycle.StartsAndStops" \
+                "AccountsManagerUpdateTest.UpdatePersistsChangedFields"; do
+                echo "=== gdb backtrace: $T ==="
+                gdb --batch --return-child-result \
+                  -ex "set pagination off" \
+                  -ex "run --gtest_filter=$T" \
+                  -ex "bt full" \
+                  -ex "info sharedlibrary" \
+                  --args ./tests/test_unit --gtest_filter=$T 2>&1 | \
+                  tail -200 || true
+                echo
+              done'
+
       # vcpkg writes per-port logs inside the container under
       # /opt/vcpkg/buildtrees/<port>/. Surfacing them on failure means
       # the next debug round does not need a fresh 1-hour build.
