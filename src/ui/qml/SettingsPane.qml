@@ -203,6 +203,56 @@ Item {
                                     onToggled: PhoneController.alwaysOnTop = checked
                                 }
                             }
+
+                            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+
+                            Text {
+                                text: qsTr("KEYBOARD")
+                                color: Theme.textSecondary
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fxs
+                                font.weight: Font.Bold
+                                font.letterSpacing: 1.2
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Theme.s10
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 0
+                                    Text {
+                                        text: qsTr("Toggle sidebar")
+                                        color: Theme.textPrimary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fbody
+                                        font.weight: Font.Medium
+                                    }
+                                    Text {
+                                        text: qsTr("Show or hide the navigation rail")
+                                        color: Theme.textTertiary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fxs
+                                    }
+                                }
+                                Rectangle {
+                                    Layout.preferredHeight: 22
+                                    Layout.preferredWidth: kbdLbl.implicitWidth + Theme.s12
+                                    radius: Theme.r6
+                                    color: Theme.surfaceHi
+                                    border.color: Theme.border
+                                    border.width: 1
+                                    Text {
+                                        id: kbdLbl
+                                        anchors.centerIn: parent
+                                        text: Qt.platform.os === "osx" ? "⌘ B" : "Ctrl + B"
+                                        color: Theme.textSecondary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fsm
+                                        font.weight: Font.Medium
+                                    }
+                                }
+                            }
                         }
                     }
 

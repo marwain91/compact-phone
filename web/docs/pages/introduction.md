@@ -13,6 +13,18 @@ This documentation is a work in progress and will be filled in as features stabi
 - **Troubleshooting** — what to check when something isn't working
 - **FAQ** — short answers to recurring questions
 
+## Keyboard shortcuts
+
+| Action | macOS | Windows / Linux |
+| --- | --- | --- |
+| Toggle sidebar | ⌘ B | Ctrl + B |
+| Accept incoming call | ⌘ ⇧ A | Ctrl + Shift + A |
+| Hang up / decline | ⌘ ⇧ H | Ctrl + Shift + H |
+| Toggle Do-not-disturb | ⌘ ⇧ D | Ctrl + Shift + D |
+| Redial last number | ⌘ ⇧ R | Ctrl + Shift + R |
+
+On macOS these are also exposed under the **View** and **Phone** menus in the menu bar.
+
 ## Project status
 
 Compact Phone is in early alpha. Expect rough edges, especially around packaging and platform integration. File issues — preferably with logs (Settings → Advanced → Diagnostics) — at the [GitHub issue tracker](https://github.com/marwain91/compact-phone/issues).
