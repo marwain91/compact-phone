@@ -27,20 +27,18 @@ jobs:
             cmake --build --preset linux
 
       - name: Run unit tests
-        # SipEngineLifecycle / KeychainFile / AccountsManagerUpdate tests
-        # segfault in the headless Linux dev container. SipEngine touches
-        # pjsua2 (audio backend init issues even with null-dev fallback);
-        # KeychainFile + AccountsManagerUpdate fail for reasons we haven't
-        # diagnosed yet — likely a pjsua2 init side-effect leaking process
-        # state since they share the test_unit binary. Tracked separately.
-        # Excluding them so the remaining 137 tests give a clean signal
-        # without the blanket continue-on-error that was masking real
-        # regressions in the other suites.
+        # SipEngineLifecycle tests SEGFAULT in the headless Linux dev
+        # container — pjsua2's audio backend init crashes even with the
+        # null-dev fallback. Tracked under #17. The Keychain and
+        # AccountsManagerUpdate suites were excluded for the same reason
+        # but those were rooted in an OpenSSL 3.0.2 provider bug
+        # triggered by EVP_PKEY_HKDF; the EVP_KDF rewrite in #23 fixed
+        # them, so they're back in the run.
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash -c "cd /workspace/build/linux && \
               ctest --output-on-failure -L unit \
-                --exclude-regex 'SipEngineLifecycle|KeychainFile|AccountsManagerUpdate'"
+                --exclude-regex 'SipEngineLifecycle'"
 
       # vcpkg writes per-port logs inside the container under
       # /opt/vcpkg/buildtrees/<port>/. Surfacing them on failure means
