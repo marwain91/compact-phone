@@ -122,6 +122,8 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
             this, &PhoneController::activeAccountIdChanged);
     connect(m_accountsController.get(), &AccountsController::activeAccountIdChanged,
             this, &PhoneController::voicemailStateChanged);
+    connect(m_accountsController.get(), &AccountsController::registrationFailed,
+            this, [this](const QString &msg) { postNotice(msg, 6000); });
 
     // MWI notifications from PJSIP arrive on a worker thread — bounce to
     // the main thread before touching Qt state.

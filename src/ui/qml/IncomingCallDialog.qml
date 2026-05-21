@@ -3,28 +3,35 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import CompactPhone
 
+// Modal popup shown when a SIP INVITE arrives. Sized by content (we use
+// `contentItem` so the ColumnLayout's implicitHeight becomes the dialog's
+// content height — previously the buttons spilled below the card because
+// width was pinned but height wasn't).
 Dialog {
     id: dialog
     modal: true
     standardButtons: Dialog.NoButton
     closePolicy: Popup.NoAutoClose
-    width: 400
-    padding: 0
+    padding: Theme.s24
+
+    // Center on the parent window — Dialog doesn't do this automatically
+    // when only width is set.
+    anchors.centerIn: parent
+    width: Math.min(420, (parent ? parent.width : 420) - Theme.s16 * 2)
 
     background: Rectangle {
         color: Theme.bgElevated
         radius: Theme.r16
         border.color: Theme.border
+        border.width: 1
     }
     header: null
 
     property bool active: PhoneController.incomingCallId >= 0
     onActiveChanged: { if (active) open(); else close(); }
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: Theme.s24
-        spacing: Theme.s16
+    contentItem: ColumnLayout {
+        spacing: Theme.s12
 
         Text {
             Layout.alignment: Qt.AlignHCenter
@@ -83,6 +90,7 @@ Dialog {
             spacing: Theme.s12
             AppButton {
                 Layout.fillWidth: true
+                Layout.preferredHeight: 44
                 variant: "danger"
                 iconPath: Icons.phone
                 text: qsTr("Decline")
@@ -90,7 +98,11 @@ Dialog {
             }
             AppButton {
                 Layout.fillWidth: true
-                variant: "primary"
+                Layout.preferredHeight: 44
+                // Green Accept signals "answer this call" — matches the
+                // dialer's green place-call button and the iOS/Android
+                // convention. Red Decline keeps the visual contrast.
+                variant: "success"
                 iconPath: Icons.phone
                 text: qsTr("Accept")
                 onClicked: PhoneController.acceptIncoming()

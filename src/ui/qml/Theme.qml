@@ -56,10 +56,13 @@ QtObject {
     readonly property color violet:      "#6600FF"
     readonly property color violetSoft:  isDark ? "#6600FF22" : "#6600FF14"
 
-    readonly property color call:        "#FF5C42"
-    readonly property color callHi:      "#FF7861"
-    readonly property color callLo:      "#E64428"
-    readonly property color callGlow:    isDark ? "#FF5C4255" : "#FF5C4233"
+    // "Call" cluster — used by the dialer's place-call button. Green to
+    // signal "start the call"; the active-call view uses Theme.danger for
+    // the hangup button so the two intents are visually distinct.
+    readonly property color call:        "#1FA75A"
+    readonly property color callHi:      "#26C26A"
+    readonly property color callLo:      "#178548"
+    readonly property color callGlow:    isDark ? "#1FA75A55" : "#1FA75A33"
 
     readonly property color success:     "#22C55E"
     readonly property color successSoft: isDark ? "#22C55E22" : "#22C55E1A"

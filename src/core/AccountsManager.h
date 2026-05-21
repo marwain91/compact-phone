@@ -25,6 +25,18 @@ enum class RegistrationState {
     Failed,
 };
 
+// Last failure reported by the SIP server (or PJSIP itself for transport
+// errors) on the most recent REGISTER attempt. `code` is the SIP status
+// code (e.g. 401, 403, 408); 0 means PJSIP gave no code (typically a
+// transport-level failure before any response arrived). `reason` is the
+// human-readable phrase from the response. Cleared on a successful
+// re-registration.
+struct RegError {
+    int code = 0;
+    std::string reason;
+    bool empty() const { return code == 0 && reason.empty(); }
+};
+
 // Snapshot of the message-summary state reported by the server via MWI
 // NOTIFY. newMessages == 0 with active == false means "no voicemail".
 struct MwiState {
@@ -58,6 +70,12 @@ public:
 
     bool setEnabled(AccountId id, bool enabled);
 
+    // Replace the keychain-stored password for an account. Updates the
+    // in-memory cache too. Re-registration happens here so PJSIP picks up
+    // the new credentials immediately instead of failing on the next
+    // refresh with stale auth.
+    bool setPassword(AccountId id, const std::string &password);
+
     // Registration. Called automatically for enabled accounts on construction
     // and when add/update flips an account to enabled.
     bool registerAccount(AccountId id);
@@ -69,6 +87,10 @@ public:
     void reregisterAllEnabled();
 
     RegistrationState stateOf(AccountId id) const;
+
+    // Last registration error for an account. Returns an empty RegError if
+    // the account is currently Registered or has never tried.
+    RegError lastRegErrorOf(AccountId id) const;
 
     // Send a SIP MESSAGE (RFC 3428) from `accountId` to `to`. Returns
     // false if the account isn't registered or PJSIP refuses.
@@ -120,6 +142,13 @@ private:
     platform::IKeychain *m_keychain;
 
     std::vector<std::unique_ptr<Entry>> m_entries;
+    // Plaintext password cache, keyed by Account::passwordRef. The first
+    // successful keychain read populates the entry; later registerAccount /
+    // reregisterAllEnabled / setEnabled cycles reuse it so the user is not
+    // prompted by macOS Keychain Services more than once per session. The
+    // password is already held in PJSIP's pj::AuthCredInfo for the lifetime
+    // of the pj::Account, so this cache is not a fresh secrecy regression.
+    std::unordered_map<std::string, std::string> m_passwordCache;
     std::function<void(AccountId, RegistrationState)> m_cb;
     std::function<void(AccountId, int)> m_onIncoming;
     std::function<void(AccountId, MwiState)> m_onMwi;

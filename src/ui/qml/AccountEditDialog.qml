@@ -245,7 +245,14 @@ Window {
                     AppField { id: displayNameField; label: qsTr("SIP DISPLAY NAME"); placeholder: qsTr("Sent to PBX in From: header"); hint: qsTr("Shown as caller name to remote party") }
                     AppField { id: usernameField; label: qsTr("USERNAME / EXTENSION"); placeholder: qsTr("e.g. 1001") }
                     AppField { id: authUserField; label: qsTr("AUTH USERNAME"); placeholder: qsTr("Leave empty to use Username"); hint: qsTr("Some PBXes require a separate auth login") }
-                    AppField { id: passwordField; visible: dialog.editingAccountId === -1; label: qsTr("PASSWORD"); placeholder: qsTr("••••••••"); echoMode: TextInput.Password }
+                    AppField {
+                        id: passwordField
+                        label: dialog.editingAccountId === -1
+                               ? qsTr("PASSWORD")
+                               : qsTr("PASSWORD (LEAVE EMPTY TO KEEP CURRENT)")
+                        placeholder: qsTr("••••••••")
+                        echoMode: TextInput.Password
+                    }
                     AppField { id: domainField; label: qsTr("SIP SERVER"); placeholder: qsTr("pbx.example.com:5060") }
                 }
             }
@@ -484,7 +491,10 @@ Window {
             dtmfMethod: dtmfCombo.currentText,
             codecs: dialog._collectCodecs()
         }
-        if (editingAccountId === -1 && passwordField.text.length > 0) {
+        // On add, password is mandatory. On edit, it's optional: only sent
+        // when the user actually typed something so AccountsManager can
+        // distinguish "no change" from "set to empty string".
+        if (passwordField.text.length > 0) {
             p.password = passwordField.text
         }
         return p

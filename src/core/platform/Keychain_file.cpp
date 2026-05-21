@@ -2,6 +2,8 @@
 
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
+#include <openssl/core_names.h>
+#include <openssl/params.h>
 #include <openssl/rand.h>
 
 #include <spdlog/spdlog.h>
@@ -26,28 +28,36 @@ constexpr int kKeySize = 32;      // 256 bits
 constexpr const char *kKdfInfo = "CompactPhone:v0.2:keychain";
 constexpr const char *kMasterSecret = "compactphone-v0.2-master";
 
+// Uses OpenSSL 3.x's EVP_KDF HKDF interface rather than the legacy
+// EVP_PKEY_HKDF / EVP_PKEY_derive path. The legacy path crashes inside
+// EVP_KEYMGMT_names_do_all on Ubuntu 22.04's libcrypto.so.3 (OpenSSL
+// 3.0.2 has a known provider-registry bug when the key-mgmt list isn't
+// fully initialised). EVP_KDF was added specifically for KDFs in 3.x
+// and doesn't traverse that code path. Same crypto output — HKDF-SHA256
+// with the same salt / IKM / info — only the API differs.
 bool deriveKey(const std::string &salt, std::array<uint8_t, kKeySize> &outKey)
 {
-    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, nullptr);
-    if (!ctx) return false;
-    bool ok = false;
-    do {
-        if (EVP_PKEY_derive_init(ctx) <= 0) break;
-        if (EVP_PKEY_CTX_set_hkdf_md(ctx, EVP_sha256()) <= 0) break;
-        if (EVP_PKEY_CTX_set1_hkdf_salt(ctx,
-                reinterpret_cast<const uint8_t *>(salt.data()),
-                static_cast<int>(salt.size())) <= 0) break;
-        if (EVP_PKEY_CTX_set1_hkdf_key(ctx,
-                reinterpret_cast<const uint8_t *>(kMasterSecret),
-                static_cast<int>(std::strlen(kMasterSecret))) <= 0) break;
-        if (EVP_PKEY_CTX_add1_hkdf_info(ctx,
-                reinterpret_cast<const uint8_t *>(kKdfInfo),
-                static_cast<int>(std::strlen(kKdfInfo))) <= 0) break;
-        size_t outLen = outKey.size();
-        if (EVP_PKEY_derive(ctx, outKey.data(), &outLen) <= 0) break;
-        ok = outLen == outKey.size();
-    } while (false);
-    EVP_PKEY_CTX_free(ctx);
+    EVP_KDF *kdf = EVP_KDF_fetch(nullptr, "HKDF", nullptr);
+    if (!kdf) return false;
+    EVP_KDF_CTX *kctx = EVP_KDF_CTX_new(kdf);
+    EVP_KDF_free(kdf);
+    if (!kctx) return false;
+
+    OSSL_PARAM params[5];
+    OSSL_PARAM *p = params;
+    char digest[] = "SHA256";
+    *p++ = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, digest, 0);
+    *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT,
+            const_cast<char *>(salt.data()), salt.size());
+    *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_KEY,
+            const_cast<char *>(kMasterSecret), std::strlen(kMasterSecret));
+    *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_INFO,
+            const_cast<char *>(kKdfInfo), std::strlen(kKdfInfo));
+    *p = OSSL_PARAM_construct_end();
+
+    const bool ok =
+        EVP_KDF_derive(kctx, outKey.data(), outKey.size(), params) > 0;
+    EVP_KDF_CTX_free(kctx);
     return ok;
 }
 

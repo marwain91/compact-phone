@@ -383,17 +383,10 @@ ColumnLayout {
                 Layout.preferredHeight: 52
                 Layout.topMargin: Theme.s8
 
-                Rectangle {
-                    id: callGlow
-                    anchors.fill: callBg
-                    anchors.margins: -8
-                    radius: callBg.radius + 8
-                    color: "transparent"
-                    border.width: 8
-                    border.color: callButton.enabled ? Theme.callGlow : "transparent"
-                    opacity: callButton.enabled ? (callMouse.pressed ? 0.4 : 0.9) : 0
-                    Behavior on opacity { NumberAnimation { duration: Theme.dur } }
-                }
+                // Previous "glow" was a Rectangle with an 8px solid border —
+                // it renders as a hard ring around the pill, not a soft
+                // shadow. Removed; the green fill is enough signal on its
+                // own and matches the rest of the surface styling.
 
                 Rectangle {
                     id: callBg

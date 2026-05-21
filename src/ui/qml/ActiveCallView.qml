@@ -63,6 +63,7 @@ ColumnLayout {
                           : root.state === "active" ? qsTr("Connected")
                           : root.state === "calling" ? qsTr("Calling…")
                           : root.state === "ringing" ? qsTr("Ringing…")
+                          : root.state === "early" ? qsTr("Calling…")
                           : root.state
                     status: root.ended ? "muted"
                           : root.held ? "warning"
@@ -82,10 +83,17 @@ ColumnLayout {
                 }
             }
 
+            // Top filler — keeps the caller block vertically centered in the
+            // gap between the card's top edge and the action row. Hidden in
+            // DTMF mode so the compact header can sit flush to the top.
+            Item {
+                visible: !root.showDtmf
+                Layout.fillHeight: true
+            }
+
             ColumnLayout {
                 visible: !root.showDtmf
                 Layout.alignment: Qt.AlignHCenter
-                Layout.topMargin: Theme.s16
                 spacing: Theme.s10
                 opacity: root.ended ? 0.6 : 1.0
                 Rectangle {
@@ -127,6 +135,7 @@ ColumnLayout {
                           : root.state === "active" ? qsTr("Connected")
                           : root.state === "calling" ? qsTr("Calling…")
                           : root.state === "ringing" ? qsTr("Ringing…")
+                          : root.state === "early" ? qsTr("Calling…")
                           : root.state
                     status: root.ended ? "muted"
                           : root.held ? "warning"
@@ -212,7 +221,6 @@ ColumnLayout {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignHCenter
-                Layout.bottomMargin: Theme.s8
                 spacing: Theme.s10
                 enabled: !root.ended
                 opacity: root.ended ? 0.45 : 1.0
@@ -399,7 +407,6 @@ ColumnLayout {
 
             IconButton {
                 Layout.alignment: Qt.AlignHCenter
-                Layout.bottomMargin: Theme.s16
                 iconPath: Icons.phone
                 diameter: 52
                 iconSize: 22
