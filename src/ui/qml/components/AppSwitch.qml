@@ -7,8 +7,11 @@ import CompactPhone
 // visible indicator: padding (4 sides), insets (4 sides), and a
 // contentItem slot for an optional label. We zero them ALL plus
 // pin the Layout dimensions so the switch occupies exactly 36×20
-// inside a RowLayout — making it sit flush with the row's right
-// edge in SettingsPane.
+// inside a RowLayout. Callers that want the toggle flush against
+// the row's right edge must insert an `Item { Layout.fillWidth: true }`
+// spacer between the description block and this control — the inner
+// fillWidth ColumnLayout pattern alone doesn't suffice because Qt
+// Quick Layouts size that column to its children's natural width.
 Switch {
     id: control
     implicitWidth: 36

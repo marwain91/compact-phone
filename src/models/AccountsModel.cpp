@@ -50,6 +50,16 @@ QVariant AccountsModel::data(const QModelIndex &index, int role) const
     case RegistrationStateRole:
         return regStateString(m_mgr ? m_mgr->stateOf(a.id)
                                     : sip::RegistrationState::Unregistered);
+    case RegistrationErrorRole: {
+        if (!m_mgr) return QString{};
+        const auto err = m_mgr->lastRegErrorOf(a.id);
+        if (err.empty()) return QString{};
+        const QString reason = QString::fromStdString(err.reason);
+        if (err.code > 0 && !reason.isEmpty())
+            return QStringLiteral("%1 %2").arg(err.code).arg(reason);
+        if (err.code > 0) return QString::number(err.code);
+        return reason;
+    }
     case LabelRole: {
         const auto &l = a.label.empty() ? a.displayName : a.label;
         return QString::fromStdString(l);
@@ -69,6 +79,7 @@ QHash<int, QByteArray> AccountsModel::roleNames() const
         {IsDefaultRole, "isDefault"},
         {EnabledRole, "enabled"},
         {RegistrationStateRole, "registrationState"},
+        {RegistrationErrorRole, "registrationError"},
         {LabelRole, "label"},
     };
 }

@@ -224,8 +224,19 @@ bool CallsController::ringing() const
 {
     if (!m_calls) return false;
     for (const auto &e : m_calls->snapshot()) {
+        // Inbound, pre-answer: the user needs to hear the ringtone so
+        // they know to pick up.
         if (e.direction == sip::CallDirection::Inbound
             && e.state == sip::CallState::Calling) {
+            return true;
+        }
+        // Outbound, while the remote is being alerted: play local ringback
+        // so the caller doesn't sit in silence. Once the remote answers
+        // (state moves to Confirmed) PJSIP's audio routing takes over and
+        // we stop the local tone.
+        if (e.direction == sip::CallDirection::Outbound
+            && (e.state == sip::CallState::Calling
+                || e.state == sip::CallState::EarlyMedia)) {
             return true;
         }
     }

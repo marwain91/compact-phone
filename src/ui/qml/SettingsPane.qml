@@ -84,8 +84,10 @@ Item {
 
             SettingsTab { text: qsTr("General") }
             SettingsTab { text: qsTr("Audio") }
+            // The former separate "Forward" tab is now the second card on
+            // the Calls tab — both are call-handling settings and the tab
+            // strip was getting crowded.
             SettingsTab { text: qsTr("Calls") }
-            SettingsTab { text: qsTr("Forward") }
             SettingsTab { text: qsTr("Advanced") }
         }
 
@@ -198,6 +200,7 @@ Item {
                                         font.pixelSize: Theme.fxs
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.alwaysOnTop
                                     onToggled: PhoneController.alwaysOnTop = checked
@@ -393,6 +396,7 @@ Item {
                                         font.pixelSize: Theme.fxs
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.ringtoneEnabled
                                     onToggled: PhoneController.ringtoneEnabled = checked
@@ -511,6 +515,7 @@ Item {
                                         font.pixelSize: Theme.fxs
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.dndEnabled
                                     onToggled: PhoneController.dndEnabled = checked
@@ -539,6 +544,7 @@ Item {
                                         font.pixelSize: Theme.fxs
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.autoAnswerEnabled
                                     onToggled: PhoneController.autoAnswerEnabled = checked
@@ -601,6 +607,7 @@ Item {
                                         font.pixelSize: Theme.fxs
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.autoRecordEnabled
                                     onToggled: PhoneController.autoRecordEnabled = checked
@@ -609,18 +616,9 @@ Item {
                         }
                     }
 
-                    Item { Layout.fillHeight: true }
-                }
-            }
-
-            // -------- Forwarding tab --------
-            ScrollView {
-                clip: true
-                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                ColumnLayout {
-                    width: parent.width
-                    spacing: Theme.s10
-
+                    // Forwarding card — moved here from the standalone
+                    // "Forward" tab. Keeps the two call-handling concerns
+                    // side-by-side on the same scroll surface.
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: cfwdCol.implicitHeight + Theme.s24
@@ -662,6 +660,7 @@ Item {
                                         font.pixelSize: Theme.fxs
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.cfwdAlwaysEnabled
                                     onToggled: PhoneController.cfwdAlwaysEnabled = checked
@@ -713,6 +712,7 @@ Item {
                                         font.pixelSize: Theme.fxs
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.cfwdBusyEnabled
                                     onToggled: PhoneController.cfwdBusyEnabled = checked
@@ -764,6 +764,7 @@ Item {
                                         font.pixelSize: Theme.fxs
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.cfwdNoAnswerEnabled
                                     onToggled: PhoneController.cfwdNoAnswerEnabled = checked
@@ -886,6 +887,7 @@ Item {
                                         Layout.fillWidth: true
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.enterpriseFeaturesEnabled
                                     onToggled: PhoneController.enterpriseFeaturesEnabled = checked
@@ -948,6 +950,7 @@ Item {
                                         Layout.fillWidth: true
                                     }
                                 }
+                                Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
                                     checked: PhoneController.crashReportingEnabled
                                     onToggled: PhoneController.crashReportingEnabled = checked

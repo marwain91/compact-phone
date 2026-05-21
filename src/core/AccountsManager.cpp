@@ -26,7 +26,12 @@ const char *transportScheme(Transport t)
     case Transport::Tcp: return ";transport=tcp";
     case Transport::Tls: return ";transport=tls";
     case Transport::Udp:
-    default:             return "";
+    default:
+        // Explicitly state UDP so PJSIP does not size-escalate to TCP for
+        // large requests (RFC 3261 §18.1.1) and so any cached non-UDP
+        // connection to the registrar isn't reused. The parameter also
+        // makes the chosen transport visible on the wire / in pcaps.
+        return ";transport=udp";
     }
 }
 
@@ -49,12 +54,17 @@ public:
     AccountId id = kInvalidAccountId;
     AccountsManager *owner = nullptr;
     std::atomic<RegistrationState> state{RegistrationState::Unregistered};
+    // Guarded by ownersMutex on read; written only from the PJSIP thread
+    // inside onRegState while the same mutex is held.
+    mutable std::mutex errMutex;
+    RegError lastError;
 
     void onRegState(pj::OnRegStateParam &prm) override
     {
         pj::AccountInfo info = getInfo();
-        spdlog::info("Account {} reg state: active={} code={}",
-                     id, info.regIsActive, static_cast<int>(prm.code));
+        spdlog::info("Account {} reg state: active={} code={} reason='{}'",
+                     id, info.regIsActive, static_cast<int>(prm.code),
+                     prm.reason);
         RegistrationState s;
         if (info.regIsActive && prm.code / 100 == 2) {
             s = RegistrationState::Registered;
@@ -64,6 +74,17 @@ public:
             s = RegistrationState::Unregistered;
         } else {
             s = RegistrationState::Failed;
+        }
+        {
+            std::lock_guard<std::mutex> lk(errMutex);
+            if (s == RegistrationState::Failed) {
+                lastError.code = static_cast<int>(prm.code);
+                lastError.reason = prm.reason;
+            } else if (s == RegistrationState::Registered) {
+                lastError = {};
+            }
+            // Registering / Unregistered preserve the previous error so the
+            // user can still read the reason while a retry is in flight.
         }
         state.store(s);
         if (owner && owner->m_cb) owner->m_cb(id, s);
@@ -213,6 +234,9 @@ AccountId AccountsManager::add(const Account &acc, const std::string &password)
     auto entry = std::make_unique<Entry>();
     entry->account = a;
     m_entries.push_back(std::move(entry));
+    // Seed the cache so the first registerAccount below doesn't go through
+    // the OS keychain (avoids an immediate ACL prompt right after add).
+    m_passwordCache[a.passwordRef] = password;
     if (a.enabled && a.registerOnStartup) registerAccount(a.id);
     return a.id;
 }
@@ -278,6 +302,7 @@ bool AccountsManager::remove(AccountId id)
         try { (*it)->impl->setRegistration(false); } catch (...) {}
     }
     m_keychain->erase((*it)->account.passwordRef);
+    m_passwordCache.erase((*it)->account.passwordRef);
     if (!deleteRow(id)) return false;
     m_entries.erase(it);
     return true;
@@ -455,6 +480,30 @@ bool AccountsManager::setEnabled(AccountId id, bool enabled)
     return true;
 }
 
+bool AccountsManager::setPassword(AccountId id, const std::string &password)
+{
+    auto it = std::find_if(m_entries.begin(), m_entries.end(),
+                           [id](const auto &e) { return e->account.id == id; });
+    if (it == m_entries.end()) return false;
+    auto &e = **it;
+    // Keep the same passwordRef so existing in-flight pj::AuthCredInfo
+    // references and the DB row don't need to change.
+    if (!m_keychain->set(e.account.passwordRef, password)) {
+        spdlog::error("setPassword: keychain set failed");
+        return false;
+    }
+    m_passwordCache[e.account.passwordRef] = password;
+    // Rebuild the PJSIP account so the new credentials take effect now.
+    const bool wasLive = e.impl != nullptr;
+    if (wasLive) {
+        unregisterAccount(id);
+    }
+    if (e.account.enabled && (wasLive || e.account.registerOnStartup)) {
+        registerAccount(id);
+    }
+    return true;
+}
+
 bool AccountsManager::registerAccount(AccountId id)
 {
     auto it = std::find_if(m_entries.begin(), m_entries.end(),
@@ -464,10 +513,21 @@ bool AccountsManager::registerAccount(AccountId id)
     if (!m_engine || !m_engine->isRunning()) return false;
     if (e.impl) return true; // already registered
 
-    const auto password = m_keychain->get(e.account.passwordRef);
-    if (!password) {
-        spdlog::error("registerAccount: keychain missing ref {}", e.account.passwordRef);
-        return false;
+    // In-memory cache short-circuits the macOS Keychain prompt on every
+    // subsequent registerAccount within the same session (network back,
+    // wake, account-enable toggle, etc).
+    std::string password;
+    if (auto cached = m_passwordCache.find(e.account.passwordRef);
+        cached != m_passwordCache.end()) {
+        password = cached->second;
+    } else {
+        auto fetched = m_keychain->get(e.account.passwordRef);
+        if (!fetched) {
+            spdlog::error("registerAccount: keychain missing ref {}", e.account.passwordRef);
+            return false;
+        }
+        password = *fetched;
+        m_passwordCache.emplace(e.account.passwordRef, password);
     }
 
     pj::AccountConfig acfg;
@@ -483,7 +543,7 @@ bool AccountsManager::registerAccount(AccountId id)
     const auto authUser = e.account.authUser.empty()
                               ? e.account.username
                               : e.account.authUser;
-    pj::AuthCredInfo cred("digest", "*", authUser, 0, *password);
+    pj::AuthCredInfo cred("digest", "*", authUser, 0, password);
     acfg.sipConfig.authCreds.push_back(cred);
 
     // Outbound proxy
@@ -665,6 +725,17 @@ RegistrationState AccountsManager::stateOf(AccountId id) const
         }
     }
     return RegistrationState::Unregistered;
+}
+
+RegError AccountsManager::lastRegErrorOf(AccountId id) const
+{
+    for (const auto &e : m_entries) {
+        if (e->account.id == id && e->impl) {
+            std::lock_guard<std::mutex> lk(e->impl->errMutex);
+            return e->impl->lastError;
+        }
+    }
+    return {};
 }
 
 void AccountsManager::setOnRegistrationStateChanged(

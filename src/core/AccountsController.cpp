@@ -61,11 +61,43 @@ AccountsController::AccountsController(sip::AccountsManager *accounts,
     pushNetworkAndCodecSettings();
     if (!m_accounts) return;
     m_accounts->setOnRegistrationStateChanged(
-        [this](sip::AccountId, sip::RegistrationState) {
-            QMetaObject::invokeMethod(this, [this] {
+        [this](sip::AccountId id, sip::RegistrationState s) {
+            // PJSIP thread — marshal everything to the Qt main thread,
+            // including the previous-state lookup, so m_lastState only
+            // mutates from one thread.
+            QMetaObject::invokeMethod(this, [this, id, s] {
+                const auto it = m_lastState.find(static_cast<int>(id));
+                const bool isNewFailure =
+                    s == sip::RegistrationState::Failed
+                    && (it == m_lastState.end() || it->second != s);
+                m_lastState[static_cast<int>(id)] = s;
                 refreshModel();
                 refreshRegisteredAccountCount();
                 emit activeAccountIdChanged();
+                if (isNewFailure && m_accounts) {
+                    const auto err = m_accounts->lastRegErrorOf(id);
+                    auto acc = m_accounts->find(id);
+                    QString label;
+                    if (acc) {
+                        label = QString::fromStdString(
+                            acc->label.empty() ? acc->displayName : acc->label);
+                    }
+                    QString detail;
+                    if (err.code > 0 && !err.reason.empty()) {
+                        detail = QStringLiteral("%1 %2").arg(err.code)
+                                     .arg(QString::fromStdString(err.reason));
+                    } else if (err.code > 0) {
+                        detail = QString::number(err.code);
+                    } else if (!err.reason.empty()) {
+                        detail = QString::fromStdString(err.reason);
+                    } else {
+                        detail = tr("transport error");
+                    }
+                    const QString msg = label.isEmpty()
+                        ? tr("Registration failed: %1").arg(detail)
+                        : tr("%1 — registration failed: %2").arg(label, detail);
+                    emit registrationFailed(msg);
+                }
             }, Qt::QueuedConnection);
         });
 }
@@ -184,13 +216,21 @@ bool AccountsController::updateAccount(int accountId, const QVariantMap &params)
     applyParams(edited, params);
     if (edited.authUser.empty()) edited.authUser = edited.username;
     const bool ok = m_accounts->update(edited);
-    if (ok) {
-        refreshModel();
-        refreshRegisteredAccountCount();
-        pushNetworkAndCodecSettings();
-        emit activeAccountIdChanged();
+    if (!ok) return false;
+    // Password is sent only when the user actually retyped it in the
+    // dialog. The update() call above already re-registered the account;
+    // setPassword reruns that cycle with the new credentials so the next
+    // REGISTER goes out with them.
+    const QString newPassword = params.value(QStringLiteral("password")).toString();
+    if (!newPassword.isEmpty()) {
+        m_accounts->setPassword(static_cast<sip::AccountId>(accountId),
+                                newPassword.toStdString());
     }
-    return ok;
+    refreshModel();
+    refreshRegisteredAccountCount();
+    pushNetworkAndCodecSettings();
+    emit activeAccountIdChanged();
+    return true;
 }
 
 bool AccountsController::setDefaultAccount(int accountId)

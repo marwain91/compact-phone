@@ -23,6 +23,7 @@ public:
         IsDefaultRole,
         EnabledRole,
         RegistrationStateRole,
+        RegistrationErrorRole,
         LabelRole,
     };
 

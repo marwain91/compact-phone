@@ -17,6 +17,7 @@ ColumnLayout {
             font.weight: Font.Bold
             font.letterSpacing: -0.4
             Layout.fillWidth: true
+            elide: Text.ElideRight
         }
         AppButton {
             variant: "primary"
@@ -43,7 +44,11 @@ ColumnLayout {
 
         delegate: Rectangle {
             width: list.width
-            height: 48
+            // Multi-line: row height grows with content. Users typically
+            // have 1-2 accounts, so we'd rather show the SIP URI in full
+            // than crunch it into an elided one-liner. A 56 px floor keeps
+            // a single-line row from looking weirdly short.
+            height: Math.max(56, row.implicitHeight + Theme.s12 * 2)
             radius: Theme.r10
             color: hoverArea.containsMouse ? Theme.surfaceHi : Theme.surface
             border.color: Theme.border
@@ -52,12 +57,17 @@ ColumnLayout {
             MouseArea { id: hoverArea; anchors.fill: parent; hoverEnabled: true }
 
             RowLayout {
-                anchors.fill: parent
+                id: row
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: Theme.s12
                 anchors.rightMargin: Theme.s6
                 spacing: Theme.s10
 
                 Rectangle {
+                    id: statusDot
+                    Layout.alignment: Qt.AlignTop
                     width: 30; height: 30; radius: 15
                     color: registrationState === "registered" ? Theme.successSoft
                           : registrationState === "registering" ? Theme.warningSoft
@@ -77,35 +87,87 @@ ColumnLayout {
                             NumberAnimation { from: 0.3; to: 1.0; duration: 700 }
                         }
                     }
+                    MouseArea {
+                        id: dotHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
+                    ToolTip.visible: dotHover.containsMouse
+                    ToolTip.delay: 400
+                    ToolTip.text: registrationState === "registered" ? qsTr("Registered")
+                                : registrationState === "registering" ? qsTr("Registering…")
+                                : registrationState === "failed"
+                                    ? (registrationError && registrationError.length > 0
+                                       ? qsTr("Registration failed: %1").arg(registrationError)
+                                       : qsTr("Registration failed"))
+                                : qsTr("Not registered")
                 }
 
+                // Three single-line stanzas: title → identity → metadata.
+                // The title gets the full first line so it never competes
+                // with the "default" tag. Default-account status moves to
+                // the third (metadata) line where it belongs.
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 0
-                    RowLayout {
-                        spacing: Theme.s6
-                        Text {
-                            text: (label && label.length > 0) ? label : displayName
-                            color: Theme.textPrimary
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.flg
-                            font.weight: Font.DemiBold
-                        }
-                        StatusBadge {
-                            visible: isDefault
-                            label: qsTr("default")
-                            status: "accent"
-                        }
+                    Layout.minimumWidth: 0
+                    spacing: 2
+                    Text {
+                        Layout.fillWidth: true
+                        text: (label && label.length > 0) ? label : displayName
+                        color: Theme.textPrimary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.flg
+                        font.weight: Font.DemiBold
+                        elide: Text.ElideRight
+                        wrapMode: Text.NoWrap
                     }
                     Text {
-                        text: username + "@" + domain + "  •  " + transport.toUpperCase()
+                        Layout.fillWidth: true
+                        text: username + "@" + domain
                         color: Theme.textTertiary
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fxs
+                        elide: Text.ElideRight
+                        wrapMode: Text.NoWrap
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.s6
+                        Text {
+                            text: transport.toUpperCase()
+                            color: Theme.textTertiary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fxs
+                            font.weight: Font.Medium
+                            font.letterSpacing: 0.5
+                        }
+                        Text {
+                            visible: isDefault
+                            text: "·  " + qsTr("DEFAULT")
+                            color: Theme.accent
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fxs
+                            font.weight: Font.Medium
+                            font.letterSpacing: 0.5
+                        }
+                        Text {
+                            visible: registrationState === "failed"
+                                     && registrationError && registrationError.length > 0
+                            Layout.fillWidth: true
+                            text: "·  " + (registrationError || "")
+                            color: Theme.danger
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fxs
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                        }
+                        Item { Layout.fillWidth: true }
                     }
                 }
 
                 IconButton {
+                    Layout.alignment: Qt.AlignTop
                     visible: !isDefault
                     iconPath: Icons.star
                     diameter: 26
@@ -117,6 +179,7 @@ ColumnLayout {
                     onClicked: PhoneController.setDefaultAccount(accountId)
                 }
                 AppSwitch {
+                    Layout.alignment: Qt.AlignTop
                     checked: model.enabled
                     ToolTip.visible: hovered
                     ToolTip.delay: 400
@@ -125,6 +188,7 @@ ColumnLayout {
                 }
                 IconButton {
                     id: moreBtn
+                    Layout.alignment: Qt.AlignTop
                     iconPath: Icons.moreVertical
                     diameter: 26
                     iconSize: 14

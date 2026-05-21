@@ -38,6 +38,18 @@ bool SipEngine::start(int sipPort)
         udpCfg.port = static_cast<unsigned>(sipPort);
         m_endpoint->transportCreate(PJSIP_TRANSPORT_UDP, udpCfg);
 
+        // TCP transport for transport=tcp accounts. Also used as the
+        // fallback when a UDP request exceeds 1300 bytes (RFC 3261
+        // §18.1.1) — without this, PJSIP would silently drop oversized
+        // REGISTER/INVITE attempts on TCP-only PBXes.
+        try {
+            pj::TransportConfig tcpCfg;
+            tcpCfg.port = 0;
+            m_endpoint->transportCreate(PJSIP_TRANSPORT_TCP, tcpCfg);
+        } catch (const pj::Error &e) {
+            spdlog::warn("SipEngine: TCP transport create failed: {}", e.info());
+        }
+
         // TLS transport for sips:/transport=tls accounts. Per-account TLS
         // verification policy is enforced on pj::AccountConfig::sipConfig.tlsConfig;
         // the transport-level tlsConfig here is the unbound default.
