@@ -202,7 +202,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\p
-          key: pjsip-windows-2.17-v2
+          # v3: bumped after switching from /MT (Release-Static default) to
+          # /MD via vcxproj patch, so the binary ABI is incompatible with
+          # the v2 cache. Bump the suffix whenever the PJSIP build flags
+          # change in a way that affects symbol/CRT linkage.
+          key: pjsip-windows-2.17-v3-md
           save-always: true
 
       - name: Add msbuild to PATH
@@ -228,6 +232,20 @@ jobs:
           $cfg = "pjproject-2.17/pjlib/include/pj/config_site.h"
           "#pragma once`n#define PJSUA_MAX_CALLS 32`n" `
               | Set-Content -NoNewline -Encoding ascii $cfg
+
+          # PJSIP's Release-Static config hardcodes
+          #   <RuntimeLibrary>MultiThreaded</RuntimeLibrary>  (= /MT)
+          # in every .vcxproj. Qt + our code link with /MD (dynamic CRT,
+          # vcpkg's default), and MSVC refuses to mix the two — link
+          # fails with LNK2038 "RuntimeLibrary mismatch". Patch all the
+          # PJSIP vcxproj files to MultiThreadedDLL (/MD) before building
+          # so the static .lib outputs are CRT-compatible with our exe.
+          Get-ChildItem pjproject-2.17 -Recurse -Filter *.vcxproj | ForEach-Object {
+              (Get-Content $_.FullName -Raw) `
+                  -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', `
+                           '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>' `
+                  | Set-Content -NoNewline $_.FullName
+          }
 
           # Build static libs, Release config, x64.  PJSIP ships a VS2015
           # solution (.sln); modern msbuild auto-retargets to the runner's
