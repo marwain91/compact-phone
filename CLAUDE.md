@@ -89,7 +89,7 @@ PJSIP is not in vcpkg upstream. We build it manually:
 Watch out for: a stale `windows-pjsip` feature in `vcpkg.json` (now
 removed) referenced a non-existent vcpkg port. Don't add it back.
 
-### `libb2` needs `autoconf-archive` — both in the dev container and on macOS/Linux CI runners
+### `libb2` needs `autoconf-archive` — in every environment that runs vcpkg cold
 
 vcpkg's `libb2` portfile runs `autoreconf`, which needs `AX_*` m4
 macros that ship in the `autoconf-archive` package — NOT the base
@@ -97,10 +97,16 @@ macros that ship in the `autoconf-archive` package — NOT the base
 
 - `tools/dev/Dockerfile` apt-installs it
 - `.github/workflows/ci.yml`'s macOS job `brew install`s it
+- `.github/workflows/release-macos.yml`'s `Install build deps` step
+  also needs it (PR #22 added it after the first release tag failed
+  cold on this exact thing — `ci.yml` had it but `release-macos.yml`
+  had drifted)
 - Linux CI job builds the dev container so it inherits the Dockerfile fix
 
 If you add a new build environment, install `autoconf-archive` or
-expect libb2 to fail on first cold install.
+expect libb2 to fail on first cold install. **If you add a new
+release workflow, mirror this brew/apt install** — release workflows
+don't inherit from `ci.yml` and drift is easy.
 
 ### gitleaks-action v2 needs `GITHUB_TOKEN`, not `GH_TOKEN`
 
@@ -187,6 +193,40 @@ target_compile_definitions(PJSIP::PJSIP INTERFACE
 
 PJSIP then treats its internal strings as ANSI regardless of the
 host app's Unicode posture. Qt is unaffected (still uses QString).
+
+### PJSIP on Windows — must build with `/MD`, not the Release-Static default `/MT`
+
+PJSIP's `pjproject-vs14.sln` `Release-Static` configuration hardcodes
+`<RuntimeLibrary>MultiThreaded</RuntimeLibrary>` (= `/MT`, static CRT)
+in every `.vcxproj`. Qt + our code link against `/MD` (dynamic CRT —
+vcpkg's default, also MSVC's modern default). MSVC refuses to mix
+the two — link fails with:
+
+```
+pjsua2-lib-...-Release-Static.lib(types.obj) : error LNK2038:
+  mismatch detected for 'RuntimeLibrary': value 'MT_StaticRelease'
+  doesn't match value 'MD_DynamicRelease' in test_register_udp.cpp.obj
+```
+
+`msbuild /p:RuntimeLibrary=MultiThreadedDLL` does NOT fix it because
+PJSIP's vcxproj sets the property explicitly per ItemDefinitionGroup,
+which overrides command-line globals. Fix: patch all the `.vcxproj`
+files in-place before invoking msbuild:
+
+```pwsh
+Get-ChildItem pjproject-2.17 -Recurse -Filter *.vcxproj | ForEach-Object {
+    (Get-Content $_.FullName -Raw) `
+        -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', `
+                 '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>' `
+        | Set-Content -NoNewline $_.FullName
+}
+```
+
+See `.github/workflows/ci.yml`'s `Build PJSIP (at C:\p)` step.
+
+Knock-on: bump the PJSIP cache key (e.g. `-v3-md`) whenever you
+change build flags that affect symbol/CRT linkage — otherwise the
+old cache shadows the fix.
 
 ### `actions/cache@v4` does NOT save on job failure by default
 
@@ -275,22 +315,70 @@ matches exactly, so version-stamped names would 404 the landing-page
 buttons after every release. See `docs/download-urls.md` for the full
 URL list and HTML snippets MyWebs uses.
 
-### Linux unit test segfaults — pjsua2 singleton + Keychain env-fragility
+### CI on `main` push is redundant with PR CI — don't add it back
 
-`SipEngineLifecycle.*`, `KeychainFile.*`, and `AccountsManagerUpdate*`
-all segfault in the headless Linux dev container. Root cause not yet
-diagnosed — likely pjsua2's singleton Endpoint state leaking across
-sequential gtest cases that each construct + destroy `pj::Endpoint`,
-and KeychainFile being downstream of that broken state in the same
-test binary.
+`ci.yml`'s `on:` is `pull_request:` only. Earlier it also had
+`push: branches: [main]` but that was removed in #24: squash-merge +
+protected main + required PR CI means every merge commit's source is
+identical to what PR CI already validated. Running CI again on every
+main push just burns ~30-60 min of macOS/Windows runner time we need
+free for tag-triggered release builds — and macOS pool contention is
+real (see next note).
 
-CI workaround: `ctest --exclude-regex
-'SipEngineLifecycle|KeychainFile|AccountsManagerUpdate'` so the other
-137 tests give a clean signal. macOS passes all 153 tests so the
-issue is Linux-headless-only. Real fix is the next investigation —
-probably a gtest fixture that initializes pjsua2 once per process,
-or moving those suites to integration-tests that only run on a real
-desktop.
+Re-add the push trigger only if we ever take in non-squash merges
+or run CI-bypassing admin merges.
+
+### GitHub-hosted `macos-14` pool contention — bump to `macos-15`
+
+Free-tier `macos-14` (Sonoma, Apple Silicon) runners are heavily
+oversubscribed across all of public-repo GitHub Actions. Multi-hour
+queue waits are normal during EU/US workday overlap; release jobs
+have sat queued 3+ hours before pickup.
+
+`macos-15` (Sequoia) is also arm64 / Apple Silicon, sits in a
+separate, less-contended runner pool. Both CI and `release-macos.yml`
+target `macos-15` since #21. Trade-off: vcpkg's content-addressed
+binary cache may need a one-time cold rebuild if the macOS 15 SDK
+changes any port's ABI hash.
+
+Don't switch to `macos-13` (Intel) — we ship arm64 DMGs, and
+building x86_64 there means a separate `lipo`-and-merge step to
+produce a universal binary. Not worth it just to reduce queue time.
+
+### Linux x86_64 unit test segfaults — OpenSSL 3.0.2 `EVP_PKEY_HKDF` bug + pjsua2 audio init
+
+Two distinct root causes, both Linux-x86_64-only (arm64 dev container
+on Apple Silicon never reproduces — different libcrypto patch level).
+
+**Cause 1 — OpenSSL 3.0.2 provider registry bug** (FIXED in #23/#25).
+`KeychainFile.*`, `KeychainFactoryTest.*`, `AccountsManagerUpdateTest.*`
+all SIGSEGV inside `EVP_KEYMGMT_names_do_all` when called via the
+legacy `EVP_PKEY_HKDF` → `EVP_PKEY_derive_init` path. Ubuntu 22.04's
+`libcrypto.so.3` is OpenSSL 3.0.2 which has a known race/init bug in
+that code path. Fix: use the modern `EVP_KDF_fetch("HKDF", ...)` /
+`EVP_KDF_derive` API instead — same crypto output (HKDF-SHA256), but
+doesn't traverse the buggy keymgmt walker. See
+`src/core/platform/Keychain_file.cpp::deriveKey`.
+
+Diagnostic that pinpointed it: add `gdb` to `tools/dev/Dockerfile`
+(see `apt-get install -y ... gdb`), then run failing tests under
+`gdb --batch -ex run -ex 'bt full' -ex 'info sharedlibrary'`. The
+backtrace immediately showed `libcrypto.so.3` frames — Qt and our
+code had nothing wrong.
+
+**Cause 2 — pjsua2 audio init** (still open).
+`SipEngineLifecycle.*` still SIGSEGVs because pjsua2's audio backend
+init crashes even with the null-dev fallback in the headless
+container. CI workaround: `ctest --exclude-regex 'SipEngineLifecycle'`
+in `ci.yml`. Real fix probably needs either a gtest fixture that
+initialises pjsua2 once per process, or moving those tests to the
+integration suite that only runs on a real desktop.
+
+**Why local arm64 dev container doesn't reproduce either**: the
+Apple-Silicon Debian/Ubuntu base ships a newer libcrypto patch, and
+the audio device enumeration on Docker-for-Mac apparently doesn't
+trip the pjsua2 init path the same way as on the GitHub x86_64
+runner. So "tests pass on my machine" is not signal for these.
 
 ## Branch + PR conventions
 
