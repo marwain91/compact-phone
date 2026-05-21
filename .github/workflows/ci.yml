@@ -2,6 +2,27 @@ name: CI
 
 on:
   pull_request:
+    # Docs-only changes don't need a 30-60 min platform-matrix build.
+    # CLAUDE.md / docs/ / web/ / LICENSE / .gitignore are pure text and
+    # cannot break the code, so skip CI entirely for PRs that change
+    # only these. A mixed PR (e.g. .cpp + .md) still triggers CI because
+    # at least one path is not ignored.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'web/**'
+      - 'LICENSE'
+      - '.gitignore'
+
+# Auto-cancel older runs on the same PR when a new push arrives. Without
+# this, every force-push during an iteration stacks another full
+# platform-matrix build on top of the still-queued previous one — easy
+# to end up with 4-5 redundant runs gated on macOS runner pickup. The
+# concurrency group is keyed on workflow + ref (= refs/pull/N/merge for
+# PRs) so only same-PR queues are collapsed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-linux-dev-container:
