@@ -27,6 +27,8 @@ TEST(AccountTypes, SrtpModeRoundTripsKnownValuesAndDefaultsUnknownToOptional)
               compactphone::sip::SrtpMode::Optional);
     EXPECT_EQ(compactphone::sip::srtpModeFromString("required"),
               compactphone::sip::SrtpMode::Required);
+    EXPECT_EQ(compactphone::sip::srtpModeFromString("mandatory"),
+              compactphone::sip::SrtpMode::Required);
     EXPECT_EQ(compactphone::sip::srtpModeFromString("bogus"),
               compactphone::sip::SrtpMode::Optional);
 }

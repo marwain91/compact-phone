@@ -28,13 +28,25 @@ struct BootConfig {
     std::optional<QString> logLevel;
     std::optional<QString> logFile;
 
+    // Headless SIP test mode. Used by compactphone-headless; ignored by the
+    // GUI executable except for shared --help/parse support.
+    std::optional<QString> headlessCallUri;
+    std::optional<bool> headlessAutoAnswer;
+    std::optional<QString> headlessPlayFile;
+    std::optional<bool> headlessLoopPlayFile;
+    std::optional<int> headlessDurationSec;
+    std::optional<bool> headlessExitAfterCall;
+
     // True if --replace-account was passed; existing accounts matching
     // (username, domain) are updated instead of duplicated.
     bool replaceAccounts = false;
 
     bool empty() const {
         return accounts.isEmpty() && !autoAnswer && !dnd && !minimizeToTray
-            && !theme && !logLevel && !logFile;
+            && !theme && !logLevel && !logFile && !headlessCallUri
+            && !headlessAutoAnswer && !headlessPlayFile
+            && !headlessLoopPlayFile && !headlessDurationSec
+            && !headlessExitAfterCall;
     }
 };
 

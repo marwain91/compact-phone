@@ -5,6 +5,8 @@
 #include <pjsua-lib/pjsua.h>
 #include <spdlog/spdlog.h>
 
+#include <QCoreApplication>
+
 #include <cctype>
 #include <vector>
 
@@ -28,7 +30,9 @@ bool SipEngine::start(int sipPort)
 
         pj::EpConfig epCfg;
         epCfg.uaConfig.userAgent = "CompactPhone/0.1";
-        epCfg.uaConfig.maxCalls = 32;
+        epCfg.uaConfig.maxCalls = PJSUA_MAX_CALLS > 1
+            ? PJSUA_MAX_CALLS - 1
+            : PJSUA_MAX_CALLS;
         epCfg.logConfig.level = 4;
         epCfg.logConfig.consoleLevel = 4;
         epCfg.logConfig.writer = spdlogPjsipWriter();
@@ -77,16 +81,26 @@ bool SipEngine::start(int sipPort)
         // desktops PJSIP picks the OS default; we leave it alone.
         try {
             auto &mgr = m_endpoint->audDevManager();
-            const auto devs = mgr.enumDev2();
-            bool hasReal = false;
-            for (const auto &d : devs) {
-                if (d.inputCount > 0 || d.outputCount > 0) { hasReal = true; break; }
-            }
-            if (!hasReal) {
-                spdlog::info("SipEngine: no real audio device, using null dev");
+            auto *app = QCoreApplication::instance();
+            const bool headless = !app || !app->inherits("QGuiApplication");
+            if (headless) {
+                spdlog::info("SipEngine: headless process, using null audio dev");
                 mgr.setNullDev();
             } else {
-                spdlog::info("SipEngine: using OS default audio device");
+                const auto devs = mgr.enumDev2();
+                bool hasReal = false;
+                for (const auto &d : devs) {
+                    if (d.inputCount > 0 || d.outputCount > 0) {
+                        hasReal = true;
+                        break;
+                    }
+                }
+                if (hasReal) {
+                    spdlog::info("SipEngine: using OS default audio device");
+                } else {
+                    spdlog::info("SipEngine: no real audio device, using null dev");
+                    mgr.setNullDev();
+                }
             }
         } catch (const pj::Error &e) {
             spdlog::warn("SipEngine: audio dev probe failed: {}", e.info());

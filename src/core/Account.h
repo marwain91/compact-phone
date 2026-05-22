@@ -21,6 +21,7 @@ struct Account {
     std::string username;
     std::string domain;
     std::string authUser;       // defaults to username if empty
+    std::string authRealm;      // defaults to "*" when empty
     std::string passwordRef;    // opaque keychain reference
     Transport transport = Transport::Udp;
     std::string proxy;

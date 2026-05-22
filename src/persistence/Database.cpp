@@ -16,6 +16,7 @@ CREATE TABLE accounts (
     username TEXT NOT NULL,
     domain TEXT NOT NULL,
     auth_user TEXT,
+    auth_realm TEXT,
     password_ref TEXT NOT NULL,
     transport TEXT NOT NULL DEFAULT 'udp',
     proxy TEXT,
@@ -102,7 +103,7 @@ CREATE INDEX idx_watched_lines_order ON watched_lines(sort_order, id);
 const char *kMigrations[] = {kMigration001, kMigration002, kMigration003,
                              kMigration004, kMigration005};
 constexpr int kSqlMigrationCount = sizeof(kMigrations) / sizeof(kMigrations[0]);
-constexpr int kLatestVersion = 6;
+constexpr int kLatestVersion = 7;
 
 bool columnExists(sqlite3 *db, const char *table, const char *column)
 {
@@ -144,6 +145,8 @@ bool migrate004AccountColumns(sqlite3 *db)
 {
     return addColumnIfMissing(db, "accounts", "label",
                               "ALTER TABLE accounts ADD COLUMN label TEXT NOT NULL DEFAULT ''")
+        && addColumnIfMissing(db, "accounts", "auth_realm",
+                              "ALTER TABLE accounts ADD COLUMN auth_realm TEXT")
         && addColumnIfMissing(db, "accounts", "public_address",
                               "ALTER TABLE accounts ADD COLUMN public_address TEXT")
         && addColumnIfMissing(db, "accounts", "codecs",

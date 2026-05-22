@@ -11,7 +11,10 @@
 #include <unordered_map>
 #include <vector>
 
-namespace pj { class AudioMediaRecorder; }
+namespace pj {
+class AudioMediaPlayer;
+class AudioMediaRecorder;
+}
 
 namespace compactphone::sip {
 
@@ -72,6 +75,12 @@ public:
     bool startRecording(CallId id, const std::string &outputPath);
     bool stopRecording(CallId id);
     bool isRecording(CallId id) const;
+
+    // Transmit a WAV file into the call. PJSIP loops file players by default;
+    // pass loop=false to play once. Returns false until call media is active.
+    bool playAudioFile(CallId id, const std::string &path, bool loop);
+    bool stopAudioFile(CallId id);
+    bool isPlayingAudioFile(CallId id) const;
 
     // Send REFER. Original call self-disconnects on transfer success.
     bool blindTransfer(CallId id, const std::string &targetUri);
@@ -161,6 +170,8 @@ private:
     // destroyed when the call ends or stopRecording is called).
     std::unordered_map<CallId, std::unique_ptr<pj::AudioMediaRecorder>>
         m_recorders;
+    std::unordered_map<CallId, std::unique_ptr<pj::AudioMediaPlayer>>
+        m_players;
     std::function<void(CallState)> m_cb;
     std::function<void(CallId, CallState)> m_eventCb;
     CallId m_nextId = 1;

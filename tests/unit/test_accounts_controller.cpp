@@ -25,6 +25,7 @@ TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
     params["displayName"] = "Jane Agent";
     params["username"] = "1001";
     params["domain"] = "pbx.example.com";
+    params["authRealm"] = "office";
     params["proxy"] = "proxy.example.com";
     params["stunServer"] = "stun.example.com";
     params["publicAddress"] = "203.0.113.10";
@@ -40,6 +41,9 @@ TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
     params["srtpMode"] = "required";
     params["allowUntrustedCert"] = true;
     params["dtmfMethod"] = "info";
+    params["enabled"] = false;
+    params["isDefault"] = true;
+    params["sortOrder"] = 7;
     params["password"] = "secret";
 
     const auto id = controller.addAccount(params);
@@ -52,6 +56,7 @@ TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
     EXPECT_EQ(snapshot["username"].toString(), QStringLiteral("1001"));
     EXPECT_EQ(snapshot["authUser"].toString(), QStringLiteral("1001"));
     EXPECT_EQ(snapshot["domain"].toString(), QStringLiteral("pbx.example.com"));
+    EXPECT_EQ(snapshot["authRealm"].toString(), QStringLiteral("office"));
     EXPECT_EQ(snapshot["proxy"].toString(), QStringLiteral("proxy.example.com"));
     EXPECT_EQ(snapshot["stunServer"].toString(), QStringLiteral("stun.example.com"));
     EXPECT_EQ(snapshot["publicAddress"].toString(), QStringLiteral("203.0.113.10"));
@@ -67,6 +72,9 @@ TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
     EXPECT_EQ(snapshot["srtpMode"].toString(), QStringLiteral("required"));
     EXPECT_TRUE(snapshot["allowUntrustedCert"].toBool());
     EXPECT_EQ(snapshot["dtmfMethod"].toString(), QStringLiteral("info"));
+    EXPECT_FALSE(snapshot["enabled"].toBool());
+    EXPECT_TRUE(snapshot["isDefault"].toBool());
+    EXPECT_EQ(snapshot["sortOrder"].toInt(), 7);
     EXPECT_EQ(controller.activeAccountId(), -1);
 }
 
