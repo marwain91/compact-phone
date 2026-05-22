@@ -14,7 +14,7 @@ TEST(KeychainFactoryTest, ProducesAWorkingBackend)
     const std::string fallback =
         QDir(tmp.path()).filePath("creds.enc").toStdString();
 
-    auto kc = platform::makeKeychain(fallback);
+    auto kc = platform::makeKeychain(fallback, /*forceFile=*/true);
     ASSERT_NE(kc.get(), nullptr);
 
     EXPECT_TRUE(kc->set("test-ref", "hunter2"));

@@ -11,7 +11,7 @@ services:
       LC_ALL: C.UTF-8
     volumes:
       - ../..:/workspace
-      - vcpkg-archives:/root/.cache/vcpkg
+      - ${VCPKG_ARCHIVES_DIR:-vcpkg-archives}:/root/.cache/vcpkg
     command: sleep infinity
     tty: true
     stdin_open: true

@@ -28,8 +28,23 @@ jobs:
   build-linux-dev-container:
     name: Linux dev container build + unit tests
     runs-on: ubuntu-22.04
+    env:
+      VCPKG_ARCHIVES_DIR: ${{ github.workspace }}/.vcpkg-cache
     steps:
       - uses: actions/checkout@v4
+
+      - name: Prepare vcpkg binary cache
+        run: mkdir -p "$VCPKG_ARCHIVES_DIR"
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-linux-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}
+          restore-keys: |
+            vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-
+            vcpkg-linux-${{ runner.os }}-
 
       - name: Build dev image
         run: docker compose -f tools/dev/docker-compose.yml build dev
@@ -101,7 +116,7 @@ jobs:
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash -c 'mkdir -p /workspace/vcpkg-logs && \
-              find /opt/vcpkg/buildtrees -maxdepth 2 -name "*.log" -size -2M \
+              find /opt/vcpkg/buildtrees -maxdepth 2 -name "*.log" -size -50M \
                 -exec cp --parents {} /workspace/vcpkg-logs/ \;' || true
       - name: Upload vcpkg logs
         if: failure()
@@ -110,6 +125,22 @@ jobs:
           name: vcpkg-logs-linux
           path: vcpkg-logs/
           if-no-files-found: ignore
+
+      - name: Save vcpkg binary cache
+        if: success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      - name: Save partial vcpkg binary cache
+        if: failure()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
 # macOS + Windows cross-platform builds moved to .github/workflows/
 # platform-matrix.yml — that workflow is triggered manually (workflow_
