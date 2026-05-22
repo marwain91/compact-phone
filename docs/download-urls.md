@@ -12,12 +12,14 @@ asset of that name on the most recent published release.
 | Platform | URL |
 |---|---|
 | macOS (DMG) | `https://github.com/marwain91/compact-phone/releases/latest/download/Compact-Phone-macOS.dmg` |
+| Linux (AppImage) | `https://github.com/marwain91/compact-phone/releases/latest/download/Compact-Phone-Linux-x86_64.AppImage` |
 | Windows (MSI) | `https://github.com/marwain91/compact-phone/releases/latest/download/Compact-Phone-Windows.msi` |
 | macOS appcast (auto-update feed) | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-macos.xml` |
 | Windows appcast | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-windows.xml` *(once PR #7 lands)* |
 
-The macOS appcast already ships. The Windows MSI + Windows appcast wait
-on the in-flight Windows PJSIP build work.
+The macOS DMG + appcast already ship. Linux AppImage produced from
+release-linux.yml. The Windows MSI + Windows appcast wait on the
+in-flight Windows PJSIP build work.
 
 ## Landing-page integration (MyWebs side)
 
@@ -29,6 +31,10 @@ Windows" buttons should point at the URLs above. Examples:
 <a href="https://github.com/marwain91/compact-phone/releases/latest/download/Compact-Phone-macOS.dmg"
    class="download-button">
    Download for macOS
+</a>
+<a href="https://github.com/marwain91/compact-phone/releases/latest/download/Compact-Phone-Linux-x86_64.AppImage"
+   class="download-button">
+   Download for Linux
 </a>
 <a href="https://github.com/marwain91/compact-phone/releases/latest/download/Compact-Phone-Windows.msi"
    class="download-button">

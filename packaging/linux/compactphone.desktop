@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Compact Phone
+GenericName=SIP Softphone
+Comment=Minimal SIP softphone for desktop
+Exec=compactphone
+Icon=compactphone
+Categories=Network;Telephony;
+StartupWMClass=Compact Phone
+Terminal=false
+StartupNotify=true
+Keywords=sip;voip;phone;softphone;
