@@ -79,127 +79,14 @@ jobs:
           path: vcpkg-logs/
           if-no-files-found: ignore
 
-  build-macos:
-    name: macOS native build
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install build deps
-        # autoconf-archive ships the m4 macros vcpkg's libb2 port needs
-        # for autoreconf; without it cold builds fail. Mirrors the same
-        # fix in tools/dev/Dockerfile for the Linux dev container.
-        run: brew install cmake ninja pkg-config autoconf autoconf-archive automake libtool
-
-      - name: Cache vcpkg
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/vcpkg
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json') }}
-
-      - name: Setup vcpkg
-        run: |
-          if [ ! -d vcpkg ]; then
-            git clone https://github.com/microsoft/vcpkg.git
-            ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          fi
-          echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $GITHUB_ENV
-
-      - name: Build PJSIP
-        run: |
-          curl -sL https://github.com/pjsip/pjproject/archive/refs/tags/2.17.tar.gz | tar -xz
-          cd pjproject-2.17
-          ./aconfigure --prefix=$HOME/pjproject \
-            --disable-shared --enable-static --with-ssl=yes \
-            --disable-video --disable-libwebrtc --disable-libyuv \
-            --disable-opencore-amr --disable-bcg729 --disable-sdl \
-            --disable-ffmpeg --disable-v4l2 --disable-openh264
-          make dep && make -j$(sysctl -n hw.ncpu) && make install
-          echo "PKG_CONFIG_PATH=$HOME/pjproject/lib/pkgconfig" >> $GITHUB_ENV
-
-      - name: Configure
-        run: cmake --preset macos
-
-      - name: Build
-        run: cmake --build --preset macos
-
-      - name: Run unit tests
-        working-directory: build/macos
-        run: ctest --output-on-failure -L unit
-
-  build-windows:
-    name: Windows native build + unsigned MSI
-    runs-on: windows-2022
-    # The windows-pjsip vcpkg feature references a `pjsip` port that
-    # does not exist in vcpkg upstream — this job has never produced a
-    # working MSI. Continuing on error so the failure stays visible in
-    # CI without blocking PR merges. Re-enable strict mode after the
-    # Windows PJSIP integration is sorted; see the project backlog.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache vcpkg
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/vcpkg
-          key: vcpkg-windows-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
-
-      - name: Setup vcpkg
-        shell: pwsh
-        run: |
-          if (-not (Test-Path vcpkg)) {
-            git clone https://github.com/microsoft/vcpkg.git
-            .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-          }
-          "VCPKG_ROOT=$pwd/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Install WiX 4
-        shell: pwsh
-        run: dotnet tool install --global wix
-
-      - name: Configure (PJSIP via vcpkg)
-        shell: pwsh
-        run: cmake --preset windows -DVCPKG_MANIFEST_FEATURES="windows-pjsip"
-
-      - name: Build
-        shell: pwsh
-        run: cmake --build --preset windows
-
-      - name: Run unit tests
-        working-directory: build/windows
-        shell: pwsh
-        run: ctest --output-on-failure -L unit
-
-      - name: Stage runtime (windeployqt)
-        shell: pwsh
-        run: |
-          $stage = "build\windows\stage"
-          New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item build\windows\src\compactphone.exe $stage
-          $deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" `
-              -Path vcpkg | Select-Object -First 1
-          if ($deploy) {
-            & $deploy.FullName --qmldir src\ui\qml --release `
-                --no-translations --no-system-d3d-compiler `
-                "$stage\compactphone.exe"
-          } else {
-            Write-Warning "windeployqt.exe not found; MSI will be missing Qt runtime"
-          }
-
-      - name: Build unsigned MSI
-        shell: pwsh
-        run: |
-          $version = (Select-String -Path CMakeLists.txt `
-              -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches.Groups[1].Value
-          New-Item -ItemType Directory -Path dist -Force | Out-Null
-          wix build packaging\windows\installer.wxs -arch x64 `
-              -d Version=$version `
-              -d StageDir=build\windows\stage `
-              -out "dist\compactphone-$version-unsigned.msi"
-
-      - name: Upload MSI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: compactphone-msi-unsigned
-          path: dist/*.msi
+# macOS + Windows cross-platform builds moved to .github/workflows/
+# platform-matrix.yml — that workflow is triggered manually (workflow_
+# _dispatch) when a PR touches cross-platform code (PJSIP / Keychain /
+# packaging / FindPJSIP.cmake) and we want pre-merge cross-platform
+# verification. Tag pushes go directly to release-{macos,windows}.yml
+# which also handle signing + notarisation + publish.
+#
+# Routine PRs (UI tweaks, single-file changes) only run the Linux job
+# above — fast enough to be useful, catches ~90% of breakage. macOS-
+# specific paths (#ifdef APPLE) and Windows-specific paths get
+# validated via the manual platform-matrix.yml trigger when relevant.
