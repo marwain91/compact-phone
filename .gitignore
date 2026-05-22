@@ -6,6 +6,7 @@ out/
 .idea/
 CMakeUserPresets.json
 vcpkg_installed/
+.vcpkg-cache/
 *.user
 .DS_Store
 Thumbs.db
