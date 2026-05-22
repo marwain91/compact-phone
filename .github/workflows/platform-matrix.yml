@@ -115,7 +115,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: C:\p
-          key: pjsip-windows-2.17-v5-md
+          key: pjsip-windows-2.17-v6-md
 
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -159,7 +159,12 @@ jobs:
               | Format-Table -AutoSize
 
           Push-Location pjproject-2.17
-          msbuild pjproject-vs14.sln /p:Configuration=Release-Static `
+          # Build the aggregate static-library project instead of the full
+          # solution. The full solution also links upstream test executables
+          # such as pjmedia_test.exe; those are irrelevant here and can fail
+          # independently of the libraries CompactPhone needs.
+          msbuild pjsip-apps\build\libpjproject.vcxproj `
+              /p:Configuration=Release-Static `
               /p:Platform=x64 /m /v:m
           Pop-Location
           Pop-Location
