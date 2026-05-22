@@ -202,12 +202,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\p
-          # v4: iter#9's vcxproj-only patch missed the .props file where
-          # PJSIP actually defines RuntimeLibrary=MultiThreaded for the
-          # Release-Static config (build/vs/pjproject-vs14-release-static-
-          # defaults.props). v3-md cache holds those iter#9 /MT-built
-          # libs and would shadow this fix.
-          key: pjsip-windows-2.17-v4-md
+          # v5: iter#10 crashed before patching (PowerShell 5.1 doesn't
+          # support Set-Content -NoNewline; whole step exited non-zero
+          # and PJSIP was never actually built). Cache from v4-md
+          # might hold a partial / no-MD build — bump to be safe.
+          key: pjsip-windows-2.17-v5-md
           save-always: true
 
       - name: Add msbuild to PATH
@@ -230,9 +229,12 @@ jobs:
           # PJSIP requires a config_site.h before build — same content as
           # Dockerfile/macOS. PJSUA_MAX_CALLS=32 bumps the default 4 so
           # the app can hold multiple lines / conference calls.
-          $cfg = "pjproject-2.17/pjlib/include/pj/config_site.h"
-          "#pragma once`n#define PJSUA_MAX_CALLS 32`n" `
-              | Set-Content -NoNewline -Encoding ascii $cfg
+          # Use .NET's File.WriteAllText instead of Set-Content -NoNewline —
+          # the windows-2022 runner ships PowerShell 5.1 which silently
+          # rejected -NoNewline on iter#10 and broke the whole step.
+          $cfg = Join-Path $PWD "pjproject-2.17\pjlib\include\pj\config_site.h"
+          [System.IO.File]::WriteAllText(
+              $cfg, "#pragma once`n#define PJSUA_MAX_CALLS 32`n")
 
           # PJSIP's Release-Static config sets /MT (MultiThreaded) for all
           # projects via a shared property sheet at
@@ -258,7 +260,10 @@ jobs:
                   '(<RuntimeLibrary[^>]*>)MultiThreaded(Debug)?(?!DLL)(</RuntimeLibrary>)', `
                   '$1MultiThreaded$2DLL$3'
               if ($new -ne $orig) {
-                  Set-Content -NoNewline $f.FullName $new
+                  # Use .NET WriteAllText, not Set-Content -NoNewline —
+                  # PowerShell 5.1 on the runner doesn't have -NoNewline
+                  # and crashes the whole step (caught from iter#10).
+                  [System.IO.File]::WriteAllText($f.FullName, $new)
                   $patched++
                   Write-Host "  patched: $($f.FullName.Substring('C:\p\'.Length))"
               }
