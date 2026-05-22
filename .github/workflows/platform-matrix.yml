@@ -72,7 +72,7 @@ jobs:
 
       - name: Run unit tests
         working-directory: build/macos
-        run: ctest --output-on-failure -L unit
+        run: ctest --output-on-failure --timeout 120 -L unit
 
   build-windows:
     name: Windows native build + unsigned MSI
