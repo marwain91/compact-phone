@@ -4,6 +4,9 @@ name: Release · Windows
 # present, and uploads to the matching GitHub Release. The signing step
 # is a no-op when CODE_SIGN_THUMBPRINT is empty, which keeps unsigned dev
 # tags working.
+#
+# Build recipe mirrors platform-matrix.yml's Windows job. Keep the C:\v,
+# C:\p, C:\b short-path layout and PJSIP cache key in sync.
 
 on:
   push:
@@ -18,44 +21,137 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache vcpkg
-        uses: actions/cache@v4
+      - name: Restore vcpkg + installed deps cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
-          path: ${{ github.workspace }}/vcpkg
-          key: vcpkg-windows-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
+          path: |
+            C:\v
+            C:\b\vcpkg_installed
+          key: vcpkg-windows-shortpath-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
+          restore-keys: |
+            vcpkg-windows-shortpath-
 
-      - name: Setup vcpkg
+      - name: Setup vcpkg (at C:\v)
         shell: pwsh
         run: |
-          if (-not (Test-Path vcpkg)) {
-            git clone https://github.com/microsoft/vcpkg.git
-            .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          if (-not (Test-Path C:\v)) {
+            git clone https://github.com/microsoft/vcpkg.git C:\v
+            C:\v\bootstrap-vcpkg.bat -disableMetrics
           }
-          "VCPKG_ROOT=$pwd/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_ROOT=C:\v" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install WiX 4
         shell: pwsh
         run: dotnet tool install --global wix
 
+      - name: Cache PJSIP build (short path)
+        id: pjsip-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: C:\p
+          key: pjsip-windows-2.17-v5-md
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build PJSIP (at C:\p)
+        if: steps.pjsip-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path C:\p -Force | Out-Null
+          Invoke-WebRequest `
+              -Uri "https://github.com/pjsip/pjproject/archive/refs/tags/2.17.tar.gz" `
+              -OutFile C:\p\pjproject-2.17.tar.gz
+          Push-Location C:\p
+          tar -xzf pjproject-2.17.tar.gz
+
+          $cfg = Join-Path $PWD "pjproject-2.17\pjlib\include\pj\config_site.h"
+          [System.IO.File]::WriteAllText(
+              $cfg, "#pragma once`n#define PJSUA_MAX_CALLS 32`n")
+
+          $files = Get-ChildItem pjproject-2.17 -Recurse `
+              -Include *.vcxproj,*.props,*.vsprops
+          Write-Host "Found $($files.Count) MSBuild config files to scan"
+          $patched = 0
+          foreach ($f in $files) {
+              $orig = Get-Content $f.FullName -Raw
+              if ($null -eq $orig) { continue }
+              $new = $orig -replace `
+                  '(<RuntimeLibrary[^>]*>)MultiThreaded(Debug)?(?!DLL)(</RuntimeLibrary>)', `
+                  '$1MultiThreaded$2DLL$3'
+              if ($new -ne $orig) {
+                  [System.IO.File]::WriteAllText($f.FullName, $new)
+                  $patched++
+                  Write-Host "  patched: $($f.FullName.Substring('C:\p\'.Length))"
+              }
+          }
+          Write-Host "Patched $patched files"
+          Write-Host "=== Surviving MultiThreaded (non-DLL) RuntimeLibrary refs ==="
+          Get-ChildItem pjproject-2.17 -Recurse `
+              -Include *.vcxproj,*.props,*.vsprops `
+              | Select-String -Pattern '<RuntimeLibrary[^>]*>MultiThreaded(Debug)?</RuntimeLibrary>' `
+              | Format-Table -AutoSize
+
+          Push-Location pjproject-2.17
+          msbuild pjproject-vs14.sln /p:Configuration=Release-Static `
+              /p:Platform=x64 /m /v:m
+          Pop-Location
+          Pop-Location
+
+      - name: Save PJSIP build cache
+        if: success() && steps.pjsip-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: C:\p
+          key: ${{ steps.pjsip-cache.outputs.cache-primary-key }}
+
+      - name: Export PJSIP_ROOT
+        shell: pwsh
+        run: |
+          "PJSIP_ROOT=C:\p\pjproject-2.17" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Set up MSVC dev environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
       - name: Configure
         shell: pwsh
-        run: cmake --preset windows -DVCPKG_MANIFEST_FEATURES="windows-pjsip"
+        run: |
+          cmake --preset windows -B C:\b `
+              -DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake
+
+      - name: Save vcpkg + installed deps cache
+        if: success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            C:\v
+            C:\b\vcpkg_installed
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Build
         shell: pwsh
-        run: cmake --build --preset windows
+        run: cmake --build C:\b
 
-      - name: Stage runtime
+      - name: Stage runtime (windeployqt)
         shell: pwsh
         run: |
-          $stage = "build\windows\stage"
+          $stage = "C:\b\stage"
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item build\windows\src\compactphone.exe $stage
-          $deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" -Path vcpkg | Select-Object -First 1
+          Copy-Item C:\b\src\compactphone.exe $stage
+          $deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" `
+              -Path C:\b\vcpkg_installed,C:\v -ErrorAction SilentlyContinue `
+              | Select-Object -First 1
           if ($deploy) {
             & $deploy.FullName --qmldir src\ui\qml --release `
                 --no-translations --no-system-d3d-compiler `
                 "$stage\compactphone.exe"
+          } else {
+            Write-Warning "windeployqt.exe not found; MSI will be missing Qt runtime"
           }
 
       - name: Build MSI
@@ -69,7 +165,7 @@ jobs:
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           wix build packaging\windows\installer.wxs -arch x64 `
               -d Version=$version `
-              -d StageDir=build\windows\stage `
+              -d StageDir=C:\b\stage `
               -out "dist\Compact-Phone-Windows.msi"
 
       - name: Sign MSI (gated on cert secret)

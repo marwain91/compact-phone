@@ -79,21 +79,23 @@ jobs:
   build-windows:
     name: Windows native build + unsigned MSI
     runs-on: windows-2022
-    # Mirrors the Windows source-build branch's recipe:
-    # PJSIP built from source at C:\p, vcpkg at C:\v, CMake build at C:\b,
-    # /MD patching for PJSIP's MSBuild props/projects, and an explicit
-    # MSVC dev environment. Keep continue-on-error until that branch's
-    # matching FindPJSIP.cmake + vcpkg.json changes land on main.
-    continue-on-error: true
+    # PJSIP is built from source at C:\p, vcpkg lives at C:\v, and CMake
+    # builds at C:\b to stay under Windows MAX_PATH during Qt/vcpkg builds.
+    # This job is intentionally blocking now that FindPJSIP.cmake supports
+    # the Windows source-built PJSIP layout.
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache vcpkg (short path)
-        uses: actions/cache@v4
+      - name: Restore vcpkg + installed deps cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
-          path: C:\v
+          path: |
+            C:\v
+            C:\b\vcpkg_installed
           key: vcpkg-windows-shortpath-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
-          save-always: true
+          restore-keys: |
+            vcpkg-windows-shortpath-
 
       - name: Setup vcpkg (at C:\v)
         shell: pwsh
@@ -110,11 +112,10 @@ jobs:
 
       - name: Cache PJSIP build (short path)
         id: pjsip-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: C:\p
           key: pjsip-windows-2.17-v5-md
-          save-always: true
 
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -163,6 +164,14 @@ jobs:
           Pop-Location
           Pop-Location
 
+      - name: Save PJSIP build cache
+        if: success() && steps.pjsip-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: C:\p
+          key: ${{ steps.pjsip-cache.outputs.cache-primary-key }}
+
       - name: Export PJSIP_ROOT
         shell: pwsh
         run: |
@@ -178,6 +187,16 @@ jobs:
         run: |
           cmake --preset windows -B C:\b `
               -DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake
+
+      - name: Save vcpkg + installed deps cache
+        if: success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            C:\v
+            C:\b\vcpkg_installed
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Build
         shell: pwsh
