@@ -31,6 +31,14 @@ if(PJSIP_FOUND AND NOT TARGET PJSIP::PJSIP)
     target_include_directories(PJSIP::PJSIP INTERFACE ${_PJSIP_INCLUDE_DIRS})
     target_compile_options(PJSIP::PJSIP INTERFACE ${_PJSIP_CFLAGS_OTHER})
 
+    set(_PJSIP_LINK_LIBRARIES ${_PJSIP_STATIC_LIBRARIES})
+    if(TARGET OpenSSL::SSL)
+        list(REMOVE_ITEM _PJSIP_LINK_LIBRARIES ssl)
+    endif()
+    if(TARGET OpenSSL::Crypto)
+        list(REMOVE_ITEM _PJSIP_LINK_LIBRARIES crypto)
+    endif()
+
     # Static linking needs the full transitive lib list — LIBS + LIBS_PRIVATE
     # from the .pc file. pkg_check_modules exposes that as `_STATIC_LIBRARIES`
     # and `_STATIC_LIBRARY_DIRS`.
@@ -38,8 +46,14 @@ if(PJSIP_FOUND AND NOT TARGET PJSIP::PJSIP)
         ${_PJSIP_STATIC_LIBRARY_DIRS}
     )
     target_link_libraries(PJSIP::PJSIP INTERFACE
-        ${_PJSIP_STATIC_LIBRARIES}
+        ${_PJSIP_LINK_LIBRARIES}
     )
+    if(TARGET OpenSSL::SSL)
+        target_link_libraries(PJSIP::PJSIP INTERFACE OpenSSL::SSL)
+    endif()
+    if(TARGET OpenSSL::Crypto)
+        target_link_libraries(PJSIP::PJSIP INTERFACE OpenSSL::Crypto)
+    endif()
 
     # Platform-specific link extras not advertised via pkg-config.
     if(APPLE)

@@ -198,6 +198,7 @@ void CallManager::releaseCallToGrace(int callId)
     m_remoteUriCache.erase(id);
     m_remoteDisplayCache.erase(id);
     m_recorders.erase(id);
+    m_players.erase(id);
     m_lingeringCalls[id] = std::move(lingering);
 
     if (id == m_activeCallId) {
@@ -234,6 +235,7 @@ void CallManager::eraseCall(int callId)
     m_remoteUriCache.erase(id);
     m_remoteDisplayCache.erase(id);
     m_recorders.erase(id);   // closes the WAV file if still recording
+    m_players.erase(id);
     if (present) emit callsChanged();
 
     if (id == m_activeCallId) {
@@ -474,6 +476,47 @@ bool CallManager::stopRecording(CallId id)
 bool CallManager::isRecording(CallId id) const
 {
     return m_recorders.count(id) > 0;
+}
+
+bool CallManager::playAudioFile(CallId id, const std::string &path, bool loop)
+{
+    auto it = m_calls.find(id);
+    if (it == m_calls.end() || path.empty()) return false;
+
+    auto *aud = firstActiveAudio(it->second.get());
+    if (!aud) {
+        spdlog::warn("CallManager::playAudioFile: no active audio yet on {}",
+                     id);
+        return false;
+    }
+
+    try {
+        stopAudioFile(id);
+        auto player = std::make_unique<pj::AudioMediaPlayer>();
+        player->createPlayer(path, loop ? 0 : PJMEDIA_FILE_NO_LOOP);
+        player->startTransmit(*aud);
+        m_players[id] = std::move(player);
+        spdlog::info("CallManager: playing file into call {} <- {}", id, path);
+        return true;
+    } catch (const pj::Error &e) {
+        spdlog::error("CallManager::playAudioFile: {}", e.info());
+        return false;
+    }
+}
+
+bool CallManager::stopAudioFile(CallId id)
+{
+    auto it = m_players.find(id);
+    if (it == m_players.end()) return false;
+    it->second.reset();
+    m_players.erase(it);
+    spdlog::info("CallManager: stopped file playback for call {}", id);
+    return true;
+}
+
+bool CallManager::isPlayingAudioFile(CallId id) const
+{
+    return m_players.count(id) > 0;
 }
 
 bool CallManager::forwardCall(CallId id, const std::string &targetUri)

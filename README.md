@@ -73,6 +73,20 @@ compactphone \
 A JSON provisioning file at `/etc/compactphone/provisioning.json` covers
 larger fleets. See [`docs/provisioning.md`](docs/provisioning.md).
 
+For SIP client tests, `compactphone-headless` can use the same config/CLI
+surface without starting QML:
+
+```bash
+compactphone-headless \
+    --sip-server pbx.acme.com \
+    --sip-user 1001 \
+    --sip-password-file /etc/compactphone/1001.pass \
+    --call sip:600@pbx.acme.com \
+    --play-file /opt/compactphone/prompt.wav \
+    --loop-play-file \
+    --exit-after-call
+```
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the build / test / PR

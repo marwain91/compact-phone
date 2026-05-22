@@ -172,6 +172,18 @@ qt_add_executable(compactphone
 )
 add_dependencies(compactphone ringtone_wav)
 
+add_executable(compactphone-headless
+    headless_main.cpp
+)
+target_link_libraries(compactphone-headless
+    PRIVATE
+        Qt6::Core
+        compactphone_core
+)
+target_compile_definitions(compactphone-headless PRIVATE
+    COMPACTPHONE_VERSION="${PROJECT_VERSION}"
+)
+
 if(APPLE)
     set(_compactphone_icns "${CMAKE_SOURCE_DIR}/branding/compactphone.icns")
     if(EXISTS "${_compactphone_icns}")

@@ -25,7 +25,7 @@ TEST(Database, ReportsCurrentSchemaVersion)
 {
     compactphone::persistence::Database db;
     ASSERT_TRUE(db.openInMemory());
-    EXPECT_EQ(db.currentVersion(), 6);
+    EXPECT_EQ(db.currentVersion(), 7);
 }
 
 TEST(Database, MigrationsAreIdempotent)
@@ -33,7 +33,7 @@ TEST(Database, MigrationsAreIdempotent)
     compactphone::persistence::Database db;
     ASSERT_TRUE(db.openInMemory());
     EXPECT_TRUE(db.runMigrations()); // already at latest, no-op
-    EXPECT_EQ(db.currentVersion(), 6);
+    EXPECT_EQ(db.currentVersion(), 7);
 }
 
 TEST(Database, UpgradesLegacyVersionOneAccountSchema)
@@ -74,11 +74,11 @@ TEST(Database, UpgradesLegacyVersionOneAccountSchema)
 
     compactphone::persistence::Database db;
     ASSERT_TRUE(db.open(path));
-    EXPECT_EQ(db.currentVersion(), 6);
+    EXPECT_EQ(db.currentVersion(), 7);
 
     sqlite3_stmt *stmt = nullptr;
     EXPECT_EQ(sqlite3_prepare_v2(db.handle(),
-                                 "SELECT label, public_address, codecs, "
+                                 "SELECT label, auth_realm, public_address, codecs, "
                                  "voicemail_number, register_interval_sec, "
                                  "keepalive_interval_sec, session_timers_enabled, "
                                  "publish_presence_enabled, ice_enabled, "

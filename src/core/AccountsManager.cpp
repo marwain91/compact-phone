@@ -166,7 +166,7 @@ void AccountsManager::loadFromDatabase()
     sqlite3_stmt *stmt = nullptr;
     const char *sql =
         "SELECT id, display_name, username, domain, auth_user, "
-        "password_ref, transport, proxy, stun_server, "
+        "auth_realm, password_ref, transport, proxy, stun_server, "
         "register_on_startup, srtp_mode, allow_untrusted_cert, "
         "dtmf_method, is_default, enabled, sort_order, label, "
         "public_address, codecs, voicemail_number, "
@@ -191,29 +191,30 @@ void AccountsManager::loadFromDatabase()
         a.username        = readText(stmt, 2);
         a.domain          = readText(stmt, 3);
         a.authUser        = readText(stmt, 4);
-        a.passwordRef     = readText(stmt, 5);
-        a.transport       = transportFromString(readText(stmt, 6));
-        a.proxy           = readText(stmt, 7);
-        a.stunServer      = readText(stmt, 8);
-        a.registerOnStartup = sqlite3_column_int(stmt, 9) != 0;
-        a.srtpMode        = srtpModeFromString(readText(stmt, 10));
-        a.allowUntrustedCert = sqlite3_column_int(stmt, 11) != 0;
-        a.dtmfMethod      = dtmfMethodFromString(readText(stmt, 12));
-        a.isDefault       = sqlite3_column_int(stmt, 13) != 0;
-        a.enabled         = sqlite3_column_int(stmt, 14) != 0;
-        a.sortOrder       = sqlite3_column_int(stmt, 15);
-        a.label           = readText(stmt, 16);
+        a.authRealm       = readText(stmt, 5);
+        a.passwordRef     = readText(stmt, 6);
+        a.transport       = transportFromString(readText(stmt, 7));
+        a.proxy           = readText(stmt, 8);
+        a.stunServer      = readText(stmt, 9);
+        a.registerOnStartup = sqlite3_column_int(stmt, 10) != 0;
+        a.srtpMode        = srtpModeFromString(readText(stmt, 11));
+        a.allowUntrustedCert = sqlite3_column_int(stmt, 12) != 0;
+        a.dtmfMethod      = dtmfMethodFromString(readText(stmt, 13));
+        a.isDefault       = sqlite3_column_int(stmt, 14) != 0;
+        a.enabled         = sqlite3_column_int(stmt, 15) != 0;
+        a.sortOrder       = sqlite3_column_int(stmt, 16);
+        a.label           = readText(stmt, 17);
         if (a.label.empty()) a.label = a.displayName;
-        a.publicAddress         = readText(stmt, 17);
-        a.codecs                = readText(stmt, 18);
-        a.voicemailNumber       = readText(stmt, 19);
-        a.registerIntervalSec   = sqlite3_column_int(stmt, 20);
-        a.keepaliveIntervalSec  = sqlite3_column_int(stmt, 21);
-        a.sessionTimersEnabled  = sqlite3_column_int(stmt, 22) != 0;
-        a.publishPresenceEnabled = sqlite3_column_int(stmt, 23) != 0;
-        a.iceEnabled            = sqlite3_column_int(stmt, 24) != 0;
-        a.hideCallerId          = sqlite3_column_int(stmt, 25) != 0;
-        a.zrtpEnabled           = sqlite3_column_int(stmt, 26) != 0;
+        a.publicAddress         = readText(stmt, 18);
+        a.codecs                = readText(stmt, 19);
+        a.voicemailNumber       = readText(stmt, 20);
+        a.registerIntervalSec   = sqlite3_column_int(stmt, 21);
+        a.keepaliveIntervalSec  = sqlite3_column_int(stmt, 22);
+        a.sessionTimersEnabled  = sqlite3_column_int(stmt, 23) != 0;
+        a.publishPresenceEnabled = sqlite3_column_int(stmt, 24) != 0;
+        a.iceEnabled            = sqlite3_column_int(stmt, 25) != 0;
+        a.hideCallerId          = sqlite3_column_int(stmt, 26) != 0;
+        a.zrtpEnabled           = sqlite3_column_int(stmt, 27) != 0;
         m_entries.push_back(std::move(entry));
     }
     sqlite3_finalize(stmt);
@@ -245,12 +246,12 @@ bool AccountsManager::insertRow(Account &acc)
 {
     const char *sql =
         "INSERT INTO accounts (label, display_name, username, domain, auth_user, "
-        "password_ref, transport, proxy, stun_server, public_address, codecs, "
+        "auth_realm, password_ref, transport, proxy, stun_server, public_address, codecs, "
         "voicemail_number, register_on_startup, register_interval_sec, "
         "keepalive_interval_sec, session_timers_enabled, publish_presence_enabled, "
         "ice_enabled, hide_caller_id, zrtp_enabled, srtp_mode, allow_untrusted_cert, "
         "dtmf_method, is_default, enabled, sort_order) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(), sql, -1, &stmt, nullptr) != SQLITE_OK) {
         spdlog::error("insertRow prepare: {}", sqlite3_errmsg(m_db->handle()));
@@ -261,27 +262,28 @@ bool AccountsManager::insertRow(Account &acc)
     bindText(stmt, 3, acc.username);
     bindText(stmt, 4, acc.domain);
     bindText(stmt, 5, acc.authUser);
-    bindText(stmt, 6, acc.passwordRef);
-    sqlite3_bind_text(stmt, 7, transportToString(acc.transport), -1, SQLITE_STATIC);
-    bindText(stmt, 8, acc.proxy);
-    bindText(stmt, 9, acc.stunServer);
-    bindText(stmt, 10, acc.publicAddress);
-    bindText(stmt, 11, acc.codecs);
-    bindText(stmt, 12, acc.voicemailNumber);
-    sqlite3_bind_int(stmt, 13, acc.registerOnStartup ? 1 : 0);
-    sqlite3_bind_int(stmt, 14, acc.registerIntervalSec);
-    sqlite3_bind_int(stmt, 15, acc.keepaliveIntervalSec);
-    sqlite3_bind_int(stmt, 16, acc.sessionTimersEnabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 17, acc.publishPresenceEnabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 18, acc.iceEnabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 19, acc.hideCallerId ? 1 : 0);
-    sqlite3_bind_int(stmt, 20, acc.zrtpEnabled ? 1 : 0);
-    sqlite3_bind_text(stmt, 21, srtpModeToString(acc.srtpMode), -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 22, acc.allowUntrustedCert ? 1 : 0);
-    sqlite3_bind_text(stmt, 23, dtmfMethodToString(acc.dtmfMethod), -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 24, acc.isDefault ? 1 : 0);
-    sqlite3_bind_int(stmt, 25, acc.enabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 26, acc.sortOrder);
+    bindText(stmt, 6, acc.authRealm);
+    bindText(stmt, 7, acc.passwordRef);
+    sqlite3_bind_text(stmt, 8, transportToString(acc.transport), -1, SQLITE_STATIC);
+    bindText(stmt, 9, acc.proxy);
+    bindText(stmt, 10, acc.stunServer);
+    bindText(stmt, 11, acc.publicAddress);
+    bindText(stmt, 12, acc.codecs);
+    bindText(stmt, 13, acc.voicemailNumber);
+    sqlite3_bind_int(stmt, 14, acc.registerOnStartup ? 1 : 0);
+    sqlite3_bind_int(stmt, 15, acc.registerIntervalSec);
+    sqlite3_bind_int(stmt, 16, acc.keepaliveIntervalSec);
+    sqlite3_bind_int(stmt, 17, acc.sessionTimersEnabled ? 1 : 0);
+    sqlite3_bind_int(stmt, 18, acc.publishPresenceEnabled ? 1 : 0);
+    sqlite3_bind_int(stmt, 19, acc.iceEnabled ? 1 : 0);
+    sqlite3_bind_int(stmt, 20, acc.hideCallerId ? 1 : 0);
+    sqlite3_bind_int(stmt, 21, acc.zrtpEnabled ? 1 : 0);
+    sqlite3_bind_text(stmt, 22, srtpModeToString(acc.srtpMode), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 23, acc.allowUntrustedCert ? 1 : 0);
+    sqlite3_bind_text(stmt, 24, dtmfMethodToString(acc.dtmfMethod), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 25, acc.isDefault ? 1 : 0);
+    sqlite3_bind_int(stmt, 26, acc.enabled ? 1 : 0);
+    sqlite3_bind_int(stmt, 27, acc.sortOrder);
     const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
     if (!ok) {
         spdlog::error("insertRow step: {}", sqlite3_errmsg(m_db->handle()));
@@ -331,7 +333,7 @@ bool AccountsManager::update(const Account &acc)
     const char *sql =
         "UPDATE accounts SET "
         "label = ?, display_name = ?, username = ?, domain = ?, auth_user = ?, "
-        "transport = ?, proxy = ?, stun_server = ?, public_address = ?, "
+        "auth_realm = ?, transport = ?, proxy = ?, stun_server = ?, public_address = ?, "
         "codecs = ?, voicemail_number = ?, register_on_startup = ?, "
         "register_interval_sec = ?, keepalive_interval_sec = ?, "
         "session_timers_enabled = ?, publish_presence_enabled = ?, "
@@ -348,26 +350,27 @@ bool AccountsManager::update(const Account &acc)
     bindText(stmt, 3, acc.username);
     bindText(stmt, 4, acc.domain);
     bindText(stmt, 5, acc.authUser);
-    sqlite3_bind_text(stmt, 6, transportToString(acc.transport), -1, SQLITE_STATIC);
-    bindText(stmt, 7, acc.proxy);
-    bindText(stmt, 8, acc.stunServer);
-    bindText(stmt, 9, acc.publicAddress);
-    bindText(stmt, 10, acc.codecs);
-    bindText(stmt, 11, acc.voicemailNumber);
-    sqlite3_bind_int(stmt, 12, acc.registerOnStartup ? 1 : 0);
-    sqlite3_bind_int(stmt, 13, acc.registerIntervalSec);
-    sqlite3_bind_int(stmt, 14, acc.keepaliveIntervalSec);
-    sqlite3_bind_int(stmt, 15, acc.sessionTimersEnabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 16, acc.publishPresenceEnabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 17, acc.iceEnabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 18, acc.hideCallerId ? 1 : 0);
-    sqlite3_bind_int(stmt, 19, acc.zrtpEnabled ? 1 : 0);
-    sqlite3_bind_text(stmt, 20, srtpModeToString(acc.srtpMode), -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 21, acc.allowUntrustedCert ? 1 : 0);
-    sqlite3_bind_text(stmt, 22, dtmfMethodToString(acc.dtmfMethod), -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 23, acc.enabled ? 1 : 0);
-    sqlite3_bind_int(stmt, 24, acc.sortOrder);
-    sqlite3_bind_int(stmt, 25, acc.id);
+    bindText(stmt, 6, acc.authRealm);
+    sqlite3_bind_text(stmt, 7, transportToString(acc.transport), -1, SQLITE_STATIC);
+    bindText(stmt, 8, acc.proxy);
+    bindText(stmt, 9, acc.stunServer);
+    bindText(stmt, 10, acc.publicAddress);
+    bindText(stmt, 11, acc.codecs);
+    bindText(stmt, 12, acc.voicemailNumber);
+    sqlite3_bind_int(stmt, 13, acc.registerOnStartup ? 1 : 0);
+    sqlite3_bind_int(stmt, 14, acc.registerIntervalSec);
+    sqlite3_bind_int(stmt, 15, acc.keepaliveIntervalSec);
+    sqlite3_bind_int(stmt, 16, acc.sessionTimersEnabled ? 1 : 0);
+    sqlite3_bind_int(stmt, 17, acc.publishPresenceEnabled ? 1 : 0);
+    sqlite3_bind_int(stmt, 18, acc.iceEnabled ? 1 : 0);
+    sqlite3_bind_int(stmt, 19, acc.hideCallerId ? 1 : 0);
+    sqlite3_bind_int(stmt, 20, acc.zrtpEnabled ? 1 : 0);
+    sqlite3_bind_text(stmt, 21, srtpModeToString(acc.srtpMode), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 22, acc.allowUntrustedCert ? 1 : 0);
+    sqlite3_bind_text(stmt, 23, dtmfMethodToString(acc.dtmfMethod), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 24, acc.enabled ? 1 : 0);
+    sqlite3_bind_int(stmt, 25, acc.sortOrder);
+    sqlite3_bind_int(stmt, 26, acc.id);
 
     const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
     sqlite3_finalize(stmt);
@@ -543,7 +546,10 @@ bool AccountsManager::registerAccount(AccountId id)
     const auto authUser = e.account.authUser.empty()
                               ? e.account.username
                               : e.account.authUser;
-    pj::AuthCredInfo cred("digest", "*", authUser, 0, password);
+    const auto authRealm = e.account.authRealm.empty()
+                               ? std::string{"*"}
+                               : e.account.authRealm;
+    pj::AuthCredInfo cred("digest", authRealm, authUser, 0, password);
     acfg.sipConfig.authCreds.push_back(cred);
 
     // Outbound proxy

@@ -7,6 +7,7 @@ using compactphone::LogBuffer;
 
 TEST(LogBufferTest, CapturesSpdlogOutput)
 {
+    spdlog::set_level(spdlog::level::info);
     // Instantiate the singleton (registers its sink with default_logger).
     auto &buf = LogBuffer::instance();
 
@@ -27,6 +28,7 @@ TEST(LogBufferTest, CapturesSpdlogOutput)
 
 TEST(LogBufferTest, AsTextJoinsLinesWithNewline)
 {
+    spdlog::set_level(spdlog::level::info);
     auto &buf = LogBuffer::instance();
     spdlog::info("logbuffer-asText-line-1");
     spdlog::info("logbuffer-asText-line-2");
@@ -48,6 +50,7 @@ TEST(LogBufferTest, AsTextJoinsLinesWithNewline)
 
 TEST(LogBufferTest, RingBufferStaysUnder1000EvenAfterFlood)
 {
+    spdlog::set_level(spdlog::level::info);
     auto &buf = LogBuffer::instance();
     for (int i = 0; i < 2000; ++i) {
         spdlog::info("logbuffer-flood-{}", i);

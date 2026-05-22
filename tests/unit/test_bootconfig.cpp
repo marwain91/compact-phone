@@ -4,6 +4,8 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
+#include <QStandardPaths>
 #include <QTemporaryFile>
 
 namespace {
@@ -17,6 +19,14 @@ QStringList args(std::initializer_list<const char *> a)
     QStringList out;
     out << QStringLiteral("compactphone");
     for (const char *s : a) out << QString::fromUtf8(s);
+    return out;
+}
+
+QStringList args(const QStringList &a)
+{
+    QStringList out;
+    out << QStringLiteral("compactphone");
+    out << a;
     return out;
 }
 
@@ -89,6 +99,51 @@ TEST(BootConfigTest, GlobalSwitchesArePropagated)
     EXPECT_EQ(*cfg.theme, "midnight");
     ASSERT_TRUE(cfg.logLevel.has_value());
     EXPECT_EQ(*cfg.logLevel, "debug");
+}
+
+TEST(BootConfigTest, AccountCliFlagsCoverAdvancedProvisioningFields)
+{
+    const auto cfg = parseCommandLine(args({
+        "--sip-server", "pbx.example.com",
+        "--sip-port", "5080",
+        "--sip-user", "1001",
+        "--sip-realm", "office",
+        "--sip-proxy", "sbc.example.com:5060",
+        "--sip-public-address", "203.0.113.10",
+        "--sip-register-interval", "180",
+        "--sip-keepalive-interval", "20",
+        "--sip-session-timers", "no",
+        "--sip-publish-presence",
+        "--sip-ice",
+        "--sip-hide-caller-id",
+        "--sip-zrtp",
+        "--sip-allow-untrusted-cert",
+        "--sip-dtmf-method", "info",
+        "--sip-enabled", "no",
+        "--sip-default",
+        "--sip-sort-order", "5",
+    }));
+
+    ASSERT_EQ(cfg.accounts.size(), 1);
+    const auto &a = cfg.accounts.first();
+    EXPECT_EQ(a.params.value("domain").toString(), "pbx.example.com:5080");
+    EXPECT_EQ(a.params.value("authRealm").toString(), "office");
+    EXPECT_EQ(a.params.value("proxy").toString(), "sbc.example.com:5060");
+    EXPECT_EQ(a.params.value("publicAddress").toString(), "203.0.113.10");
+    EXPECT_EQ(a.params.value("registerIntervalSec").toInt(), 180);
+    EXPECT_EQ(a.params.value("keepaliveIntervalSec").toInt(), 20);
+    EXPECT_TRUE(a.params.contains("sessionTimersEnabled"));
+    EXPECT_FALSE(a.params.value("sessionTimersEnabled").toBool());
+    EXPECT_TRUE(a.params.value("publishPresenceEnabled").toBool());
+    EXPECT_TRUE(a.params.value("iceEnabled").toBool());
+    EXPECT_TRUE(a.params.value("hideCallerId").toBool());
+    EXPECT_TRUE(a.params.value("zrtpEnabled").toBool());
+    EXPECT_TRUE(a.params.value("allowUntrustedCert").toBool());
+    EXPECT_EQ(a.params.value("dtmfMethod").toString(), "info");
+    EXPECT_TRUE(a.params.contains("enabled"));
+    EXPECT_FALSE(a.params.value("enabled").toBool());
+    EXPECT_TRUE(a.params.value("isDefault").toBool());
+    EXPECT_EQ(a.params.value("sortOrder").toInt(), 5);
 }
 
 TEST(BootConfigTest, ReplaceAccountFlagIsCaptured)
@@ -171,6 +226,292 @@ TEST(BootConfigTest, LoadFromFileBuildsAccountsAndDefaults)
     EXPECT_EQ(*cfg.logLevel, "debug");
     ASSERT_TRUE(cfg.minimizeToTray.has_value());
     EXPECT_TRUE(*cfg.minimizeToTray);
+}
+
+TEST(BootConfigTest, LoadFromFileMapsEveryProvisionableAccountField)
+{
+    QTemporaryFile f;
+    f.setFileTemplate(QDir::tempPath() + "/cp-provXXXXXX.json");
+    ASSERT_TRUE(f.open());
+    f.write(R"({
+        "schema_version": 1,
+        "accounts": [
+            {
+                "label": "Full",
+                "server": "pbx.full.example",
+                "realm": "full-realm",
+                "user": "4001",
+                "auth_user": "auth4001",
+                "password": "full-secret",
+                "display_name": "Full User",
+                "transport": "tls",
+                "proxy": "sbc.full.example:5061",
+                "stun": "stun.full.example:3478",
+                "public_address": "203.0.113.40",
+                "codecs": "opus,PCMA",
+                "voicemail": "*98",
+                "register_on_start": false,
+                "register_interval_sec": 120,
+                "keepalive_interval_sec": 25,
+                "session_timers_enabled": false,
+                "publish_presence_enabled": true,
+                "ice_enabled": true,
+                "hide_caller_id": true,
+                "zrtp_enabled": true,
+                "srtp": "mandatory",
+                "allow_untrusted_cert": true,
+                "dtmf_method": "info",
+                "enabled": false,
+                "default": true,
+                "sort_order": 9
+            }
+        ]
+    })");
+    f.flush();
+
+    const auto cfg = compactphone::bootconfig::loadFromFile(f.fileName());
+
+    ASSERT_EQ(cfg.accounts.size(), 1);
+    const auto &a = cfg.accounts.first();
+    EXPECT_EQ(a.params.value("label").toString(), "Full");
+    EXPECT_EQ(a.params.value("domain").toString(), "pbx.full.example");
+    EXPECT_EQ(a.params.value("authRealm").toString(), "full-realm");
+    EXPECT_EQ(a.params.value("username").toString(), "4001");
+    EXPECT_EQ(a.params.value("authUser").toString(), "auth4001");
+    EXPECT_EQ(a.password, "full-secret");
+    EXPECT_EQ(a.params.value("displayName").toString(), "Full User");
+    EXPECT_EQ(a.params.value("transport").toString(), "tls");
+    EXPECT_EQ(a.params.value("proxy").toString(), "sbc.full.example:5061");
+    EXPECT_EQ(a.params.value("stunServer").toString(), "stun.full.example:3478");
+    EXPECT_EQ(a.params.value("publicAddress").toString(), "203.0.113.40");
+    EXPECT_EQ(a.params.value("codecs").toString(), "opus,PCMA");
+    EXPECT_EQ(a.params.value("voicemailNumber").toString(), "*98");
+    EXPECT_FALSE(a.params.value("registerOnStartup").toBool());
+    EXPECT_EQ(a.params.value("registerIntervalSec").toInt(), 120);
+    EXPECT_EQ(a.params.value("keepaliveIntervalSec").toInt(), 25);
+    EXPECT_TRUE(a.params.contains("sessionTimersEnabled"));
+    EXPECT_FALSE(a.params.value("sessionTimersEnabled").toBool());
+    EXPECT_TRUE(a.params.value("publishPresenceEnabled").toBool());
+    EXPECT_TRUE(a.params.value("iceEnabled").toBool());
+    EXPECT_TRUE(a.params.value("hideCallerId").toBool());
+    EXPECT_TRUE(a.params.value("zrtpEnabled").toBool());
+    EXPECT_EQ(a.params.value("srtpMode").toString(), "mandatory");
+    EXPECT_TRUE(a.params.value("allowUntrustedCert").toBool());
+    EXPECT_EQ(a.params.value("dtmfMethod").toString(), "info");
+    EXPECT_TRUE(a.params.contains("enabled"));
+    EXPECT_FALSE(a.params.value("enabled").toBool());
+    EXPECT_TRUE(a.params.value("isDefault").toBool());
+    EXPECT_EQ(a.params.value("sortOrder").toInt(), 9);
+}
+
+TEST(BootConfigTest, LoadFromFileReadsHeadlessScenario)
+{
+    QTemporaryFile f;
+    f.setFileTemplate(QDir::tempPath() + "/cp-provXXXXXX.json");
+    ASSERT_TRUE(f.open());
+    f.write(R"({
+        "schema_version": 1,
+        "headless": {
+            "call": "sip:600@pbx.example.com",
+            "auto_answer": true,
+            "play_file": "/tmp/prompt.wav",
+            "loop_play_file": true,
+            "duration_sec": 30,
+            "exit_after_call": true
+        }
+    })");
+    f.flush();
+
+    const auto cfg = compactphone::bootconfig::loadFromFile(f.fileName());
+
+    ASSERT_TRUE(cfg.headlessCallUri.has_value());
+    EXPECT_EQ(*cfg.headlessCallUri, "sip:600@pbx.example.com");
+    ASSERT_TRUE(cfg.headlessAutoAnswer.has_value());
+    EXPECT_TRUE(*cfg.headlessAutoAnswer);
+    ASSERT_TRUE(cfg.headlessPlayFile.has_value());
+    EXPECT_EQ(*cfg.headlessPlayFile, "/tmp/prompt.wav");
+    ASSERT_TRUE(cfg.headlessLoopPlayFile.has_value());
+    EXPECT_TRUE(*cfg.headlessLoopPlayFile);
+    ASSERT_TRUE(cfg.headlessDurationSec.has_value());
+    EXPECT_EQ(*cfg.headlessDurationSec, 30);
+    ASSERT_TRUE(cfg.headlessExitAfterCall.has_value());
+    EXPECT_TRUE(*cfg.headlessExitAfterCall);
+}
+
+TEST(BootConfigTest, HeadlessCliFlagsOverrideConfig)
+{
+    QTemporaryFile f;
+    f.setFileTemplate(QDir::tempPath() + "/cp-provXXXXXX.json");
+    ASSERT_TRUE(f.open());
+    f.write(R"({
+        "schema_version": 1,
+        "headless": {
+            "call": "sip:old@example.com",
+            "auto_answer": false,
+            "play_file": "/tmp/old.wav",
+            "loop_play_file": false,
+            "duration_sec": 10
+        }
+    })");
+    f.flush();
+
+    const auto cfg = parseCommandLine(args({
+        QStringLiteral("--config"),
+        f.fileName(),
+        QStringLiteral("--call"),
+        QStringLiteral("sip:new@example.com"),
+        QStringLiteral("--auto-answer"),
+        QStringLiteral("--play-file"),
+        QStringLiteral("/tmp/new.wav"),
+        QStringLiteral("--loop-play-file"),
+        QStringLiteral("--duration-sec"),
+        QStringLiteral("45"),
+        QStringLiteral("--exit-after-call"),
+    }));
+
+    ASSERT_TRUE(cfg.headlessCallUri.has_value());
+    EXPECT_EQ(*cfg.headlessCallUri, "sip:new@example.com");
+    ASSERT_TRUE(cfg.headlessAutoAnswer.has_value());
+    EXPECT_TRUE(*cfg.headlessAutoAnswer);
+    ASSERT_TRUE(cfg.headlessPlayFile.has_value());
+    EXPECT_EQ(*cfg.headlessPlayFile, "/tmp/new.wav");
+    ASSERT_TRUE(cfg.headlessLoopPlayFile.has_value());
+    EXPECT_TRUE(*cfg.headlessLoopPlayFile);
+    ASSERT_TRUE(cfg.headlessDurationSec.has_value());
+    EXPECT_EQ(*cfg.headlessDurationSec, 45);
+    ASSERT_TRUE(cfg.headlessExitAfterCall.has_value());
+    EXPECT_TRUE(*cfg.headlessExitAfterCall);
+}
+
+TEST(BootConfigTest, ParseCommandLineLoadsExplicitConfigFile)
+{
+    QTemporaryFile f;
+    f.setFileTemplate(QDir::tempPath() + "/cp-provXXXXXX.json");
+    ASSERT_TRUE(f.open());
+    f.write(R"({
+        "schema_version": 1,
+        "accounts": [
+            {
+                "server": "pbx.config.example",
+                "user": "2001",
+                "auth_user": "auth2001",
+                "password": "from-config",
+                "display_name": "Config User"
+            }
+        ],
+        "defaults": {
+            "theme": "ivory",
+            "dnd": true
+        }
+    })");
+    f.flush();
+
+    const auto cfg = parseCommandLine(args({
+        QStringLiteral("--config"),
+        f.fileName(),
+    }));
+
+    ASSERT_EQ(cfg.accounts.size(), 1);
+    const auto &a = cfg.accounts.first();
+    EXPECT_EQ(a.params.value("domain").toString(), "pbx.config.example");
+    EXPECT_EQ(a.params.value("username").toString(), "2001");
+    EXPECT_EQ(a.params.value("authUser").toString(), "auth2001");
+    EXPECT_EQ(a.params.value("displayName").toString(), "Config User");
+    EXPECT_EQ(a.password, "from-config");
+    ASSERT_TRUE(cfg.theme.has_value());
+    EXPECT_EQ(*cfg.theme, "ivory");
+    ASSERT_TRUE(cfg.dnd.has_value());
+    EXPECT_TRUE(*cfg.dnd);
+}
+
+TEST(BootConfigTest, CliFlagsOverrideExplicitConfigDefaultsAndAppendAccount)
+{
+    QTemporaryFile f;
+    f.setFileTemplate(QDir::tempPath() + "/cp-provXXXXXX.json");
+    ASSERT_TRUE(f.open());
+    f.write(R"({
+        "schema_version": 1,
+        "accounts": [
+            { "server": "pbx.config.example", "user": "2001" }
+        ],
+        "defaults": {
+            "theme": "light"
+        }
+    })");
+    f.flush();
+
+    const auto cfg = parseCommandLine(args({
+        QStringLiteral("--config"),
+        f.fileName(),
+        QStringLiteral("--theme"),
+        QStringLiteral("midnight"),
+        QStringLiteral("--sip-server"),
+        QStringLiteral("pbx.cli.example"),
+        QStringLiteral("--sip-user"),
+        QStringLiteral("3001"),
+    }));
+
+    ASSERT_EQ(cfg.accounts.size(), 2);
+    EXPECT_EQ(cfg.accounts.first().params.value("domain").toString(),
+              "pbx.config.example");
+    EXPECT_EQ(cfg.accounts.last().params.value("domain").toString(),
+              "pbx.cli.example");
+    ASSERT_TRUE(cfg.theme.has_value());
+    EXPECT_EQ(*cfg.theme, "midnight");
+}
+
+TEST(BootConfigTest, UserProvisioningOverridesSystemProvisioning)
+{
+    const QString systemDir = QStringLiteral("/etc/compactphone");
+    const QString systemPath = systemDir + QStringLiteral("/provisioning.json");
+    QFile oldSystem(systemPath);
+    QByteArray oldSystemBytes;
+    const bool hadOldSystem = oldSystem.exists();
+    if (hadOldSystem) {
+        ASSERT_TRUE(oldSystem.open(QIODevice::ReadOnly));
+        oldSystemBytes = oldSystem.readAll();
+        oldSystem.close();
+    }
+
+    if (!QDir().mkpath(systemDir)) {
+        GTEST_SKIP() << "cannot create /etc/compactphone in this environment";
+    }
+
+    QFile systemFile(systemPath);
+    ASSERT_TRUE(systemFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    systemFile.write(R"({
+        "schema_version": 1,
+        "defaults": { "theme": "dark" }
+    })");
+    systemFile.close();
+
+    QStandardPaths::setTestModeEnabled(true);
+    const QString userDir =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    ASSERT_FALSE(userDir.isEmpty());
+    ASSERT_TRUE(QDir().mkpath(userDir));
+    QFile userFile(QDir(userDir).filePath(QStringLiteral("provisioning.json")));
+    ASSERT_TRUE(userFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    userFile.write(R"({
+        "schema_version": 1,
+        "defaults": { "theme": "ivory" }
+    })");
+    userFile.close();
+
+    const auto cfg = parseCommandLine(args({}));
+
+    if (hadOldSystem) {
+        ASSERT_TRUE(systemFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        systemFile.write(oldSystemBytes);
+        systemFile.close();
+    } else {
+        QFile::remove(systemPath);
+    }
+    QFile::remove(userFile.fileName());
+    QStandardPaths::setTestModeEnabled(false);
+
+    ASSERT_TRUE(cfg.theme.has_value());
+    EXPECT_EQ(*cfg.theme, "ivory");
 }
 
 TEST(BootConfigTest, LoadFromFileRejectsUnknownSchemaVersion)

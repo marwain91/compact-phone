@@ -32,7 +32,7 @@ const char *srtpModeToString(SrtpMode m)
 SrtpMode srtpModeFromString(const std::string &s)
 {
     if (s == "disabled") return SrtpMode::Disabled;
-    if (s == "required") return SrtpMode::Required;
+    if (s == "required" || s == "mandatory") return SrtpMode::Required;
     return SrtpMode::Optional;
 }
 

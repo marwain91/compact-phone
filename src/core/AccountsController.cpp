@@ -29,6 +29,7 @@ void applyParams(sip::Account &a, const QVariantMap &p)
     if (p.contains("username"))            a.username = str("username");
     if (p.contains("domain"))              a.domain = str("domain");
     if (p.contains("authUser"))            a.authUser = str("authUser");
+    if (p.contains("authRealm"))           a.authRealm = str("authRealm");
     if (a.authUser.empty())                a.authUser = a.username;
     if (p.contains("transport"))           a.transport = sip::transportFromString(str("transport"));
     if (p.contains("proxy"))               a.proxy = str("proxy");
@@ -47,6 +48,9 @@ void applyParams(sip::Account &a, const QVariantMap &p)
     if (p.contains("srtpMode"))            a.srtpMode = sip::srtpModeFromString(str("srtpMode"));
     if (p.contains("allowUntrustedCert"))  a.allowUntrustedCert = boolean("allowUntrustedCert", false);
     if (p.contains("dtmfMethod"))          a.dtmfMethod = sip::dtmfMethodFromString(str("dtmfMethod"));
+    if (p.contains("enabled"))             a.enabled = boolean("enabled", true);
+    if (p.contains("isDefault"))           a.isDefault = boolean("isDefault", false);
+    if (p.contains("sortOrder"))           a.sortOrder = integer("sortOrder", 0);
 }
 
 } // namespace
@@ -152,10 +156,19 @@ int AccountsController::addAccount(const QVariantMap &params)
     if (!m_accounts) return sip::kInvalidAccountId;
     sip::Account a;
     applyParams(a, params);
-    a.isDefault = m_accounts->list().empty();
-    a.enabled = true;
+    const bool explicitDefault = params.contains(QStringLiteral("isDefault"));
+    const bool wantsDefault =
+        params.value(QStringLiteral("isDefault"), false).toBool();
+    const bool firstAccount = m_accounts->list().empty();
+    a.isDefault = explicitDefault ? (wantsDefault && firstAccount) : firstAccount;
+    a.enabled = params.contains(QStringLiteral("enabled"))
+        ? params.value(QStringLiteral("enabled")).toBool()
+        : true;
     if (a.authUser.empty()) a.authUser = a.username;
     const auto id = m_accounts->add(a, params.value("password").toString().toStdString());
+    if (id != sip::kInvalidAccountId && wantsDefault && !a.isDefault) {
+        m_accounts->setDefault(id);
+    }
     refreshModel();
     pushNetworkAndCodecSettings();
     return id;
@@ -174,6 +187,7 @@ QVariantMap AccountsController::accountSnapshot(int accountId) const
     m["username"] = QString::fromStdString(a.username);
     m["domain"] = QString::fromStdString(a.domain);
     m["authUser"] = QString::fromStdString(a.authUser);
+    m["authRealm"] = QString::fromStdString(a.authRealm);
     m["transport"] = QString::fromUtf8(sip::transportToString(a.transport));
     m["proxy"] = QString::fromStdString(a.proxy);
     m["stunServer"] = QString::fromStdString(a.stunServer);
@@ -191,6 +205,9 @@ QVariantMap AccountsController::accountSnapshot(int accountId) const
     m["srtpMode"] = QString::fromUtf8(sip::srtpModeToString(a.srtpMode));
     m["allowUntrustedCert"] = a.allowUntrustedCert;
     m["dtmfMethod"] = QString::fromUtf8(sip::dtmfMethodToString(a.dtmfMethod));
+    m["enabled"] = a.enabled;
+    m["isDefault"] = a.isDefault;
+    m["sortOrder"] = a.sortOrder;
     return m;
 }
 
@@ -217,6 +234,9 @@ bool AccountsController::updateAccount(int accountId, const QVariantMap &params)
     if (edited.authUser.empty()) edited.authUser = edited.username;
     const bool ok = m_accounts->update(edited);
     if (!ok) return false;
+    if (params.value(QStringLiteral("isDefault"), false).toBool()) {
+        m_accounts->setDefault(static_cast<sip::AccountId>(accountId));
+    }
     // Password is sent only when the user actually retyped it in the
     // dialog. The update() call above already re-registered the account;
     // setPassword reruns that cycle with the new credentials so the next

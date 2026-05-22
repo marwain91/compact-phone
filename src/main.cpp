@@ -6,6 +6,7 @@
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QTranslator>
 
 #if COMPACTPHONE_WITH_TRAY
@@ -22,7 +23,11 @@ using CompactPhoneApplication = QGuiApplication;
 #include "core/UrlDispatcher.h"
 #include "models/AccountsModel.h"
 
+#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/spdlog.h>
+
+#include <memory>
+#include <utility>
 
 namespace {
 
@@ -77,6 +82,24 @@ void applyBootConfig(const compactphone::BootConfig &cfg,
     if (cfg.theme)      controller.setThemeId(*cfg.theme);
 }
 
+bool addLogFileSink(const QString &path)
+{
+    if (path.trimmed().isEmpty()) return false;
+    try {
+        auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
+            path.toStdString(), true);
+        sink->set_pattern("%Y-%m-%d %H:%M:%S.%e [%l] %v");
+        if (auto logger = spdlog::default_logger()) {
+            logger->sinks().push_back(std::move(sink));
+            return true;
+        }
+    } catch (const spdlog::spdlog_ex &e) {
+        spdlog::error("BootConfig: cannot open log file {}: {}",
+                      path.toStdString(), e.what());
+    }
+    return false;
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -107,6 +130,7 @@ int main(int argc, char *argv[])
     // Run before any SIP/UI work so a clean install can register immediately.
     const auto bootCfg =
         compactphone::bootconfig::parseCommandLine(app.arguments());
+    if (bootCfg.logFile) addLogFileSink(*bootCfg.logFile);
 
     // Install the sip:/tel:/callto: URL handler as early as possible so
     // launches triggered by clicking a SIP link don't drop the URL.
@@ -151,6 +175,14 @@ int main(int argc, char *argv[])
         // singleton via Main.qml bindings; apply the boot config now that
         // every sub-controller is wired up.
         applyBootConfig(bootCfg, *pc);
+    }
+
+    if (bootCfg.minimizeToTray && *bootCfg.minimizeToTray) {
+        QTimer::singleShot(120, &app, [&engine] {
+            for (auto *root : engine.rootObjects()) {
+                if (root) root->setProperty("visible", false);
+            }
+        });
     }
 
     // Crash reporting — only honored when the build was configured with
