@@ -1,4 +1,10 @@
-FROM ubuntu:22.04
+# Ubuntu 24.04 (Noble) ships OpenSSL 3.0.13+ which patches the
+# EVP_MAC_CTX_new + EVP_KEYMGMT_names_do_all crashes that bit
+# Ubuntu 22.04's 3.0.2 — see CLAUDE.md "Linux x86_64 unit test
+# segfaults". Both the libsrtp init self-test (SipEngineLifecycle)
+# and EVP_PKEY_HKDF (already worked around via EVP_KDF in #23)
+# crash on 22.04; 24.04 unblocks both code paths.
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC

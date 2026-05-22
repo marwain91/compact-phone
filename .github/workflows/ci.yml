@@ -48,18 +48,16 @@ jobs:
             cmake --build --preset linux
 
       - name: Run unit tests
-        # SipEngineLifecycle tests SEGFAULT in the headless Linux dev
-        # container — pjsua2's audio backend init crashes even with the
-        # null-dev fallback. Tracked under #17. The Keychain and
-        # AccountsManagerUpdate suites were excluded for the same reason
-        # but those were rooted in an OpenSSL 3.0.2 provider bug
-        # triggered by EVP_PKEY_HKDF; the EVP_KDF rewrite in #23 fixed
-        # them, so they're back in the run.
+        # All previously-excluded segfaulting suites should now pass:
+        # SipEngineLifecycle was libsrtp self-test crashing in
+        # EVP_MAC_CTX_new on Ubuntu 22.04's libcrypto 3.0.2 (same
+        # OpenSSL bug family as the keychain EVP_PKEY_HKDF crash fixed
+        # in #23). Ubuntu 24.04 ships libcrypto 3.0.13+ which patches
+        # both. Re-enabling the full test run.
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash -c "cd /workspace/build/linux && \
-              ctest --output-on-failure -L unit \
-                --exclude-regex 'SipEngineLifecycle'"
+              ctest --output-on-failure -L unit"
 
       # vcpkg writes per-port logs inside the container under
       # /opt/vcpkg/buildtrees/<port>/. Surfacing them on failure means
