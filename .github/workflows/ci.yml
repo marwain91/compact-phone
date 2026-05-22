@@ -67,13 +67,23 @@ jobs:
       # GitHub runner — pointed straight at libcrypto. Same playbook
       # here: get a backtrace, then write the fix in one shot. This
       # step is non-blocking; output is in the job log.
+      #
+      # gdb is installed inside the diagnostic step rather than baked
+      # into the Dockerfile so adding it doesn't invalidate the docker
+      # layer cache (which would force a vcpkg cold rebuild — saw
+      # qtdeclarative cold compile fail+timeout on the previous iter).
       - name: Diagnose SipEngineLifecycle segfaults (gdb backtrace)
         if: always()
         continue-on-error: true
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash -c 'set -e
+              apt-get update -qq && apt-get install -y -qq --no-install-recommends gdb
               cd /workspace/build/linux
+              if [ ! -x ./tests/test_unit ]; then
+                echo "test_unit binary not built — skipping gdb diagnostic"
+                exit 0
+              fi
               ulimit -c unlimited
               for T in \
                 "SipEngineLifecycle.StartsAndStops" \
@@ -93,12 +103,15 @@ jobs:
       # vcpkg writes per-port logs inside the container under
       # /opt/vcpkg/buildtrees/<port>/. Surfacing them on failure means
       # the next debug round does not need a fresh 1-hour build.
+      # Bumped the size cap to 20MB — qtdeclarative's install-out.log
+      # can hit ~5-10MB on a real build failure (was capped at 2MB
+      # which silently dropped it on the iter#9 failure).
       - name: Collect vcpkg logs on failure
         if: failure()
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash -c 'mkdir -p /workspace/vcpkg-logs && \
-              find /opt/vcpkg/buildtrees -maxdepth 2 -name "*.log" -size -2M \
+              find /opt/vcpkg/buildtrees -maxdepth 2 -name "*.log" -size -20M \
                 -exec cp --parents {} /workspace/vcpkg-logs/ \;' || true
       - name: Upload vcpkg logs
         if: failure()
