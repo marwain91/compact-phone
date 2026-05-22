@@ -53,7 +53,9 @@ jobs:
           echo "PKG_CONFIG_PATH=$HOME/pjproject/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Configure
-        run: cmake --preset macos
+        run: |
+          cmake --preset macos \
+            -DVCPKG_OVERLAY_TRIPLETS="${{ github.workspace }}/tools/release/triplets"
 
       - name: Build
         run: cmake --build --preset macos
