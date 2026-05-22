@@ -202,11 +202,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\p
-          # v3: bumped after switching from /MT (Release-Static default) to
-          # /MD via vcxproj patch, so the binary ABI is incompatible with
-          # the v2 cache. Bump the suffix whenever the PJSIP build flags
-          # change in a way that affects symbol/CRT linkage.
-          key: pjsip-windows-2.17-v3-md
+          # v4: iter#9's vcxproj-only patch missed the .props file where
+          # PJSIP actually defines RuntimeLibrary=MultiThreaded for the
+          # Release-Static config (build/vs/pjproject-vs14-release-static-
+          # defaults.props). v3-md cache holds those iter#9 /MT-built
+          # libs and would shadow this fix.
+          key: pjsip-windows-2.17-v4-md
           save-always: true
 
       - name: Add msbuild to PATH
@@ -233,19 +234,45 @@ jobs:
           "#pragma once`n#define PJSUA_MAX_CALLS 32`n" `
               | Set-Content -NoNewline -Encoding ascii $cfg
 
-          # PJSIP's Release-Static config hardcodes
-          #   <RuntimeLibrary>MultiThreaded</RuntimeLibrary>  (= /MT)
-          # in every .vcxproj. Qt + our code link with /MD (dynamic CRT,
-          # vcpkg's default), and MSVC refuses to mix the two — link
-          # fails with LNK2038 "RuntimeLibrary mismatch". Patch all the
-          # PJSIP vcxproj files to MultiThreadedDLL (/MD) before building
-          # so the static .lib outputs are CRT-compatible with our exe.
-          Get-ChildItem pjproject-2.17 -Recurse -Filter *.vcxproj | ForEach-Object {
-              (Get-Content $_.FullName -Raw) `
-                  -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', `
-                           '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>' `
-                  | Set-Content -NoNewline $_.FullName
+          # PJSIP's Release-Static config sets /MT (MultiThreaded) for all
+          # projects via a shared property sheet at
+          #   build/vs/pjproject-vs14-release-static-defaults.props
+          # Qt + our code link with /MD (dynamic CRT, vcpkg's default), and
+          # MSVC refuses to mix the two — link fails with LNK2038
+          # "RuntimeLibrary mismatch". iter#9's patch only targeted .vcxproj
+          # files which DON'T contain the offending element — the .props
+          # files do. Patch BOTH file types and use a regex that tolerates
+          # optional Condition= attributes on the opening tag.
+          $files = Get-ChildItem pjproject-2.17 -Recurse `
+              -Include *.vcxproj,*.props,*.vsprops
+          Write-Host "Found $($files.Count) MSBuild config files to scan"
+          $patched = 0
+          foreach ($f in $files) {
+              $orig = Get-Content $f.FullName -Raw
+              if ($null -eq $orig) { continue }
+              # Match <RuntimeLibrary ...>MultiThreaded</RuntimeLibrary>
+              # and <RuntimeLibrary ...>MultiThreadedDebug</RuntimeLibrary>
+              # but NOT *DLL variants (they're already /MD). Negative
+              # lookahead (?!DLL) after "MultiThreaded(Debug)?" guards.
+              $new = $orig -replace `
+                  '(<RuntimeLibrary[^>]*>)MultiThreaded(Debug)?(?!DLL)(</RuntimeLibrary>)', `
+                  '$1MultiThreaded$2DLL$3'
+              if ($new -ne $orig) {
+                  Set-Content -NoNewline $f.FullName $new
+                  $patched++
+                  Write-Host "  patched: $($f.FullName.Substring('C:\p\'.Length))"
+              }
           }
+          Write-Host "Patched $patched files"
+          # Verification: any remaining un-DLL'd MultiThreaded references
+          # should only appear inside comments or unrelated text. Dump any
+          # that survive so we can see what the next iteration needs to
+          # cover.
+          Write-Host "=== Surviving MultiThreaded (non-DLL) RuntimeLibrary refs ==="
+          Get-ChildItem pjproject-2.17 -Recurse `
+              -Include *.vcxproj,*.props,*.vsprops `
+              | Select-String -Pattern '<RuntimeLibrary[^>]*>MultiThreaded(Debug)?</RuntimeLibrary>' `
+              | Format-Table -AutoSize
 
           # Build static libs, Release config, x64.  PJSIP ships a VS2015
           # solution (.sln); modern msbuild auto-retargets to the runner's
