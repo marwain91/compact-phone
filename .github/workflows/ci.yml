@@ -48,16 +48,48 @@ jobs:
             cmake --build --preset linux
 
       - name: Run unit tests
-        # All previously-excluded segfaulting suites should now pass:
-        # SipEngineLifecycle was libsrtp self-test crashing in
-        # EVP_MAC_CTX_new on Ubuntu 22.04's libcrypto 3.0.2 (same
-        # OpenSSL bug family as the keychain EVP_PKEY_HKDF crash fixed
-        # in #23). Ubuntu 24.04 ships libcrypto 3.0.13+ which patches
-        # both. Re-enabling the full test run.
+        # 24.04 bump fixed the keychain side (EVP_PKEY_HKDF code path)
+        # but SipEngineLifecycle + AccountsManagerUpdate still segfault.
+        # Keeping the full suite enabled so we can see in the gdb step
+        # below what's actually crashing now — initial guess (libsrtp
+        # EVP_MAC_CTX_new from the 22.04 backtrace) might not be the
+        # right diagnosis for 24.04.
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash -c "cd /workspace/build/linux && \
               ctest --output-on-failure -L unit"
+
+      # Diagnostic: get the actual stack frame on Ubuntu 24.04.
+      # gdb is installed in-step (not in Dockerfile) so it doesn't
+      # invalidate the docker layer cache. test_unit existence is
+      # checked first so we don't pile gdb noise on top of an
+      # earlier build failure.
+      - name: Diagnose SipEngine/Accounts segfaults (gdb backtrace)
+        if: always()
+        continue-on-error: true
+        run: |
+          docker compose -f tools/dev/docker-compose.yml exec -T dev \
+            bash -c 'set -e
+              apt-get update -qq && apt-get install -y -qq --no-install-recommends gdb
+              cd /workspace/build/linux
+              if [ ! -x ./tests/test_unit ]; then
+                echo "test_unit binary not built — skipping gdb diagnostic"
+                exit 0
+              fi
+              ulimit -c unlimited
+              for T in \
+                "SipEngineLifecycle.StartsAndStops" \
+                "AccountsManagerUpdateTest.UpdatePersistsChangedFields"; do
+                echo "=== gdb backtrace: $T ==="
+                gdb --batch --return-child-result \
+                  -ex "set pagination off" \
+                  -ex "run --gtest_filter=$T" \
+                  -ex "bt full" \
+                  -ex "info sharedlibrary" \
+                  --args ./tests/test_unit --gtest_filter=$T 2>&1 | \
+                  tail -200 || true
+                echo
+              done'
 
       # vcpkg writes per-port logs inside the container under
       # /opt/vcpkg/buildtrees/<port>/. Surfacing them on failure means
