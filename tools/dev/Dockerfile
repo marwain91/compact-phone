@@ -1,9 +1,11 @@
-# Ubuntu 24.04 (Noble) ships OpenSSL 3.0.13+ which patches the
-# EVP_MAC_CTX_new + EVP_KEYMGMT_names_do_all crashes that bit
-# Ubuntu 22.04's 3.0.2 — see CLAUDE.md "Linux x86_64 unit test
-# segfaults". Both the libsrtp init self-test (SipEngineLifecycle)
-# and EVP_PKEY_HKDF (already worked around via EVP_KDF in #23)
-# crash on 22.04; 24.04 unblocks both code paths.
+# Ubuntu 24.04 (Noble) ships a modern libsrtp2 (2.5+) that's compatible
+# with OpenSSL 3.x's EVP_MAC API. PJSIP 2.17's bundled libsrtp crashes
+# in its init self-test (srtp_auth_type_test -> hmac_dup ->
+# EVP_MAC_CTX_new) on both 22.04 (libcrypto 3.0.2) and 24.04 (3.0.13) —
+# the libsrtp+OpenSSL3 incompatibility, not the OpenSSL version. The
+# fix is to link PJSIP against system libsrtp2 via --with-external-srtp,
+# bypassing the broken bundled copy. Ubuntu 24.04's libsrtp2-dev is
+# what we want, hence the base bump.
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -68,6 +70,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libglu1-mesa-dev \
         libdbus-1-dev \
         libssl-dev \
+        libsrtp2-dev \
         libasound2-dev \
         libpulse-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -106,6 +109,7 @@ RUN cd /tmp \
         --disable-shared \
         --enable-static \
         --with-ssl=yes \
+        --with-external-srtp=1 \
         --disable-video \
         --disable-libwebrtc \
         --disable-libyuv \

@@ -48,23 +48,25 @@ jobs:
             cmake --build --preset linux
 
       - name: Run unit tests
-        # 24.04 bump fixed the keychain side (EVP_PKEY_HKDF code path)
-        # but SipEngineLifecycle + AccountsManagerUpdate still segfault.
-        # Keeping the full suite enabled so we can see in the gdb step
-        # below what's actually crashing now — initial guess (libsrtp
-        # EVP_MAC_CTX_new from the 22.04 backtrace) might not be the
-        # right diagnosis for 24.04.
+        # Full suite now that #17's two halves are fixed:
+        # - Keychain (EVP_PKEY_HKDF crash) → switched to EVP_KDF in #23
+        # - SipEngine / AccountsManagerUpdate (libsrtp self-test crash
+        #   inside hmac_dup -> EVP_MAC_CTX_new) → PJSIP now linked
+        #   against system libsrtp2 via --with-external-srtp in the
+        #   Dockerfile, bypassing PJSIP's broken-on-OpenSSL3 bundled
+        #   copy.
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash -c "cd /workspace/build/linux && \
               ctest --output-on-failure -L unit"
 
-      # Diagnostic: get the actual stack frame on Ubuntu 24.04.
-      # gdb is installed in-step (not in Dockerfile) so it doesn't
+      # Kept as a safety net: if any test starts crashing again, we
+      # get a backtrace inline in the job log instead of just SEGFAULT.
+      # gdb installed in-step (not in Dockerfile) so it doesn't
       # invalidate the docker layer cache. test_unit existence is
       # checked first so we don't pile gdb noise on top of an
       # earlier build failure.
-      - name: Diagnose SipEngine/Accounts segfaults (gdb backtrace)
+      - name: Diagnose segfaults if any (gdb backtrace)
         if: always()
         continue-on-error: true
         run: |
