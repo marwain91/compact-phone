@@ -40,7 +40,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/vcpkg
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
 
       - name: Setup vcpkg
         run: |
@@ -63,7 +63,9 @@ jobs:
           echo "PKG_CONFIG_PATH=$HOME/pjproject/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: Configure
-        run: cmake --preset macos
+        run: |
+          cmake --preset macos \
+            -DVCPKG_OVERLAY_TRIPLETS="${{ github.workspace }}/tools/release/triplets"
 
       - name: Build
         run: cmake --build --preset macos
@@ -75,58 +77,124 @@ jobs:
   build-windows:
     name: Windows native build + unsigned MSI
     runs-on: windows-2022
-    # The Windows build recipe is in active development on PR #7 —
-    # PJSIP-from-source with /MD vcxproj+props patch, MSVC dev env,
-    # short paths C:\v / C:\p / C:\b. Once that PR lands, the Windows
-    # half of this workflow needs the same updates (and the same
-    # changes also need porting into release-windows.yml — see #29).
-    # Until then this job will fail on Configure due to the missing
-    # windows-pjsip vcpkg feature. continue-on-error keeps the macOS
-    # job's verdict visible.
+    # Mirrors the Windows source-build branch's recipe:
+    # PJSIP built from source at C:\p, vcpkg at C:\v, CMake build at C:\b,
+    # /MD patching for PJSIP's MSBuild props/projects, and an explicit
+    # MSVC dev environment. Keep continue-on-error until that branch's
+    # matching FindPJSIP.cmake + vcpkg.json changes land on main.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache vcpkg
+      - name: Cache vcpkg (short path)
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/vcpkg
-          key: vcpkg-windows-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
+          path: C:\v
+          key: vcpkg-windows-shortpath-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
+          save-always: true
 
-      - name: Setup vcpkg
+      - name: Setup vcpkg (at C:\v)
         shell: pwsh
         run: |
-          if (-not (Test-Path vcpkg)) {
-            git clone https://github.com/microsoft/vcpkg.git
-            .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          if (-not (Test-Path C:\v)) {
+            git clone https://github.com/microsoft/vcpkg.git C:\v
+            C:\v\bootstrap-vcpkg.bat -disableMetrics
           }
-          "VCPKG_ROOT=$pwd/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_ROOT=C:\v" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install WiX 4
         shell: pwsh
         run: dotnet tool install --global wix
 
-      - name: Configure (PJSIP via vcpkg)
+      - name: Cache PJSIP build (short path)
+        id: pjsip-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\p
+          key: pjsip-windows-2.17-v5-md
+          save-always: true
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build PJSIP (at C:\p)
+        if: steps.pjsip-cache.outputs.cache-hit != 'true'
         shell: pwsh
-        run: cmake --preset windows -DVCPKG_MANIFEST_FEATURES="windows-pjsip"
+        run: |
+          New-Item -ItemType Directory -Path C:\p -Force | Out-Null
+          Invoke-WebRequest `
+              -Uri "https://github.com/pjsip/pjproject/archive/refs/tags/2.17.tar.gz" `
+              -OutFile C:\p\pjproject-2.17.tar.gz
+          Push-Location C:\p
+          tar -xzf pjproject-2.17.tar.gz
+
+          $cfg = Join-Path $PWD "pjproject-2.17\pjlib\include\pj\config_site.h"
+          [System.IO.File]::WriteAllText(
+              $cfg, "#pragma once`n#define PJSUA_MAX_CALLS 32`n")
+
+          $files = Get-ChildItem pjproject-2.17 -Recurse `
+              -Include *.vcxproj,*.props,*.vsprops
+          Write-Host "Found $($files.Count) MSBuild config files to scan"
+          $patched = 0
+          foreach ($f in $files) {
+              $orig = Get-Content $f.FullName -Raw
+              if ($null -eq $orig) { continue }
+              $new = $orig -replace `
+                  '(<RuntimeLibrary[^>]*>)MultiThreaded(Debug)?(?!DLL)(</RuntimeLibrary>)', `
+                  '$1MultiThreaded$2DLL$3'
+              if ($new -ne $orig) {
+                  [System.IO.File]::WriteAllText($f.FullName, $new)
+                  $patched++
+                  Write-Host "  patched: $($f.FullName.Substring('C:\p\'.Length))"
+              }
+          }
+          Write-Host "Patched $patched files"
+          Write-Host "=== Surviving MultiThreaded (non-DLL) RuntimeLibrary refs ==="
+          Get-ChildItem pjproject-2.17 -Recurse `
+              -Include *.vcxproj,*.props,*.vsprops `
+              | Select-String -Pattern '<RuntimeLibrary[^>]*>MultiThreaded(Debug)?</RuntimeLibrary>' `
+              | Format-Table -AutoSize
+
+          Push-Location pjproject-2.17
+          msbuild pjproject-vs14.sln /p:Configuration=Release-Static `
+              /p:Platform=x64 /m /v:m
+          Pop-Location
+          Pop-Location
+
+      - name: Export PJSIP_ROOT
+        shell: pwsh
+        run: |
+          "PJSIP_ROOT=C:\p\pjproject-2.17" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Set up MSVC dev environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake --preset windows -B C:\b `
+              -DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake
 
       - name: Build
         shell: pwsh
-        run: cmake --build --preset windows
+        run: cmake --build C:\b
 
       - name: Run unit tests
-        working-directory: build/windows
+        working-directory: C:\b
         shell: pwsh
         run: ctest --output-on-failure -L unit
 
       - name: Stage runtime (windeployqt)
         shell: pwsh
         run: |
-          $stage = "build\windows\stage"
+          $stage = "C:\b\stage"
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item build\windows\src\compactphone.exe $stage
+          Copy-Item C:\b\src\compactphone.exe $stage
           $deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" `
-              -Path vcpkg | Select-Object -First 1
+              -Path C:\b\vcpkg_installed,C:\v -ErrorAction SilentlyContinue `
+              | Select-Object -First 1
           if ($deploy) {
             & $deploy.FullName --qmldir src\ui\qml --release `
                 --no-translations --no-system-d3d-compiler `
@@ -143,7 +211,7 @@ jobs:
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           wix build packaging\windows\installer.wxs -arch x64 `
               -d Version=$version `
-              -d StageDir=build\windows\stage `
+              -d StageDir=C:\b\stage `
               -out "dist\compactphone-$version-unsigned.msi"
 
       - name: Upload MSI artifact
