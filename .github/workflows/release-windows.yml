@@ -1,9 +1,8 @@
 name: Release · Windows
 
-# Fires on every v* tag. Builds the MSI, signs it if the cert secrets are
-# present, and uploads to the matching GitHub Release. The signing step
-# is a no-op when CODE_SIGN_THUMBPRINT is empty, which keeps unsigned dev
-# tags working.
+# Fires on every v* tag. Builds the MSI, signs it, and uploads to the
+# matching GitHub Release. Tags containing "-test" may produce unsigned dev
+# artifacts; production tags fail if signing is not configured.
 #
 # Keep the C:\v, C:\p, C:\b short-path layout and PJSIP cache key stable;
 # Windows Qt/vcpkg paths get long enough to hit MAX_PATH otherwise.
@@ -20,6 +19,20 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate production signing config
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
+        run: |
+          if ($env:REF_NAME -like "*-test*") {
+            Write-Host "Test tag detected; unsigned Windows artifact is allowed."
+            exit 0
+          }
+          if ([string]::IsNullOrWhiteSpace($env:CODE_SIGN_THUMBPRINT)) {
+            throw "CODE_SIGN_THUMBPRINT is required for production Windows releases"
+          }
 
       - name: Restore vcpkg + installed deps cache
         id: vcpkg-cache
@@ -169,7 +182,7 @@ jobs:
                 --no-translations --no-system-d3d-compiler `
                 "$stage\compactphone.exe"
           } else {
-            Write-Warning "windeployqt.exe not found; MSI will be missing Qt runtime"
+            throw "windeployqt.exe not found; MSI would be missing Qt runtime"
           }
           Copy-Item LICENSE "$stage\LICENSE"
           Copy-Item THIRD_PARTY_LICENSES.md "$stage\THIRD_PARTY_LICENSES.md"
@@ -195,10 +208,14 @@ jobs:
         env:
           CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
           TIMESTAMP_URL: ${{ vars.TIMESTAMP_URL }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           if ([string]::IsNullOrEmpty($env:CODE_SIGN_THUMBPRINT)) {
-            Write-Host "CODE_SIGN_THUMBPRINT not set — uploading unsigned MSI"
-            exit 0
+            if ($env:REF_NAME -like "*-test*") {
+              Write-Host "CODE_SIGN_THUMBPRINT not set — uploading unsigned test MSI"
+              exit 0
+            }
+            throw "CODE_SIGN_THUMBPRINT is required for production Windows releases"
           }
           $ts = if ([string]::IsNullOrEmpty($env:TIMESTAMP_URL)) {
             "http://timestamp.digicert.com" } else { $env:TIMESTAMP_URL }

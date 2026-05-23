@@ -68,10 +68,10 @@ wix build packaging\windows\installer.wxs dist\stage-files.wxs -arch x64 `
 
 ## CI
 
-`.github/workflows/platform-matrix.yml` builds an unsigned MSI on manual
-validation runs. `.github/workflows/release-windows.yml` fires on tags
-matching `v*`, signs when certificate secrets are present, and uploads the
-MSI to the matching GitHub release.
+`.github/workflows/release-windows.yml` fires on tags matching `v*`, builds
+the MSI, and uploads it to the matching GitHub release. Tags containing
+`-test` may upload unsigned dev artifacts; production tags fail if
+`CODE_SIGN_THUMBPRINT` is not configured.
 
 ## SmartScreen reputation
 

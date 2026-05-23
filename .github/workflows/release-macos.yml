@@ -1,9 +1,9 @@
 name: Release · macOS
 
-# Fires on every v* tag. Builds the .app, signs + notarizes + staples
-# the DMG when the Apple Developer ID secrets are present, and uploads
-# to the matching GitHub Release. Skips signing/notarization (uploads
-# unsigned DMG) when the secrets are empty.
+# Fires on every v* tag. Builds the .app, signs + notarizes + staples the
+# DMG, and uploads to the matching GitHub Release. Tags containing "-test"
+# may produce unsigned dev artifacts; production tags fail if signing and
+# notarization secrets are missing.
 
 on:
   push:
@@ -19,6 +19,36 @@ jobs:
       VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate production signing config
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          if [[ "$REF_NAME" == *"-test"* ]]; then
+            echo "Test tag detected; unsigned macOS artifact is allowed."
+            exit 0
+          fi
+
+          missing=0
+          for name in \
+            P12_BASE64 \
+            P12_PASSWORD \
+            DEVELOPER_ID_APP \
+            NOTARY_APPLE_ID \
+            NOTARY_TEAM_ID \
+            NOTARY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "error: $name is required for production macOS releases" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
 
       - name: Install build deps
         # autoconf-archive ships the m4 macros vcpkg's libb2 portfile needs
@@ -110,6 +140,10 @@ jobs:
           # carried in the appcast's sparkle:shortVersionString and
           # inside the .app's Info.plist.
           if [ -z "$DEVELOPER_ID_APP" ]; then
+            if [[ "$REF_NAME" != *"-test"* ]]; then
+              echo "error: signing identity missing for production macOS release" >&2
+              exit 1
+            fi
             echo "Signing identity missing — producing unsigned DMG"
             mkdir -p dist
             STAGE=$(mktemp -d)
