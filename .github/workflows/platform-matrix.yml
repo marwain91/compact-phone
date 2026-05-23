@@ -217,7 +217,17 @@ jobs:
         run: |
           $stage = "C:\b\stage"
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item C:\b\src\compactphone.exe $stage
+          $app = Get-ChildItem -Path C:\b -Recurse -Filter "compactphone.exe" `
+              -File -ErrorAction SilentlyContinue `
+              | Where-Object { $_.FullName -notlike "$stage\*" } `
+              | Sort-Object { $_.FullName.Length } `
+              | Select-Object -First 1
+          if (-not $app) {
+            Get-ChildItem -Path C:\b -Recurse -Filter "*.exe" -File `
+                -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw "compactphone.exe not found under C:\b"
+          }
+          Copy-Item $app.FullName "$stage\compactphone.exe"
           $deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" `
               -Path C:\b\vcpkg_installed,C:\v -ErrorAction SilentlyContinue `
               | Select-Object -First 1
