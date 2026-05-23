@@ -5,8 +5,8 @@ name: Release · Windows
 # is a no-op when CODE_SIGN_THUMBPRINT is empty, which keeps unsigned dev
 # tags working.
 #
-# Build recipe mirrors platform-matrix.yml's Windows job. Keep the C:\v,
-# C:\p, C:\b short-path layout and PJSIP cache key in sync.
+# Keep the C:\v, C:\p, C:\b short-path layout and PJSIP cache key stable;
+# Windows Qt/vcpkg paths get long enough to hit MAX_PATH otherwise.
 
 on:
   push:

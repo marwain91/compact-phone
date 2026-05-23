@@ -18,8 +18,23 @@ permissions:
 jobs:
   build-publish:
     runs-on: ubuntu-22.04
+    env:
+      VCPKG_ARCHIVES_DIR: ${{ github.workspace }}/.vcpkg-cache
     steps:
       - uses: actions/checkout@v4
+
+      - name: Prepare vcpkg binary cache
+        run: mkdir -p "$VCPKG_ARCHIVES_DIR"
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-linux-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}
+          restore-keys: |
+            vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-
+            vcpkg-linux-${{ runner.os }}-
 
       - name: Build dev image
         run: docker compose -f tools/dev/docker-compose.yml build dev
@@ -36,6 +51,22 @@ jobs:
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash tools/release/build-linux-appimage.sh
+
+      - name: Save vcpkg binary cache
+        if: success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      - name: Save partial vcpkg binary cache
+        if: failure()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload AppImage to release
         uses: softprops/action-gh-release@v2
