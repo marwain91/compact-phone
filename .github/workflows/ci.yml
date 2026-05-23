@@ -45,8 +45,17 @@ jobs:
             vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-
             vcpkg-linux-${{ runner.os }}-
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build dev image
-        run: docker compose -f tools/dev/docker-compose.yml build dev
+        uses: docker/build-push-action@v6
+        with:
+          context: tools/dev
+          load: true
+          tags: compactphone-dev:latest
+          cache-from: type=gha,scope=compactphone-dev-${{ runner.os }}
+          cache-to: type=gha,scope=compactphone-dev-${{ runner.os }},mode=max
 
       - name: Start dev container
         run: docker compose -f tools/dev/docker-compose.yml up -d dev
