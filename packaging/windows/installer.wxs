@@ -37,7 +37,7 @@
 
         <MediaTemplate EmbedCab="yes" />
 
-        <Icon Id="CompactPhoneIcon" SourceFile="..\..\branding\compactphone.ico" />
+        <Icon Id="CompactPhoneIcon" SourceFile="branding\compactphone.ico" />
         <Property Id="ARPPRODUCTICON" Value="CompactPhoneIcon" />
         <Property Id="ARPHELPLINK" Value="https://github.com/marwain91/compact-phone" />
         <Property Id="ARPURLINFOABOUT" Value="https://github.com/marwain91/compact-phone" />
