@@ -17,7 +17,7 @@ for the Compact Phone MSI.
    - Capture the SHA-1 thumbprint of the cert after install: `certutil -store My`.
 2. **Timestamp authority URL** — bundled with most cert vendors. Defaults
    used by the signing step: `http://timestamp.digicert.com`.
-3. **WiX Toolset v4** — `dotnet tool install --global wix` on the Windows
+3. **WiX Toolset v4** — `dotnet tool install --global wix --version 4.0.6` on the Windows
    build runner.
 
 ## Build steps (manual)
