@@ -31,8 +31,7 @@ export NOTARY_PASSWORD="abcd-efgh-ijkl-mnop"   # app-specific password
 ./packaging/macos/build-dmg.sh
 ```
 
-Output lands in `dist/compactphone-<version>.dmg`. Verify on a fresh
-Mac:
+Output lands in `dist/Compact-Phone-macOS.dmg`. Verify on a fresh Mac:
 
 ```sh
 spctl --assess --type install -v dist/compactphone-*.dmg
@@ -41,10 +40,11 @@ xcrun stapler validate dist/compactphone-*.dmg
 
 ## CI
 
-The `release-macos.yml` workflow (TODO) fires on a `v*` tag, decrypts the
-signing identity from a runner-local keychain (provisioned via repository
-secret `APPLE_DEVELOPER_ID_P12_BASE64`), runs `build-dmg.sh`, and uploads
-the DMG to the GitHub release.
+The `release-macos.yml` workflow fires on a `v*` tag, imports the signing
+identity into a runner-local keychain from repository secrets, runs
+`build-dmg.sh`, generates `appcast-macos.xml`, and uploads both files to the
+GitHub release. Tags containing `-test` may upload unsigned dev artifacts;
+production tags fail if signing or notarization secrets are missing.
 
 Required repository secrets:
 - `APPLE_DEVELOPER_ID_P12_BASE64` — base64 of the .p12 export of the
@@ -80,7 +80,5 @@ ride along inside the bundle into the DMG.
 
 ## What's still missing
 
-- The `release-macos.yml` workflow.
 - Apple Developer ID procurement.
-- An updates appcast endpoint (see task #8, Sparkle).
 - The sleep/wake re-registration hook (task #15).

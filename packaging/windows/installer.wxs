@@ -15,7 +15,6 @@
   The MSI ships:
     • compactphone.exe (with the embedded .ico from src/compactphone.rc)
     • Qt6 runtime + plugins (deployed by windeployqt)
-    • Visual C++ runtime (chained via Visual C++ redistributable merge module)
     • LICENSE and THIRD_PARTY_LICENSES.md — the build pipeline copies
       these from the repo root into $(StageDir) before harvesting, so
       they end up under Program Files\Compact Phone alongside the .exe.

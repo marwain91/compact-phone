@@ -2,8 +2,7 @@ name: Release · Linux
 
 # Fires on every v* tag. Builds the binary inside the dev container
 # (same image CI uses, so identical toolchain), bundles into an
-# AppImage via linuxdeploy + linuxdeploy-plugin-qt, and uploads to
-# the matching GitHub Release.
+# AppImage via linuxdeploy, and uploads to the matching GitHub Release.
 #
 # Stable filename: Compact-Phone-Linux-x86_64.AppImage — landing page
 # can hardcode .../releases/latest/download/<filename>. Matches the
@@ -15,18 +14,58 @@ on:
 
 permissions:
   contents: write   # needed to attach assets to the release
+  packages: read    # needed to pull the Linux builder image from GHCR
 
 jobs:
   build-publish:
     runs-on: ubuntu-22.04
+    env:
+      VCPKG_ARCHIVES_DIR: ${{ github.workspace }}/.vcpkg-cache
+      COMPACTPHONE_DEV_IMAGE: ghcr.io/${{ github.repository }}/linux-builder:latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build dev image
-        run: docker compose -f tools/dev/docker-compose.yml build dev
+      - name: Prepare vcpkg binary cache
+        run: mkdir -p "$VCPKG_ARCHIVES_DIR"
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-linux-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}
+          restore-keys: |
+            vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-
+            vcpkg-linux-${{ runner.os }}-
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        continue-on-error: true
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull Linux builder image
+        id: builder-image
+        continue-on-error: true
+        run: docker pull "$COMPACTPHONE_DEV_IMAGE"
+
+      - name: Build dev image fallback
+        if: steps.builder-image.outcome != 'success'
+        uses: docker/build-push-action@v6
+        with:
+          context: tools/dev
+          load: true
+          tags: ${{ env.COMPACTPHONE_DEV_IMAGE }}
+          cache-from: type=gha,scope=compactphone-dev-${{ runner.os }}
+          cache-to: type=gha,scope=compactphone-dev-${{ runner.os }},mode=max
 
       - name: Start dev container
-        run: docker compose -f tools/dev/docker-compose.yml up -d dev
+        run: docker compose -f tools/dev/docker-compose.yml up -d --no-build dev
 
       - name: Configure + build
         run: |
@@ -36,59 +75,23 @@ jobs:
       - name: Bundle into AppImage
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
-            bash -c '
-              set -euo pipefail
-              cd /workspace
+            bash tools/release/build-linux-appimage.sh
 
-              # Install runtime deps needed by linuxdeploy (the dev image
-              # already has most build deps but not these specific tools).
-              apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-                  file desktop-file-utils zsync
+      - name: Save vcpkg binary cache
+        if: success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
-              # Stage the AppDir layout that linuxdeploy expects.
-              rm -rf AppDir
-              mkdir -p AppDir/usr/bin
-              mkdir -p AppDir/usr/share/applications
-              mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-
-              cp build/linux/src/compactphone AppDir/usr/bin/
-              cp packaging/linux/compactphone.desktop \
-                  AppDir/usr/share/applications/
-              cp branding/generated/icon_256x256.png \
-                  AppDir/usr/share/icons/hicolor/256x256/apps/compactphone.png
-
-              # Download linuxdeploy. Pinning to continuous releases — there
-              # is no semver-tagged release.
-              cd /tmp
-              wget -q -O linuxdeploy.AppImage \
-                  https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-              chmod +x linuxdeploy.AppImage
-
-              # APPIMAGE_EXTRACT_AND_RUN=1 lets these AppImages run
-              # without FUSE — docker containers do not have /dev/fuse
-              # by default. linuxdeploy unpacks itself to /tmp and runs from
-              # there.
-              export APPIMAGE_EXTRACT_AND_RUN=1
-
-              # Qt is statically linked by tools/dev/triplets/x64-linux.cmake,
-              # so there are no Qt shared libraries for linuxdeploy's Qt plugin
-              # to collect. Plain linuxdeploy is enough to gather the remaining
-              # dynamic system dependencies.
-              cd /workspace
-              /tmp/linuxdeploy.AppImage \
-                  --appdir AppDir \
-                  --output appimage \
-                  --desktop-file AppDir/usr/share/applications/compactphone.desktop \
-                  --icon-file branding/generated/icon_256x256.png
-
-              # linuxdeploy names the output Compact_Phone-<arch>.AppImage
-              # (replaces spaces with underscores). Move to the stable
-              # filename the landing page hardcodes.
-              mkdir -p dist
-              mv Compact_Phone*-x86_64.AppImage dist/Compact-Phone-Linux-x86_64.AppImage
-              chmod +x dist/Compact-Phone-Linux-x86_64.AppImage
-              ls -la dist/
-            '
+      - name: Save partial vcpkg binary cache
+        if: failure()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload AppImage to release
         uses: softprops/action-gh-release@v2

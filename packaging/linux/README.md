@@ -2,9 +2,11 @@
 
 Compact Phone ships on Linux as a single-file `.AppImage`:
 
-- `Compact-Phone-Linux-x86_64.AppImage` — runs on any glibc 2.35+ distro
-  (Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch, etc.) without installation
-- Bundles Qt 6, PJSIP, OpenSSL, libsrtp2, and any transitive runtime deps
+- `Compact-Phone-Linux-x86_64.AppImage` — currently targets glibc 2.39+
+  distros (Ubuntu 24.04+, Debian 13+, Fedora 40+, Arch, etc.) without
+  installation
+- Statically links Qt 6, PJSIP, OpenSSL, libsrtp2, and vcpkg libraries;
+  `linuxdeploy` gathers the remaining dynamic system dependencies
 - No package-manager integration: users `chmod +x` and double-click
 
 ## Files
@@ -21,7 +23,7 @@ Done by `.github/workflows/release-linux.yml` on every `v*` tag push:
    for CI Linux builds, so the binary is built against the same toolchain
 2. `cmake --preset linux && cmake --build --preset linux`
 3. Stage runtime into `AppDir/` (binary + desktop file + icon)
-4. Invoke `linuxdeployqt` to gather Qt + transitive `.so` deps and
+4. Invoke `linuxdeploy` to gather remaining dynamic `.so` deps and
    produce `Compact-Phone-Linux-x86_64.AppImage`
 5. Upload to the GitHub Release matching the tag
 
@@ -31,12 +33,11 @@ matches the macOS DMG and Windows MSI pattern.
 
 ## glibc compatibility note
 
-`linuxdeployqt`'s best practice is "build on the oldest distro you
-want to support" — binaries depend on the build host's glibc symbol
-versions. Our dev container is currently Ubuntu 24.04 (glibc 2.39),
-so the AppImage requires glibc 2.39+ on the user machine. That covers
-Ubuntu 24.04+, Debian 13+, Fedora 40+, Arch, and most recent rolling
-distros, but excludes Ubuntu 22.04 / Debian 12 / older.
+AppImages cannot bundle glibc, so binaries inherit the build host's glibc
+symbol floor. Our release currently builds in the dev container, which is
+Ubuntu 24.04 (glibc 2.39), so the AppImage requires glibc 2.39+ on the user
+machine. That covers Ubuntu 24.04+, Debian 13+, Fedora 40+, Arch, and most
+recent rolling distros, but excludes Ubuntu 22.04 / Debian 12 / older.
 
 If broader compatibility is needed later, the build container can be
 pinned to ubuntu:22.04 specifically for releases. See CLAUDE.md for

@@ -17,9 +17,8 @@ asset of that name on the most recent published release.
 | macOS appcast (auto-update feed) | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-macos.xml` |
 | Windows appcast | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-windows.xml` *(once PR #7 lands)* |
 
-The macOS DMG + appcast already ship. Linux AppImage produced from
-release-linux.yml. The Windows MSI + Windows appcast wait on the
-in-flight Windows PJSIP build work.
+The macOS DMG + appcast and Windows MSI are produced by the tag release
+workflows. Linux AppImage is produced from `release-linux.yml`.
 
 ## Landing-page integration (MyWebs side)
 

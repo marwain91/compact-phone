@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    # Docs-only changes don't need a 30-60 min platform-matrix build.
+    # Docs-only changes don't need a Linux dev-container build.
     # CLAUDE.md / docs/ / web/ / LICENSE / .gitignore are pure text and
     # cannot break the code, so skip CI entirely for PRs that change
     # only these. A mixed PR (e.g. .cpp + .md) still triggers CI because
@@ -15,14 +15,17 @@ on:
       - '.gitignore'
 
 # Auto-cancel older runs on the same PR when a new push arrives. Without
-# this, every force-push during an iteration stacks another full
-# platform-matrix build on top of the still-queued previous one — easy
-# to end up with 4-5 redundant runs gated on macOS runner pickup. The
-# concurrency group is keyed on workflow + ref (= refs/pull/N/merge for
-# PRs) so only same-PR queues are collapsed.
+# this, every force-push during an iteration stacks another full Linux
+# dev-container build on top of the still-queued previous one. The
+# concurrency group is keyed on workflow + ref (= refs/pull/N/merge for PRs)
+# so only same-PR queues are collapsed.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
 
 jobs:
   build-linux-dev-container:
@@ -30,6 +33,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       VCPKG_ARCHIVES_DIR: ${{ github.workspace }}/.vcpkg-cache
+      COMPACTPHONE_DEV_IMAGE: ghcr.io/${{ github.repository }}/linux-builder:latest
     steps:
       - uses: actions/checkout@v4
 
@@ -46,11 +50,34 @@ jobs:
             vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-
             vcpkg-linux-${{ runner.os }}-
 
-      - name: Build dev image
-        run: docker compose -f tools/dev/docker-compose.yml build dev
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        continue-on-error: true
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull Linux builder image
+        id: builder-image
+        continue-on-error: true
+        run: docker pull "$COMPACTPHONE_DEV_IMAGE"
+
+      - name: Build dev image fallback
+        if: steps.builder-image.outcome != 'success'
+        uses: docker/build-push-action@v6
+        with:
+          context: tools/dev
+          load: true
+          tags: ${{ env.COMPACTPHONE_DEV_IMAGE }}
+          cache-from: type=gha,scope=compactphone-dev-${{ runner.os }}
+          cache-to: type=gha,scope=compactphone-dev-${{ runner.os }},mode=max
 
       - name: Start dev container
-        run: docker compose -f tools/dev/docker-compose.yml up -d dev
+        run: docker compose -f tools/dev/docker-compose.yml up -d --no-build dev
 
       - name: Configure
         run: |
@@ -142,14 +169,6 @@ jobs:
           path: .vcpkg-cache
           key: vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-# macOS + Windows cross-platform builds moved to .github/workflows/
-# platform-matrix.yml — that workflow is triggered manually (workflow_
-# _dispatch) when a PR touches cross-platform code (PJSIP / Keychain /
-# packaging / FindPJSIP.cmake) and we want pre-merge cross-platform
-# verification. Tag pushes go directly to release-{macos,windows}.yml
-# which also handle signing + notarisation + publish.
-#
-# Routine PRs (UI tweaks, single-file changes) only run the Linux job
-# above — fast enough to be useful, catches ~90% of breakage. macOS-
-# specific paths (#ifdef APPLE) and Windows-specific paths get
-# validated via the manual platform-matrix.yml trigger when relevant.
+  # Routine PRs only run the Linux job above. Platform packages are built by
+  # the tag-triggered release-{macos,linux,windows}.yml workflows, which are
+  # the single source of truth for signing, packaging, and publishing.
