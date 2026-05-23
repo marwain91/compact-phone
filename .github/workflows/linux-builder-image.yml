@@ -28,7 +28,7 @@ jobs:
   build-publish:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Resolve image name
         id: image
