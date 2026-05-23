@@ -27,6 +27,8 @@ jobs:
   build-macos:
     name: macOS native build
     runs-on: macos-15
+    env:
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite"
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +45,16 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-
+
+      - name: Cache macOS vcpkg deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.vcpkg-cache
+            ${{ github.workspace }}/build/macos/vcpkg_installed
+          key: vcpkg-macos-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/release/triplets/arm64-osx.cmake') }}
+          restore-keys: |
+            vcpkg-macos-deps-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Setup vcpkg
         run: |
@@ -79,21 +91,23 @@ jobs:
   build-windows:
     name: Windows native build + unsigned MSI
     runs-on: windows-2022
-    # Mirrors the Windows source-build branch's recipe:
-    # PJSIP built from source at C:\p, vcpkg at C:\v, CMake build at C:\b,
-    # /MD patching for PJSIP's MSBuild props/projects, and an explicit
-    # MSVC dev environment. Keep continue-on-error until that branch's
-    # matching FindPJSIP.cmake + vcpkg.json changes land on main.
-    continue-on-error: true
+    # PJSIP is built from source at C:\p, vcpkg lives at C:\v, and CMake
+    # builds at C:\b to stay under Windows MAX_PATH during Qt/vcpkg builds.
+    # This job is intentionally blocking now that FindPJSIP.cmake supports
+    # the Windows source-built PJSIP layout.
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache vcpkg (short path)
-        uses: actions/cache@v4
+      - name: Restore vcpkg + installed deps cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
-          path: C:\v
+          path: |
+            C:\v
+            C:\b\vcpkg_installed
           key: vcpkg-windows-shortpath-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
-          save-always: true
+          restore-keys: |
+            vcpkg-windows-shortpath-
 
       - name: Setup vcpkg (at C:\v)
         shell: pwsh
@@ -106,15 +120,14 @@ jobs:
 
       - name: Install WiX 4
         shell: pwsh
-        run: dotnet tool install --global wix
+        run: dotnet tool install --global wix --version 4.0.6
 
       - name: Cache PJSIP build (short path)
         id: pjsip-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: C:\p
-          key: pjsip-windows-2.17-v5-md
-          save-always: true
+          key: pjsip-windows-2.17-v6-md
 
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -158,10 +171,23 @@ jobs:
               | Format-Table -AutoSize
 
           Push-Location pjproject-2.17
-          msbuild pjproject-vs14.sln /p:Configuration=Release-Static `
+          # Build the aggregate static-library project instead of the full
+          # solution. The full solution also links upstream test executables
+          # such as pjmedia_test.exe; those are irrelevant here and can fail
+          # independently of the libraries CompactPhone needs.
+          msbuild pjsip-apps\build\libpjproject.vcxproj `
+              /p:Configuration=Release-Static `
               /p:Platform=x64 /m /v:m
           Pop-Location
           Pop-Location
+
+      - name: Save PJSIP build cache
+        if: success() && steps.pjsip-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: C:\p
+          key: ${{ steps.pjsip-cache.outputs.cache-primary-key }}
 
       - name: Export PJSIP_ROOT
         shell: pwsh
@@ -179,6 +205,16 @@ jobs:
           cmake --preset windows -B C:\b `
               -DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake
 
+      - name: Save vcpkg + installed deps cache
+        if: success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            C:\v
+            C:\b\vcpkg_installed
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
       - name: Build
         shell: pwsh
         run: cmake --build C:\b
@@ -192,8 +228,21 @@ jobs:
         shell: pwsh
         run: |
           $stage = "C:\b\stage"
+          if (Test-Path $stage) {
+            Remove-Item $stage -Recurse -Force
+          }
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item C:\b\src\compactphone.exe $stage
+          $app = Get-ChildItem -Path C:\b -Recurse -Filter "compactphone.exe" `
+              -File -ErrorAction SilentlyContinue `
+              | Where-Object { $_.FullName -notlike "$stage\*" } `
+              | Sort-Object { $_.FullName.Length } `
+              | Select-Object -First 1
+          if (-not $app) {
+            Get-ChildItem -Path C:\b -Recurse -Filter "*.exe" -File `
+                -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw "compactphone.exe not found under C:\b"
+          }
+          Copy-Item $app.FullName "$stage\compactphone.exe"
           $deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" `
               -Path C:\b\vcpkg_installed,C:\v -ErrorAction SilentlyContinue `
               | Select-Object -First 1
@@ -204,6 +253,8 @@ jobs:
           } else {
             Write-Warning "windeployqt.exe not found; MSI will be missing Qt runtime"
           }
+          Copy-Item LICENSE "$stage\LICENSE"
+          Copy-Item THIRD_PARTY_LICENSES.md "$stage\THIRD_PARTY_LICENSES.md"
 
       - name: Build unsigned MSI
         shell: pwsh
@@ -211,9 +262,11 @@ jobs:
           $version = (Select-String -Path CMakeLists.txt `
               -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches.Groups[1].Value
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          wix build packaging\windows\installer.wxs -arch x64 `
+          .\packaging\windows\generate-stage-wxs.ps1 `
+              -StageDir C:\b\stage `
+              -OutputPath dist\stage-files.wxs
+          wix build packaging\windows\installer.wxs dist\stage-files.wxs -arch x64 `
               -d Version=$version `
-              -d StageDir=C:\b\stage `
               -out "dist\compactphone-$version-unsigned.msi"
 
       - name: Upload MSI artifact

@@ -57,7 +57,7 @@ never "no cache" — it's "your triplet's ABI hash changed". Common
 triggers: `vcpkg.json` feature-list edit, vcpkg baseline bump,
 overlay triplet added (the release-only fix below).
 
-### The release-only Linux triplet
+### Release-only vcpkg triplets
 
 `tools/dev/triplets/{x64,arm64}-linux.cmake` shadow vcpkg's
 built-ins with `set(VCPKG_BUILD_TYPE release)`. Without this, a
@@ -66,10 +66,10 @@ cold Linux build of `qtdeclarative` peaks at ~30 GB of buildtree
 file × 19 sublibraries). With it, peak is ~10 GB.
 
 The Linux CMake preset wires the overlay via `VCPKG_OVERLAY_TRIPLETS`.
-**macOS and Windows are NOT overlaid** — release-only on those is
-unnecessary (cache works fine on Mac, Windows binary is release
-anyway). Don't add overlay files for `arm64-osx` or `x64-windows`
-unless someone reports a similar disk-pressure issue there.
+macOS release/manual validation uses `tools/release/triplets/arm64-osx.cmake`
+through `vcpkg-configuration.json` so vcpkg cannot silently ignore it during
+manifest install. That triplet also sets `VCPKG_OSX_DEPLOYMENT_TARGET=12.0`.
+Windows is not overlaid; the binary is release anyway.
 
 ### PJSIP is built out-of-band on every platform — there is no vcpkg port
 

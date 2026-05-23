@@ -14,11 +14,5 @@
     "qtdeclarative",
     "qtquickcontrols2"
   ],
-  "overrides": [],
-  "features": {
-    "windows-pjsip": {
-      "description": "Pull PJSIP from vcpkg on Windows. Disabled by default because macOS / Linux build PJSIP out-of-band; enable with `vcpkg install --x-feature=windows-pjsip` from CI.",
-      "dependencies": ["pjsip"]
-    }
-  }
+  "overrides": []
 }

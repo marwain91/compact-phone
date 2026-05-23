@@ -36,9 +36,9 @@ TEST_F(ContactsManagerTest, AddListUpdateRemove)
 TEST_F(ContactsManagerTest, FindByUri)
 {
     compactphone::sip::ContactsManager mgr(&db);
-    compactphone::sip::Contact c{
-        .displayName = "Bob", .sipUri = "sip:bob@example.com"
-    };
+    compactphone::sip::Contact c;
+    c.displayName = "Bob";
+    c.sipUri = "sip:bob@example.com";
     mgr.add(c);
     auto found = mgr.findByUri("sip:bob@example.com");
     ASSERT_TRUE(found.has_value());
@@ -62,8 +62,12 @@ TEST_F(ContactsManagerTest, UpdateAndRemoveUnknownContactReturnFalse)
 TEST_F(ContactsManagerTest, ListOrdersByDisplayName)
 {
     compactphone::sip::ContactsManager mgr(&db);
-    compactphone::sip::Contact zed{.displayName = "Zed", .sipUri = "sip:zed@example.com"};
-    compactphone::sip::Contact amy{.displayName = "Amy", .sipUri = "sip:amy@example.com"};
+    compactphone::sip::Contact zed;
+    zed.displayName = "Zed";
+    zed.sipUri = "sip:zed@example.com";
+    compactphone::sip::Contact amy;
+    amy.displayName = "Amy";
+    amy.sipUri = "sip:amy@example.com";
     ASSERT_NE(mgr.add(zed), compactphone::sip::kInvalidContactId);
     ASSERT_NE(mgr.add(amy), compactphone::sip::kInvalidContactId);
 

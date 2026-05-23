@@ -3,5 +3,8 @@
     "kind": "git",
     "repository": "https://github.com/microsoft/vcpkg",
     "baseline": "8defa4b8bc4c35071c678e87a0e140dd433489bb"
-  }
+  },
+  "overlay-triplets": [
+    "tools/release/triplets"
+  ]
 }

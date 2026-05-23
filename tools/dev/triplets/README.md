@@ -42,13 +42,16 @@ debug variants back.
 - Release binaries shipped to users — those were already
   release-only (the `release-macos.yml` / `release-windows.yml`
   workflows use Release config).
-- macOS development builds — they use the `arm64-osx` triplet
-  which is **not** overlaid here; the local Mac cache already worked
-  fine with the default.
+- macOS app symbols — macOS uses `tools/release/triplets/arm64-osx.cmake`
+  for release-only dependencies, but the app itself still builds with
+  `RelWithDebInfo`.
 - Windows release builds — same, `x64-windows` is unaffected.
 
-This overlay only narrows Linux deps. macOS, Windows, and shipping
-release artifacts are all untouched.
+This overlay only narrows Linux deps. macOS release/manual validation
+uses `tools/release/triplets/arm64-osx.cmake`, wired through
+`vcpkg-configuration.json`, to avoid building Qt debug variants after
+Apple clang crashed in `qtshadertools` debug codegen on macos-15.
+Windows is untouched.
 
 ## How vcpkg finds these files
 

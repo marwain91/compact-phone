@@ -17,22 +17,29 @@ for the Compact Phone MSI.
    - Capture the SHA-1 thumbprint of the cert after install: `certutil -store My`.
 2. **Timestamp authority URL** — bundled with most cert vendors. Defaults
    used by the signing step: `http://timestamp.digicert.com`.
-3. **WiX Toolset v4** — `dotnet tool install --global wix` on the Windows
+3. **WiX Toolset v4** — `dotnet tool install --global wix --version 4.0.6` on the Windows
    build runner.
 
 ## Build steps (manual)
 
 ```powershell
-# 1. Build with PJSIP from vcpkg
-$env:VCPKG_ROOT = "C:\vcpkg"
-cmake --preset windows -DVCPKG_MANIFEST_FEATURES="windows-pjsip"
-cmake --build --preset windows
+# 1. Build with PJSIP from source
+$env:VCPKG_ROOT = "C:\v"
+$env:PJSIP_ROOT = "C:\p\pjproject-2.17"
+cmake --preset windows -B C:\b -DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake
+cmake --build C:\b
 
 # 2. Stage the runtime
-$stage = "build\windows\stage"
+$stage = "C:\b\stage"
 New-Item -ItemType Directory -Path $stage | Out-Null
-Copy-Item build\windows\src\compactphone.exe $stage
-& "$env:Qt6_DIR\..\..\..\bin\windeployqt.exe" --qmldir src\ui\qml `
+$app = Get-ChildItem -Path C:\b -Recurse -Filter "compactphone.exe" -File `
+    | Sort-Object { $_.FullName.Length } `
+    | Select-Object -First 1
+Copy-Item $app.FullName "$stage\compactphone.exe"
+$deploy = Get-ChildItem -Recurse -Filter "windeployqt.exe" `
+    -Path C:\b\vcpkg_installed,C:\v `
+    | Select-Object -First 1
+& $deploy.FullName --qmldir src\ui\qml `
     --release --no-translations --no-system-d3d-compiler `
     "$stage\compactphone.exe"
 
@@ -44,25 +51,27 @@ Copy-Item LICENSE $stage
 Copy-Item THIRD_PARTY_LICENSES.md $stage
 
 # 3. Build MSI
-cd packaging\windows
-wix build installer.wxs -arch x64 `
+New-Item -ItemType Directory -Path dist -Force | Out-Null
+.\packaging\windows\generate-stage-wxs.ps1 `
+    -StageDir $stage `
+    -OutputPath dist\stage-files.wxs
+wix build packaging\windows\installer.wxs dist\stage-files.wxs -arch x64 `
     -d Version="0.3.0" `
-    -d StageDir="..\..\$stage" `
-    -out "..\..\dist\compactphone-0.3.0.msi"
+    -out "dist\compactphone-0.3.0.msi"
 
 # 4. Sign (with EV cert in cert store)
 & signtool sign /v `
     /sha1 $env:CODE_SIGN_THUMBPRINT `
     /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
-    ..\..\dist\compactphone-0.3.0.msi
+    dist\compactphone-0.3.0.msi
 ```
 
 ## CI
 
-`.github/workflows/ci.yml` builds an unsigned MSI on every push. Signing
-runs on a separate, gated workflow (`release-windows.yml` — TODO) that
-fires on a tag matching `v*` and pulls the cert from a self-hosted signing
-runner (the token can't safely live on a hosted runner).
+`.github/workflows/platform-matrix.yml` builds an unsigned MSI on manual
+validation runs. `.github/workflows/release-windows.yml` fires on tags
+matching `v*`, signs when certificate secrets are present, and uploads the
+MSI to the matching GitHub release.
 
 ## SmartScreen reputation
 
@@ -74,6 +83,6 @@ until Microsoft accumulates positive telemetry. To accelerate:
 
 ## What's still missing
 
-- The `release-windows.yml` workflow.
-- Self-hosted signing runner provisioning notes.
+- Self-hosted signing runner provisioning notes if the EV certificate cannot
+  be exposed to GitHub-hosted runners.
 - Auto-update hookup (WinSparkle) — see task #8.
