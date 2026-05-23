@@ -315,24 +315,24 @@ matches exactly, so version-stamped names would 404 the landing-page
 buttons after every release. See `docs/download-urls.md` for the full
 URL list and HTML snippets MyWebs uses.
 
-### Main merges must not start expensive build workflows
+### Expensive builds run only for release tags or explicit manual dispatch
 
-`ci.yml`'s `on:` is `pull_request:` only. Earlier it also had
-`push: branches: [main]` but that was removed in #24: squash-merge +
-protected main + required PR CI means every merge commit's source is
-identical to what PR CI already validated. Running CI again on every
-main push just burns runner time we need free for tag-triggered release
-builds — and macOS pool contention is real (see next note).
+Release means a `v*` tag. The long-running build workflows must not run
+on every PR, pull request update, merge queue item, or `main` push.
+They burn hours of GitHub runner time and delay actual releases.
 
-Do not add `push: branches: [main]` to workflows that build Docker
-images, vcpkg dependencies, app binaries, or platform packages. Main
-merges may run cheap checks such as secret scanning or docs dispatch,
-but expensive builds should run only on release tags (`v*`) or explicit
-`workflow_dispatch` when someone intentionally asks for them. The
-`linux-builder-image.yml` workflow is manual for this reason.
+Do not add automatic `pull_request`, `merge_group`, or `push: branches:
+[main]` triggers to workflows that build Docker images, vcpkg/Qt
+dependencies, app binaries, tests in the dev container, installers, or
+platform packages. Those jobs may run only from:
 
-Re-add the push trigger only if we ever take in non-squash merges
-or run CI-bypassing admin merges.
+- release tags (`push.tags: ["v*"]`) for release workflows
+- explicit `workflow_dispatch` when a human intentionally asks for a
+  validation build or builder-image refresh
+
+Cheap checks are allowed on PR/main push: secret scanning and docs
+dispatch. `ci.yml` and `linux-builder-image.yml` are manual-only for
+this reason. The release workflows are tag-only.
 
 ### GitHub-hosted `macos-14` pool contention — bump to `macos-15`
 
