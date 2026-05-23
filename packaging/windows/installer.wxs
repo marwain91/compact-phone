@@ -2,9 +2,11 @@
 <!--
   WiX 4 source for the Compact Phone MSI.
 
-  Build pipeline (run from packaging/windows after the executable is staged):
-    wix build installer.wxs -arch x64 -d Version=$(version) \
-        -d StageDir=$(stage) -out compactphone-$(version).msi
+  Build pipeline (run from the repo root after the executable is staged):
+    .\packaging\windows\generate-stage-wxs.ps1 -StageDir $(stage) \
+        -OutputPath dist\stage-files.wxs
+    wix build packaging\windows\installer.wxs dist\stage-files.wxs \
+        -arch x64 -d Version=$(version) -out dist\compactphone-$(version).msi
 
   After build, sign with signtool using an EV code-signing cert:
     signtool sign /v /tr http://timestamp.digicert.com /td sha256 \
@@ -71,18 +73,14 @@
 
         <StandardDirectory Id="DesktopFolder" />
 
-        <!-- Files are harvested into the MainComponents group by `heat` in
-             the CI pipeline, then included here. The "$(StageDir)" variable
-             points at the post-windeployqt directory. -->
-        <ComponentGroup Id="MainComponents" Directory="INSTALLFOLDER">
-            <Files Include="$(StageDir)\**" />
-        </ComponentGroup>
+        <!-- Files are generated into the MainComponents group by
+             generate-stage-wxs.ps1 in the CI pipeline. -->
 
         <Component Id="StartMenuShortcut" Directory="StartMenuDir" Guid="*">
             <Shortcut Id="StartMenuShortcut"
                       Name="Compact Phone"
                       Description="A compact SIP softphone"
-                      Target="[#compactphone.exe]"
+                      Target="[#AppExe]"
                       WorkingDirectory="INSTALLFOLDER"
                       Icon="CompactPhoneIcon" />
             <RemoveFolder Id="RemoveStartMenuDir" On="uninstall" />
@@ -97,7 +95,7 @@
         <Component Id="DesktopShortcutComp" Directory="DesktopFolder" Guid="*">
             <Shortcut Id="DesktopShortcut"
                       Name="Compact Phone"
-                      Target="[#compactphone.exe]"
+                      Target="[#AppExe]"
                       WorkingDirectory="INSTALLFOLDER"
                       Icon="CompactPhoneIcon" />
             <RegistryValue Root="HKCU"

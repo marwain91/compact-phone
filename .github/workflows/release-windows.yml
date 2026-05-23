@@ -146,6 +146,9 @@ jobs:
         shell: pwsh
         run: |
           $stage = "C:\b\stage"
+          if (Test-Path $stage) {
+            Remove-Item $stage -Recurse -Force
+          }
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
           $app = Get-ChildItem -Path C:\b -Recurse -Filter "compactphone.exe" `
               -File -ErrorAction SilentlyContinue `
@@ -168,6 +171,8 @@ jobs:
           } else {
             Write-Warning "windeployqt.exe not found; MSI will be missing Qt runtime"
           }
+          Copy-Item LICENSE "$stage\LICENSE"
+          Copy-Item THIRD_PARTY_LICENSES.md "$stage\THIRD_PARTY_LICENSES.md"
 
       - name: Build MSI
         shell: pwsh
@@ -178,9 +183,11 @@ jobs:
           # .../releases/latest/download/Compact-Phone-Windows.msi
           $version = $env:REF_NAME -replace '^v', ''
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          wix build packaging\windows\installer.wxs -arch x64 `
+          .\packaging\windows\generate-stage-wxs.ps1 `
+              -StageDir C:\b\stage `
+              -OutputPath dist\stage-files.wxs
+          wix build packaging\windows\installer.wxs dist\stage-files.wxs -arch x64 `
               -d Version=$version `
-              -d StageDir=C:\b\stage `
               -out "dist\Compact-Phone-Windows.msi"
 
       - name: Sign MSI (gated on cert secret)

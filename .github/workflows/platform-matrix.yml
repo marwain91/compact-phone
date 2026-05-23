@@ -27,6 +27,8 @@ jobs:
   build-macos:
     name: macOS native build
     runs-on: macos-15
+    env:
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite"
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +45,16 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-
+
+      - name: Cache macOS vcpkg deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.vcpkg-cache
+            ${{ github.workspace }}/build/macos/vcpkg_installed
+          key: vcpkg-macos-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/release/triplets/arm64-osx.cmake') }}
+          restore-keys: |
+            vcpkg-macos-deps-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Setup vcpkg
         run: |
@@ -216,6 +228,9 @@ jobs:
         shell: pwsh
         run: |
           $stage = "C:\b\stage"
+          if (Test-Path $stage) {
+            Remove-Item $stage -Recurse -Force
+          }
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
           $app = Get-ChildItem -Path C:\b -Recurse -Filter "compactphone.exe" `
               -File -ErrorAction SilentlyContinue `
@@ -238,6 +253,8 @@ jobs:
           } else {
             Write-Warning "windeployqt.exe not found; MSI will be missing Qt runtime"
           }
+          Copy-Item LICENSE "$stage\LICENSE"
+          Copy-Item THIRD_PARTY_LICENSES.md "$stage\THIRD_PARTY_LICENSES.md"
 
       - name: Build unsigned MSI
         shell: pwsh
@@ -245,9 +262,11 @@ jobs:
           $version = (Select-String -Path CMakeLists.txt `
               -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches.Groups[1].Value
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          wix build packaging\windows\installer.wxs -arch x64 `
+          .\packaging\windows\generate-stage-wxs.ps1 `
+              -StageDir C:\b\stage `
+              -OutputPath dist\stage-files.wxs
+          wix build packaging\windows\installer.wxs dist\stage-files.wxs -arch x64 `
               -d Version=$version `
-              -d StageDir=C:\b\stage `
               -out "dist\compactphone-$version-unsigned.msi"
 
       - name: Upload MSI artifact
