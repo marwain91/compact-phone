@@ -72,17 +72,39 @@ jobs:
               # to /tmp, runs from there.
               export APPIMAGE_EXTRACT_AND_RUN=1
 
-              # Point the Qt plugin at vcpkg-installed Qt. vcpkg's Qt tools
-              # directory is case-sensitive on Linux (Qt6, not qt6), so locate
-              # qmake instead of hard-coding the triplet/tool casing.
-              QMAKE=$(find /workspace/build/linux/vcpkg_installed \
-                  -path "*/tools/*/bin/qmake6" -o \
-                  -path "*/tools/*/bin/qmake" \
-                  | sort | head -n 1)
+              # Point the Qt plugin at vcpkg-built Qt. The installed tree is
+              # normally under the CMake build dir, but CI has observed it
+              # missing by the bundle step while vcpkg's package staging tree
+              # still contains the Qt tools. Search known roots instead of
+              # hard-coding one install path or the Qt6 directory casing.
+              QMAKE=
+              for root in \
+                  /workspace/build/linux/vcpkg_installed \
+                  /workspace/vcpkg_installed \
+                  /opt/vcpkg/installed \
+                  /opt/vcpkg/packages; do
+                [ -d "$root" ] || continue
+                QMAKE=$(find "$root" -type f \
+                    \( -name qmake6 -o -name qmake \) \
+                    -path "*/tools/*/bin/*" -print \
+                    | sort | head -n 1)
+                [ -z "$QMAKE" ] || break
+              done
               if [ -z "$QMAKE" ]; then
-                echo "qmake not found under /workspace/build/linux/vcpkg_installed"
-                find /workspace/build/linux/vcpkg_installed -maxdepth 5 -type f \
-                    \( -name qmake -o -name qmake6 \) -print
+                echo "qmake not found under expected vcpkg roots"
+                for root in \
+                    /workspace/build/linux/vcpkg_installed \
+                    /workspace/vcpkg_installed \
+                    /opt/vcpkg/installed \
+                    /opt/vcpkg/packages; do
+                  echo "=== $root ==="
+                  if [ -d "$root" ]; then
+                    find "$root" -maxdepth 7 -type f \
+                        \( -name qmake -o -name qmake6 \) -print
+                  else
+                    echo "missing"
+                  fi
+                done
                 exit 1
               fi
               export QMAKE
