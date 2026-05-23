@@ -57,64 +57,26 @@ jobs:
               cp branding/generated/icon_256x256.png \
                   AppDir/usr/share/icons/hicolor/256x256/apps/compactphone.png
 
-              # Download linuxdeploy + the Qt plugin. Pinning to
-              # continuous releases — there is no semver-tagged release.
+              # Download linuxdeploy. Pinning to continuous releases — there
+              # is no semver-tagged release.
               cd /tmp
               wget -q -O linuxdeploy.AppImage \
                   https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-              wget -q -O linuxdeploy-plugin-qt.AppImage \
-                  https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-              chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+              chmod +x linuxdeploy.AppImage
 
               # APPIMAGE_EXTRACT_AND_RUN=1 lets these AppImages run
               # without FUSE — docker containers do not have /dev/fuse
-              # by default. linuxdeploy unpacks itself + the plugin
-              # to /tmp, runs from there.
+              # by default. linuxdeploy unpacks itself to /tmp and runs from
+              # there.
               export APPIMAGE_EXTRACT_AND_RUN=1
 
-              # Point the Qt plugin at vcpkg-built Qt. The installed tree is
-              # normally under the CMake build dir, but CI has observed it
-              # missing by the bundle step while vcpkg's package staging tree
-              # still contains the Qt tools. Search known roots instead of
-              # hard-coding one install path or the Qt6 directory casing.
-              QMAKE=
-              for root in \
-                  /workspace/build/linux/vcpkg_installed \
-                  /workspace/vcpkg_installed \
-                  /opt/vcpkg/installed \
-                  /opt/vcpkg/packages; do
-                [ -d "$root" ] || continue
-                QMAKE=$(find "$root" -type f \
-                    \( -name qmake6 -o -name qmake \) \
-                    -path "*/tools/*/bin/*" -print \
-                    | sort | head -n 1)
-                [ -z "$QMAKE" ] || break
-              done
-              if [ -z "$QMAKE" ]; then
-                echo "qmake not found under expected vcpkg roots"
-                for root in \
-                    /workspace/build/linux/vcpkg_installed \
-                    /workspace/vcpkg_installed \
-                    /opt/vcpkg/installed \
-                    /opt/vcpkg/packages; do
-                  echo "=== $root ==="
-                  if [ -d "$root" ]; then
-                    find "$root" -maxdepth 7 -type f \
-                        \( -name qmake -o -name qmake6 \) -print
-                  else
-                    echo "missing"
-                  fi
-                done
-                exit 1
-              fi
-              export QMAKE
-              echo "Using QMAKE=$QMAKE"
-              export QML_SOURCES_PATHS=/workspace/src/ui/qml
-
+              # Qt is statically linked by tools/dev/triplets/x64-linux.cmake,
+              # so there are no Qt shared libraries for linuxdeploy's Qt plugin
+              # to collect. Plain linuxdeploy is enough to gather the remaining
+              # dynamic system dependencies.
               cd /workspace
               /tmp/linuxdeploy.AppImage \
                   --appdir AppDir \
-                  --plugin qt \
                   --output appimage \
                   --desktop-file AppDir/usr/share/applications/compactphone.desktop \
                   --icon-file branding/generated/icon_256x256.png
