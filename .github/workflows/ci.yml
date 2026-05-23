@@ -35,7 +35,7 @@ jobs:
       VCPKG_ARCHIVES_DIR: ${{ github.workspace }}/.vcpkg-cache
       COMPACTPHONE_DEV_IMAGE: ghcr.io/${{ github.repository }}/linux-builder:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Prepare vcpkg binary cache
         run: mkdir -p "$VCPKG_ARCHIVES_DIR"
