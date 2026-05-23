@@ -26,6 +26,20 @@ docker compose -f tools/dev/docker-compose.yml exec dev \
     cmake --build --preset linux
 ```
 
+## Simulate the Linux release locally
+
+Before pushing a release tag, run the Linux release build locally through the
+same Docker dev container used by GitHub Actions:
+
+```bash
+bash tools/release/simulate-linux-release.sh
+```
+
+On arm64 Macs, this wrapper forces `linux/amd64` so the resulting AppImage
+matches the GitHub release target. The first run still has to build the
+dependencies, but the `vcpkg-archives-amd64` Docker volume is reused on later
+runs.
+
 ## Run tests
 
 Unit tests:
