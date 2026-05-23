@@ -1,19 +1,11 @@
 name: Linux builder image
 
 # Builds and publishes the reusable Linux builder image used by PR CI and
-# Linux release packaging. This moves the expensive toolchain/PJSIP image
-# layers out of every release tag run.
+# Linux release packaging. Manual only: main merges must not start expensive
+# Docker/vcpkg builds. Run this explicitly before a release when the image
+# recipe or dependency manifests changed.
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - ".github/workflows/linux-builder-image.yml"
-      - "tools/dev/Dockerfile"
-      - "tools/dev/docker-compose.yml"
-      - "tools/dev/triplets/**"
-      - "vcpkg.json"
-      - "vcpkg-configuration.json"
   workflow_dispatch:
 
 permissions:
