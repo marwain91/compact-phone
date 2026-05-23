@@ -72,8 +72,21 @@ jobs:
               # to /tmp, runs from there.
               export APPIMAGE_EXTRACT_AND_RUN=1
 
-              # Point the Qt plugin at vcpkg-installed Qt.
-              export QMAKE=/workspace/build/linux/vcpkg_installed/x64-linux/tools/qt6/bin/qmake6
+              # Point the Qt plugin at vcpkg-installed Qt. vcpkg's Qt tools
+              # directory is case-sensitive on Linux (Qt6, not qt6), so locate
+              # qmake instead of hard-coding the triplet/tool casing.
+              QMAKE=$(find /workspace/build/linux/vcpkg_installed \
+                  -path "*/tools/*/bin/qmake6" -o \
+                  -path "*/tools/*/bin/qmake" \
+                  | sort | head -n 1)
+              if [ -z "$QMAKE" ]; then
+                echo "qmake not found under /workspace/build/linux/vcpkg_installed"
+                find /workspace/build/linux/vcpkg_installed -maxdepth 5 -type f \
+                    \( -name qmake -o -name qmake6 \) -print
+                exit 1
+              fi
+              export QMAKE
+              echo "Using QMAKE=$QMAKE"
               export QML_SOURCES_PATHS=/workspace/src/ui/qml
 
               cd /workspace
