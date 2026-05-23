@@ -8,11 +8,16 @@ cd "$repo_root"
 # Docker emulation locally but avoids validating the wrong architecture.
 export DOCKER_DEFAULT_PLATFORM="${DOCKER_DEFAULT_PLATFORM:-linux/amd64}"
 export VCPKG_ARCHIVES_DIR="${VCPKG_ARCHIVES_DIR:-vcpkg-archives-amd64}"
+export COMPACTPHONE_DEV_IMAGE="${COMPACTPHONE_DEV_IMAGE:-compactphone-dev:latest}"
 
 compose=(docker compose -f tools/dev/docker-compose.yml)
 
-"${compose[@]}" build dev
-"${compose[@]}" up -d dev
+if [[ "$COMPACTPHONE_DEV_IMAGE" == ghcr.io/* ]]; then
+  docker pull "$COMPACTPHONE_DEV_IMAGE"
+else
+  "${compose[@]}" build dev
+fi
+"${compose[@]}" up -d --no-build dev
 "${compose[@]}" exec -T dev \
   bash -c "cmake --preset linux && cmake --build --preset linux"
 "${compose[@]}" exec -T dev \

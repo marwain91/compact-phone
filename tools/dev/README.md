@@ -40,6 +40,14 @@ matches the GitHub release target. The first run still has to build the
 dependencies, but the `vcpkg-archives-amd64` Docker volume is reused on later
 runs.
 
+To test with the same reusable builder image CI uses, set
+`COMPACTPHONE_DEV_IMAGE` before running the wrapper:
+
+```bash
+COMPACTPHONE_DEV_IMAGE=ghcr.io/marwain91/compact-phone/linux-builder:latest \
+  bash tools/release/simulate-linux-release.sh
+```
+
 ## Run tests
 
 Unit tests:

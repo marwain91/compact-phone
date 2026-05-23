@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: compactphone-dev:latest
+    image: ${COMPACTPHONE_DEV_IMAGE:-compactphone-dev:latest}
     container_name: compactphone-dev
     working_dir: /workspace
     environment:
