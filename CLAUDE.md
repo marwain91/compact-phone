@@ -315,15 +315,21 @@ matches exactly, so version-stamped names would 404 the landing-page
 buttons after every release. See `docs/download-urls.md` for the full
 URL list and HTML snippets MyWebs uses.
 
-### CI on `main` push is redundant with PR CI — don't add it back
+### Main merges must not start expensive build workflows
 
 `ci.yml`'s `on:` is `pull_request:` only. Earlier it also had
 `push: branches: [main]` but that was removed in #24: squash-merge +
 protected main + required PR CI means every merge commit's source is
 identical to what PR CI already validated. Running CI again on every
-main push just burns ~30-60 min of macOS/Windows runner time we need
-free for tag-triggered release builds — and macOS pool contention is
-real (see next note).
+main push just burns runner time we need free for tag-triggered release
+builds — and macOS pool contention is real (see next note).
+
+Do not add `push: branches: [main]` to workflows that build Docker
+images, vcpkg dependencies, app binaries, or platform packages. Main
+merges may run cheap checks such as secret scanning or docs dispatch,
+but expensive builds should run only on release tags (`v*`) or explicit
+`workflow_dispatch` when someone intentionally asks for them. The
+`linux-builder-image.yml` workflow is manual for this reason.
 
 Re-add the push trigger only if we ever take in non-squash merges
 or run CI-bypassing admin merges.
