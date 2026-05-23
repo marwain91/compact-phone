@@ -1,24 +1,13 @@
 name: CI
 
 on:
-  pull_request:
-    # Docs-only changes don't need a Linux dev-container build.
-    # CLAUDE.md / docs/ / web/ / LICENSE / .gitignore are pure text and
-    # cannot break the code, so skip CI entirely for PRs that change
-    # only these. A mixed PR (e.g. .cpp + .md) still triggers CI because
-    # at least one path is not ignored.
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'web/**'
-      - 'LICENSE'
-      - '.gitignore'
+  # Manual only. This workflow builds the Linux dev container, restores or
+  # builds vcpkg/Qt dependencies, compiles the app, and runs tests. It can
+  # take close to an hour on a cold cache, so it must not run automatically
+  # for every PR or merge.
+  workflow_dispatch:
 
-# Auto-cancel older runs on the same PR when a new push arrives. Without
-# this, every force-push during an iteration stacks another full Linux
-# dev-container build on top of the still-queued previous one. The
-# concurrency group is keyed on workflow + ref (= refs/pull/N/merge for PRs)
-# so only same-PR queues are collapsed.
+# Auto-cancel older manual runs on the same ref when a new run starts.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -169,6 +158,6 @@ jobs:
           path: .vcpkg-cache
           key: vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-  # Routine PRs only run the Linux job above. Platform packages are built by
-  # the tag-triggered release-{macos,linux,windows}.yml workflows, which are
-  # the single source of truth for signing, packaging, and publishing.
+  # Routine PRs do not run this job. Platform packages are built by the
+  # tag-triggered release-{macos,linux,windows}.yml workflows, which are the
+  # single source of truth for signing, packaging, and publishing.
