@@ -24,6 +24,7 @@ permissions:
   contents: write
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   BUILD_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
 
@@ -81,7 +82,7 @@ jobs:
         run: brew install cmake ninja pkg-config create-dmg autoconf autoconf-archive automake libtool
 
       - name: Cache vcpkg
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/vcpkg
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
@@ -89,7 +90,7 @@ jobs:
             vcpkg-${{ runner.os }}-
 
       - name: Cache macOS vcpkg deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ github.workspace }}/.vcpkg-cache
@@ -202,7 +203,7 @@ jobs:
             --output dist/appcast-macos.xml
 
       - name: Upload DMG + appcast to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           prerelease: ${{ contains(env.RELEASE_TAG, '-test') }}
