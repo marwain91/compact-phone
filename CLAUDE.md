@@ -110,11 +110,12 @@ expect libb2 to fail on first cold install. **If you add a new
 release workflow, mirror this brew/apt install** — release workflows
 don't inherit from `ci.yml` and drift is easy.
 
-### gitleaks-action v2 needs `GITHUB_TOKEN`, not `GH_TOKEN`
+### Secret scan uses the gitleaks CLI, not the Node action
 
-`.github/workflows/secret-scan.yml` passes `GITHUB_TOKEN`. The action
-silently ignores `GH_TOKEN` and fails on every PR with "GITHUB_TOKEN
-is now required to scan pull requests" if you change it.
+`.github/workflows/secret-scan.yml` downloads a pinned gitleaks CLI
+release and verifies its SHA-256 before running `gitleaks detect`.
+Do not switch back to `gitleaks/gitleaks-action@v2`; it still declares
+`node20` and emits GitHub Actions runtime deprecation warnings.
 
 ### GitHub Actions JavaScript actions are kept on Node 24
 
@@ -122,9 +123,8 @@ Workflow JS actions should use Node 24-capable majors where available:
 `actions/cache@v5`, Docker actions `setup-buildx@v4` / `login@v4` /
 `build-push@v7`, `actions/upload-artifact@v7`,
 `microsoft/setup-msbuild@v3`, and `softprops/action-gh-release@v3`.
-Keep `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` in workflows because
-`gitleaks/gitleaks-action@v2` and `ilammy/msvc-dev-cmd@v1` still
-declare `node20` as of 2026-05-24.
+Keep `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` in workflows so we
+exercise GitHub's upcoming default before it becomes mandatory.
 
 ### Default ssh + non-interactive => first-time host key rejection
 
@@ -175,9 +175,10 @@ built with MSVC, and linking MinGW-built compactphone against MSVC
 Qt is an ABI mismatch — and triggers PJSIP's non-MSVC codepath
 (`pj/compat/string.h` requires `wcsicmp` etc. PJSIP doesn't ship).
 
-Fix: run `ilammy/msvc-dev-cmd@v1` with `arch: amd64` BEFORE the
-cmake configure step. It runs `vcvarsall.bat` and prepends MSVC's
-bin to PATH for the rest of the job.
+Fix: call Visual Studio's `VsDevCmd.bat` with `-arch=amd64` before
+the CMake configure and build commands. `release-windows.yml` locates
+it with `vswhere`; do not use `ilammy/msvc-dev-cmd@v1`, which still
+declares `node20`.
 
 ### `setup-msbuild` adds VS's bundled vcpkg to PATH; force our toolchain
 
