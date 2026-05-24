@@ -205,6 +205,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
+          prerelease: ${{ contains(env.RELEASE_TAG, '-test') }}
           files: |
             dist/*.dmg
             dist/appcast-macos.xml
