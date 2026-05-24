@@ -69,7 +69,9 @@ The Linux CMake preset wires the overlay via `VCPKG_OVERLAY_TRIPLETS`.
 macOS release/manual validation uses `tools/release/triplets/arm64-osx.cmake`
 through `vcpkg-configuration.json` so vcpkg cannot silently ignore it during
 manifest install. That triplet also sets `VCPKG_OSX_DEPLOYMENT_TARGET=12.0`.
-Windows is not overlaid; the binary is release anyway.
+Windows release/manual validation uses `tools/release/triplets/x64-windows.cmake`
+for the same reason: default `x64-windows` builds both Debug and Release
+variants of Qt, which can leave `qtdeclarative` building for hours on cold CI.
 
 ### PJSIP is built out-of-band on every platform — there is no vcpkg port
 

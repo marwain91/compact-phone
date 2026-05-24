@@ -65,7 +65,7 @@ jobs:
           path: |
             C:\v
             C:\b\vcpkg_installed
-          key: vcpkg-windows-shortpath-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
+          key: vcpkg-windows-shortpath-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/release/triplets/*.cmake') }}
           restore-keys: |
             vcpkg-windows-shortpath-
 

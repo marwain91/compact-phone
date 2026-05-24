@@ -45,13 +45,15 @@ debug variants back.
 - macOS app symbols — macOS uses `tools/release/triplets/arm64-osx.cmake`
   for release-only dependencies, but the app itself still builds with
   `RelWithDebInfo`.
-- Windows release builds — same, `x64-windows` is unaffected.
+- Windows release builds — same, `tools/release/triplets/x64-windows.cmake`
+  skips dependency Debug variants while keeping the app build in RelWithDebInfo.
 
 This overlay only narrows Linux deps. macOS release/manual validation
 uses `tools/release/triplets/arm64-osx.cmake`, wired through
 `vcpkg-configuration.json`, to avoid building Qt debug variants after
 Apple clang crashed in `qtshadertools` debug codegen on macos-15.
-Windows is untouched.
+Windows release/manual validation uses `tools/release/triplets/x64-windows.cmake`
+for the same release-only dependency behavior.
 
 ## How vcpkg finds these files
 
