@@ -116,6 +116,16 @@ don't inherit from `ci.yml` and drift is easy.
 silently ignores `GH_TOKEN` and fails on every PR with "GITHUB_TOKEN
 is now required to scan pull requests" if you change it.
 
+### GitHub Actions JavaScript actions are kept on Node 24
+
+Workflow JS actions should use Node 24-capable majors where available:
+`actions/cache@v5`, Docker actions `setup-buildx@v4` / `login@v4` /
+`build-push@v7`, `actions/upload-artifact@v7`,
+`microsoft/setup-msbuild@v3`, and `softprops/action-gh-release@v3`.
+Keep `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` in workflows because
+`gitleaks/gitleaks-action@v2` and `ilammy/msvc-dev-cmd@v1` still
+declare `node20` as of 2026-05-24.
+
 ### Default ssh + non-interactive => first-time host key rejection
 
 `ssh almalinux@new-host hostname` (with a command argument)
@@ -171,7 +181,7 @@ bin to PATH for the rest of the job.
 
 ### `setup-msbuild` adds VS's bundled vcpkg to PATH; force our toolchain
 
-`microsoft/setup-msbuild@v2` (which we need for PJSIP's msbuild step)
+`microsoft/setup-msbuild@v3` (which we need for PJSIP's msbuild step)
 also adds VS's bundled `C:\Program Files\...\VC\vcpkg\` to PATH. That
 vcpkg's `scripts/buildsystems/vcpkg.cmake` then wins over our
 `C:\v\scripts\buildsystems\vcpkg.cmake` despite our `VCPKG_ROOT=C:\v`.
@@ -230,7 +240,7 @@ Knock-on: bump the PJSIP cache key (e.g. `-v3-md`) whenever you
 change build flags that affect symbol/CRT linkage — otherwise the
 old cache shadows the fix.
 
-### `actions/cache@v4` does NOT save on job failure by default
+### `actions/cache` does NOT save on job failure by default
 
 For expensive caches (Windows Qt cold build is ~2h), use
 `save-always: true` so a failed compile downstream doesn't throw
@@ -238,7 +248,7 @@ away cache progress. Otherwise every iteration on a failing build
 redoes the cold work.
 
 Also cache `vcpkg_installed/`, not just `vcpkg/` root — see
-`.github/workflows/ci.yml` Windows job for the path list.
+`.github/workflows/release-windows.yml` for the path list.
 
 ### macOS Dock tooltip uses bundle directory name, not Info.plist
 
