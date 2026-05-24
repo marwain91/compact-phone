@@ -26,8 +26,8 @@ permissions:
   contents: write   # needed to attach assets to the release
 
 env:
-  # ilammy/msvc-dev-cmd@v1 still declares node20; run it under Node 24 now
-  # because GitHub will force that runtime by default soon.
+  # Exercise GitHub's upcoming default now so release workflows do not
+  # surprise us when Node 24 becomes mandatory for JavaScript actions.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   BUILD_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
@@ -157,16 +157,31 @@ jobs:
         run: |
           "PJSIP_ROOT=C:\p\pjproject-2.17" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Set up MSVC dev environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: amd64
+      - name: Locate VS Dev Command Prompt
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} `
+              "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstall = & $vswhere -latest -products * `
+              -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+              -property installationPath
+          if ([string]::IsNullOrWhiteSpace($vsInstall)) {
+            throw "Visual Studio with VC tools not found"
+          }
+          $devcmd = Join-Path $vsInstall "Common7\Tools\VsDevCmd.bat"
+          if (-not (Test-Path $devcmd)) {
+            throw "VsDevCmd.bat not found at $devcmd"
+          }
+          "VSDEVCMD=$devcmd" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Configure
         shell: pwsh
         run: |
-          cmake --preset windows -B C:\b `
-              -DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake
+          $cmd = "`"$env:VSDEVCMD`" -arch=amd64 -host_arch=amd64 " +
+              "&& cmake --preset windows -B C:\b " +
+              "-DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake"
+          cmd /c $cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Save vcpkg + installed deps cache
         if: success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
@@ -180,7 +195,11 @@ jobs:
 
       - name: Build
         shell: pwsh
-        run: cmake --build C:\b
+        run: |
+          $cmd = "`"$env:VSDEVCMD`" -arch=amd64 -host_arch=amd64 " +
+              "&& cmake --build C:\b"
+          cmd /c $cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Stage runtime (windeployqt)
         shell: pwsh
