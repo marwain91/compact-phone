@@ -10,20 +10,44 @@ name: Release · Windows
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, e.g. v0.1.0-test7"
+        required: true
+        type: string
+      source_ref:
+        description: "Git ref to build. Empty = selected workflow ref."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write   # needed to attach assets to the release
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  BUILD_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
 
 jobs:
   build-sign-publish:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Validate release tag
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG -notlike "v*") {
+            throw "release tag must start with v; got '$env:RELEASE_TAG'"
+          }
 
       - name: Validate production signing config
         shell: pwsh
         env:
-          REF_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ env.RELEASE_TAG }}
           CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
         run: |
           if ($env:REF_NAME -like "*-test*") {
@@ -190,7 +214,7 @@ jobs:
       - name: Build MSI
         shell: pwsh
         env:
-          REF_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ env.RELEASE_TAG }}
         run: |
           # Stable filename — landing page can hardcode
           # .../releases/latest/download/Compact-Phone-Windows.msi
@@ -208,7 +232,7 @@ jobs:
         env:
           CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
           TIMESTAMP_URL: ${{ vars.TIMESTAMP_URL }}
-          REF_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ env.RELEASE_TAG }}
         run: |
           if ([string]::IsNullOrEmpty($env:CODE_SIGN_THUMBPRINT)) {
             if ($env:REF_NAME -like "*-test*") {
@@ -225,5 +249,6 @@ jobs:
       - name: Upload MSI to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: dist/*.msi
           fail_on_unmatched_files: true

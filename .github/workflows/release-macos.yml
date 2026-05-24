@@ -8,9 +8,24 @@ name: Release · macOS
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, e.g. v0.1.0-test7"
+        required: true
+        type: string
+      source_ref:
+        description: "Git ref to build. Empty = selected workflow ref."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  BUILD_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
 
 jobs:
   build-sign-publish:
@@ -19,10 +34,19 @@ jobs:
       VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite"
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Validate release tag
+        run: |
+          if [[ "$RELEASE_TAG" != v* ]]; then
+            echo "error: release tag must start with v; got '$RELEASE_TAG'" >&2
+            exit 1
+          fi
 
       - name: Validate production signing config
         env:
-          REF_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ env.RELEASE_TAG }}
           P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
           DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
@@ -132,7 +156,7 @@ jobs:
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
-          REF_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ env.RELEASE_TAG }}
         run: |
           # Stable filename (no version) so the landing-page Download
           # button can hardcode .../releases/latest/download/Compact-Phone-macOS.dmg
@@ -164,7 +188,7 @@ jobs:
       - name: Generate macOS appcast
         env:
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
-          REF_NAME: ${{ github.ref_name }}
+          REF_NAME: ${{ env.RELEASE_TAG }}
         run: |
           python3 -m pip install --quiet --user cryptography || true
           VERSION="${REF_NAME#v}"
@@ -180,6 +204,7 @@ jobs:
       - name: Upload DMG + appcast to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             dist/*.dmg
             dist/appcast-macos.xml
