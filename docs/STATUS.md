@@ -55,7 +55,7 @@ These are all v0.4 / pre-GA work — none of them affect the core SIP feature se
 | Auto-update (Sparkle, WinSparkle) | v0.4 | Tied to installers |
 | Native keychain backends (macOS Security.framework, Windows wincred, Linux libsecret) | v0.4 | Tied to installers; file backend works as fallback |
 | Tray icon + autostart | v0.4 | OS integration |
-| Crash reporting (Sentry) | v1.0 | Needs Sentry project/DSN |
+| Crash reporting (Sentry) | Release hardening | Optional release wiring exists; needs project `SENTRY_DSN` secret and live crash validation |
 | NAT matrix QA (same-LAN, STUN, symmetric NAT, TLS-only egress) | Pre-GA | Real PBX matrix |
 | Interop matrix QA (Asterisk, FreeSWITCH, 3CX, cloud PBX) | Pre-GA | Real PBX matrix |
 | External-client inbound test for the 3 disabled integration tests | Pre-GA | Needs an external SIP client setup |

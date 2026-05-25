@@ -138,8 +138,9 @@ OTHER DEALINGS IN THE SOFTWARE.
 - **Upstream:** <https://github.com/getsentry/sentry-native>
 - **Licence:** MIT
 - **Compliance notes:** Only included when the build option
-  `COMPACTPHONE_ENABLE_SENTRY` is enabled. Default builds and the
-  shipped installers do not include it.
+  `COMPACTPHONE_ENABLE_SENTRY` is enabled. Release workflows enable it
+  only when the repository has a `SENTRY_DSN` secret configured, and the
+  app still requires explicit user opt-in before sending crash reports.
 
 ## Fonts and branding assets
 
