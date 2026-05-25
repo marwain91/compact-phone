@@ -24,6 +24,16 @@ constexpr const char *kDefaultFeed =
 #else
     "https://github.com/marwain91/compact-phone/releases/latest/download/appcast-linux.xml";
 #endif
+
+bool isUsableHttpUrl(const QUrl &url)
+{
+    const QString scheme = url.scheme().toLower();
+    return url.isValid()
+        && !url.isEmpty()
+        && !url.host().isEmpty()
+        && (scheme == QLatin1String("https")
+            || scheme == QLatin1String("http"));
+}
 }
 
 UpdateChecker::UpdateChecker(QObject *parent)
@@ -53,7 +63,13 @@ void UpdateChecker::check()
         emit upToDate();
         return;
     }
-    QUrl url(m_feedUrl);
+    QUrl url(m_feedUrl, QUrl::StrictMode);
+    if (!isUsableHttpUrl(url)) {
+        spdlog::warn("UpdateChecker: invalid feed URL: {}",
+                     m_feedUrl.toStdString());
+        emit checkFailed(QStringLiteral("invalid update feed URL"));
+        return;
+    }
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::UserAgentHeader,
                   QStringLiteral("CompactPhone/%1").arg(m_currentVersion));
@@ -95,12 +111,13 @@ UpdateChecker::ParsedFeed UpdateChecker::parseAppcast(const QByteArray &xml)
             ? shortVersion
             : attrs.value("sparkle:version").toString();
         const QString url = attrs.value("url").toString();
-        if (version.isEmpty() || url.isEmpty()) continue;
+        const QUrl downloadUrl(url, QUrl::StrictMode);
+        if (version.isEmpty() || !isUsableHttpUrl(downloadUrl)) continue;
 
         if (best.version.isEmpty()
             || compareVersions(best.version, version) < 0) {
             best.version = version;
-            best.url = QUrl(url);
+            best.url = downloadUrl;
         }
     }
     return best;

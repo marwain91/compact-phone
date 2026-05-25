@@ -1,8 +1,27 @@
 #include "core/UpdateChecker.h"
 
+#include <QCoreApplication>
+#include <QSignalSpy>
+
 #include <gtest/gtest.h>
 
 using compactphone::UpdateChecker;
+
+namespace {
+
+QCoreApplication *ensureQApp()
+{
+    static int argc = 1;
+    static char appName[] = "test_update_checker";
+    static char *argv[] = {appName, nullptr};
+    static QCoreApplication *app = nullptr;
+    if (!QCoreApplication::instance()) {
+        app = new QCoreApplication(argc, argv);
+    }
+    return QCoreApplication::instance();
+}
+
+} // namespace
 
 TEST(UpdateCheckerVersions, OrdersDottedNumbersCorrectly)
 {
@@ -103,4 +122,61 @@ TEST(UpdateCheckerParse, EnclosureMissingUrlOrVersionIsSkipped)
 </rss>)";
     const auto feed = UpdateChecker::parseAppcast(xml);
     EXPECT_EQ(feed.version, "0.3.1");
+}
+
+TEST(UpdateCheckerParse, SkipsUnsafeDownloadUrls)
+{
+    const QByteArray xml = R"APPCAST(<?xml version="1.0"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <item>
+      <enclosure url="javascript:alert(1)"
+                 sparkle:shortVersionString="9.0.0"
+                 length="0" type="application/octet-stream" />
+    </item>
+    <item>
+      <enclosure url="ftp://example.com/cp-8.0.0.dmg"
+                 sparkle:shortVersionString="8.0.0"
+                 length="0" type="application/octet-stream" />
+    </item>
+    <item>
+      <enclosure url="https://example.com/cp-0.6.0.dmg"
+                 sparkle:shortVersionString="0.6.0"
+                 length="0" type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>)APPCAST";
+    const auto feed = UpdateChecker::parseAppcast(xml);
+    EXPECT_EQ(feed.version, "0.6.0");
+    EXPECT_EQ(feed.url, QUrl("https://example.com/cp-0.6.0.dmg"));
+}
+
+TEST(UpdateCheckerParse, ReturnsEmptyWhenOnlyUnsafeDownloadUrlsExist)
+{
+    const QByteArray xml = R"(<?xml version="1.0"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <item>
+      <enclosure url="file:///tmp/Compact-Phone.dmg"
+                 sparkle:shortVersionString="9.0.0"
+                 length="0" type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>)";
+    const auto feed = UpdateChecker::parseAppcast(xml);
+    EXPECT_TRUE(feed.version.isEmpty());
+    EXPECT_FALSE(feed.url.isValid() && !feed.url.isEmpty());
+}
+
+TEST(UpdateCheckerCheck, RejectsInvalidFeedUrlWithoutStartingNetworkFetch)
+{
+    ensureQApp();
+    UpdateChecker checker;
+    checker.setFeedUrl("not a url");
+    QSignalSpy failed(&checker, &UpdateChecker::checkFailed);
+
+    checker.check();
+
+    ASSERT_EQ(failed.count(), 1);
+    EXPECT_TRUE(failed.takeFirst().at(0).toString().contains("invalid"));
 }

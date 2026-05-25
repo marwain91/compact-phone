@@ -749,7 +749,14 @@ QString PhoneController::latestUpdateUrl() const
 
 void PhoneController::openLatestUpdateUrl()
 {
-    if (m_latestUpdateUrl.isEmpty() || !m_latestUpdateUrl.isValid()) {
+    const QString scheme = m_latestUpdateUrl.scheme().toLower();
+    const bool canOpen =
+        m_latestUpdateUrl.isValid()
+        && !m_latestUpdateUrl.isEmpty()
+        && !m_latestUpdateUrl.host().isEmpty()
+        && (scheme == QLatin1String("https")
+            || scheme == QLatin1String("http"));
+    if (!canOpen) {
         postNotice(tr("No update download available"), 3000);
         return;
     }
