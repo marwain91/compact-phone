@@ -185,16 +185,11 @@ int main(int argc, char *argv[])
         });
     }
 
-    // Crash reporting — only honored when the build was configured with
-    // -DCOMPACTPHONE_ENABLE_SENTRY=ON AND the user has opted in via
-    // Settings → Advanced. Both gates are checked inside initSentry.
-#if defined(COMPACTPHONE_SENTRY_DSN)
+    // Crash reporting is only available when the release build embeds a
+    // usable DSN, and it remains gated by the user's Settings opt-in.
     if (pc) {
-        compactphone::crash::initSentry(
-            QStringLiteral(COMPACTPHONE_SENTRY_DSN),
-            pc->crashReportingEnabled());
+        compactphone::crash::initConfiguredSentry(pc->crashReportingEnabled());
     }
-#endif
 
     const int rc = app.exec();
     compactphone::crash::shutdown();

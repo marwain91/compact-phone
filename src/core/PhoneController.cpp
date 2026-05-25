@@ -15,6 +15,7 @@
 #include "CallManager.h"
 #include "ContactsManager.h"
 #include "ContactImporter.h"
+#include "CrashReporting.h"
 #include "LogBuffer.h"
 #include "HistoryManager.h"
 #include "LinesManager.h"
@@ -584,6 +585,13 @@ void PhoneController::setCrashReportingEnabled(bool enabled)
 {
     if (m_settingsController)
         m_settingsController->setCrashReportingEnabled(enabled);
+    if (enabled)
+        crash::initConfiguredSentry(true);
+}
+
+bool PhoneController::crashReportingAvailable() const
+{
+    return crash::configuredSentryAvailable();
 }
 
 bool PhoneController::alwaysOnTop() const
