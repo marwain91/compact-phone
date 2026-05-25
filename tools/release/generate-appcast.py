@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Generate a Sparkle 2.x appcast.xml for one Compact Phone release.
 
-The appcast is uploaded as a release asset alongside the DMG / MSI.
+The appcast is uploaded as a release asset alongside the DMG / MSI /
+AppImage.
 UpdateChecker.cpp fetches the per-OS file from
 `https://github.com/marwain91/compact-phone/releases/latest/download/`,
 so /latest/ always redirects to the newest tag and clients see the
 new version automatically.
 
-Each invocation generates ONE entry — the release-macos.yml and
-release-windows.yml workflows each produce a platform-specific file
-(appcast-macos.xml / appcast-windows.xml).
+Each invocation generates ONE entry. The release workflows produce a
+platform-specific file:
+appcast-macos.xml / appcast-windows.xml / appcast-linux.xml.
 
 Usage:
     generate-appcast.py --version 0.1.1 \\
-                        --asset-url https://.../Compact-Phone-0.1.1.dmg \\
-                        --asset-file dist/Compact-Phone-0.1.1.dmg \\
+                        --asset-url https://.../Compact-Phone-macOS.dmg \\
+                        --asset-file dist/Compact-Phone-macOS.dmg \\
                         --os macos \\
                         --output dist/appcast-macos.xml
 
@@ -66,13 +67,14 @@ def main() -> int:
     p.add_argument("--version", required=True,
                    help="Semantic version (e.g. 0.1.1), no leading v")
     p.add_argument("--asset-url", required=True,
-                   help="Public URL where the DMG/MSI will be downloadable")
+                   help="Public URL where the release asset is downloadable")
     p.add_argument("--asset-file", required=True,
-                   help="Local path to the DMG/MSI (for size + signing)")
-    p.add_argument("--os", choices=("macos", "windows"), required=True)
+                   help="Local path to the release asset (for size + signing)")
+    p.add_argument("--os", choices=("macos", "windows", "linux"),
+                   required=True)
     p.add_argument("--min-system-version", default=None,
                    help="Override the default min OS version (12.0 mac / "
-                        "10.0 win)")
+                        "10.0 win / glibc 2.39 linux)")
     p.add_argument("--output", required=True)
     args = p.parse_args()
 
@@ -85,9 +87,12 @@ def main() -> int:
     if args.os == "macos":
         mime = "application/x-apple-diskimage"
         default_min = "12.0"
-    else:
+    elif args.os == "windows":
         mime = "application/x-msi"
         default_min = "10.0"
+    else:
+        mime = "application/vnd.appimage"
+        default_min = "glibc 2.39"
     min_system = args.min_system_version or default_min
 
     # register_namespace() above already arranges for ElementTree to

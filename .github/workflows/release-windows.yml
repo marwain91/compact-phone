@@ -46,6 +46,7 @@ jobs:
           if ($env:RELEASE_TAG -notlike "v*") {
             throw "release tag must start with v; got '$env:RELEASE_TAG'"
           }
+          python tools/release/verify-release-version.py $env:RELEASE_TAG
 
       - name: Validate production signing config
         shell: pwsh
@@ -268,10 +269,33 @@ jobs:
           & "signtool" sign /v /sha1 $env:CODE_SIGN_THUMBPRINT `
               /tr $ts /td sha256 /fd sha256 dist\*.msi
 
-      - name: Upload MSI to release
+      - name: Generate Windows appcast
+        shell: pwsh
+        env:
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+          REF_NAME: ${{ env.RELEASE_TAG }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:SPARKLE_ED25519_PRIVATE_KEY)) {
+            python -m pip install --quiet --user cryptography
+          }
+          $version = $env:REF_NAME -replace '^v', ''
+          $msi = Get-ChildItem dist\*.msi | Select-Object -First 1
+          if (-not $msi) {
+            throw "MSI not found under dist"
+          }
+          python tools/release/generate-appcast.py `
+              --version $version `
+              --asset-url "https://github.com/marwain91/compact-phone/releases/download/$env:REF_NAME/$($msi.Name)" `
+              --asset-file $msi.FullName `
+              --os windows `
+              --output dist\appcast-windows.xml
+
+      - name: Upload MSI + appcast to release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           prerelease: ${{ contains(env.RELEASE_TAG, '-test') }}
-          files: dist/*.msi
+          files: |
+            dist/*.msi
+            dist/appcast-windows.xml
           fail_on_unmatched_files: true

@@ -1023,12 +1023,25 @@ Item {
                                 Layout.fillWidth: true
                                 onLinkActivated: (link) => Qt.openUrlExternally(link)
                             }
-                            AppButton {
+                            RowLayout {
                                 Layout.topMargin: Theme.s4
-                                variant: "ghost"
-                                size: "sm"
-                                text: qsTr("Check for updates")
-                                onClicked: PhoneController.checkForUpdates()
+                                spacing: Theme.s8
+                                AppButton {
+                                    variant: "ghost"
+                                    size: "sm"
+                                    text: qsTr("Check for updates")
+                                    onClicked: PhoneController.checkForUpdates()
+                                }
+                                AppButton {
+                                    visible: PhoneController.latestUpdateUrl.length > 0
+                                    variant: "primary"
+                                    size: "sm"
+                                    iconPath: Icons.download
+                                    text: PhoneController.latestUpdateVersion.length > 0
+                                        ? qsTr("Download %1").arg(PhoneController.latestUpdateVersion)
+                                        : qsTr("Download update")
+                                    onClicked: PhoneController.openLatestUpdateUrl()
+                                }
                             }
                         }
                     }

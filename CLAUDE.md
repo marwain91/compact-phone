@@ -311,18 +311,39 @@ platform-specific in `src/core/UpdateChecker.cpp` via `#ifdef`:
 
 - macOS: `.../releases/latest/download/appcast-macos.xml`
 - Windows: `.../releases/latest/download/appcast-windows.xml`
-- Linux: `""` (no signed release path; `check()` no-ops cleanly)
+- Linux: `.../releases/latest/download/appcast-linux.xml`
 
 `tools/release/generate-appcast.py` builds the XML; the
-`release-{macos,windows}.yml` workflows call it and upload the
-appcast as a release asset alongside the DMG/MSI. Optional EdDSA
-signing via the `SPARKLE_ED25519_PRIVATE_KEY` Actions secret —
+`release-{macos,linux,windows}.yml` workflows call it and upload the
+appcast as a release asset alongside the DMG/AppImage/MSI. Optional
+EdDSA signing via the `SPARKLE_ED25519_PRIVATE_KEY` Actions secret —
 forward-compat with the real Sparkle framework if we ever adopt it.
+
+The app's update check is notification/download only: it does not
+install updates automatically. `PhoneController` exposes
+`latestUpdateVersion`, `latestUpdateUrl`, and `openLatestUpdateUrl()`;
+Settings shows the download button after `checkForUpdates()` finds a
+newer version.
+
+### Release tags must match the CMake project version
+
+Release workflows run `tools/release/verify-release-version.py` during
+their cheap validation phase. The core tag version must match
+`project(CompactPhone VERSION ...)` in `CMakeLists.txt`.
+
+Examples:
+- `v0.1.0` and `v0.1.0-test7` match CMake `0.1.0`
+- `v0.1.1` fails until CMake is bumped to `0.1.1`
+
+This prevents publishing installers whose embedded application version
+does not advance, which would make `UpdateChecker` and Windows MSI
+upgrade detection behave incorrectly.
 
 ### Stable release filenames so the landing page can hardcode URLs
 
 Release artifacts use **version-less filenames** —
-`Compact-Phone-macOS.dmg` and `Compact-Phone-Windows.msi`. GitHub's
+`Compact-Phone-macOS.dmg`, `Compact-Phone-Linux-x86_64.AppImage`, and
+`Compact-Phone-Windows.msi`. GitHub's
 `/releases/latest/download/<filename>` only resolves when the filename
 matches exactly, so version-stamped names would 404 the landing-page
 buttons after every release. See `docs/download-urls.md` for the full

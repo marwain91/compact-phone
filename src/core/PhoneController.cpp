@@ -34,6 +34,7 @@
 #include "platform/Keychain_factory.h"
 
 #include <QCoreApplication>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QSettings>
@@ -286,11 +287,23 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     // so it shows up in the existing snackbar.
     m_updateChecker = std::make_unique<UpdateChecker>(this);
     connect(m_updateChecker.get(), &UpdateChecker::updateAvailable,
-            this, [this](const QString &v, const QUrl &) {
-        postNotice(tr("Update available: %1").arg(v), 6000);
+            this, [this](const QString &v, const QUrl &url) {
+        const bool changed =
+            m_latestUpdateVersion != v || m_latestUpdateUrl != url;
+        m_latestUpdateVersion = v;
+        m_latestUpdateUrl = url;
+        if (changed) {
+            emit latestUpdateChanged();
+        }
+        postNotice(tr("Update available: %1").arg(v), 8000);
     });
     connect(m_updateChecker.get(), &UpdateChecker::upToDate,
             this, [this] {
+        if (!m_latestUpdateVersion.isEmpty() || !m_latestUpdateUrl.isEmpty()) {
+            m_latestUpdateVersion.clear();
+            m_latestUpdateUrl = QUrl();
+            emit latestUpdateChanged();
+        }
         postNotice(tr("Compact Phone is up to date"), 4000);
     });
     connect(m_updateChecker.get(), &UpdateChecker::checkFailed,
@@ -722,6 +735,27 @@ void PhoneController::checkForUpdates()
     if (!m_updateChecker) return;
     postNotice(tr("Checking for updates…"), 2500);
     m_updateChecker->check();
+}
+
+QString PhoneController::latestUpdateVersion() const
+{
+    return m_latestUpdateVersion;
+}
+
+QString PhoneController::latestUpdateUrl() const
+{
+    return m_latestUpdateUrl.toString();
+}
+
+void PhoneController::openLatestUpdateUrl()
+{
+    if (m_latestUpdateUrl.isEmpty() || !m_latestUpdateUrl.isValid()) {
+        postNotice(tr("No update download available"), 3000);
+        return;
+    }
+    if (!QDesktopServices::openUrl(m_latestUpdateUrl)) {
+        postNotice(tr("Could not open the update download"), 5000);
+    }
 }
 
 void PhoneController::provisionWithProvider(const QString &providerId,

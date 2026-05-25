@@ -1,67 +1,53 @@
 # Release feed (appcast)
 
-Compact Phone uses the Sparkle 2 appcast schema for cross-platform update
-notifications. Linux uses the in-app `UpdateChecker` to surface a "new
-version available" banner; macOS will adopt full Sparkle 2 framework
-integration in a future task; Windows will use WinSparkle. The feed format
-is the same for all three so a single file at
-`https://compactphone.eu/appcast.xml` covers everyone.
+Compact Phone uses Sparkle 2.x appcast XML as a lightweight
+cross-platform update feed. The in-app Qt `UpdateChecker` fetches the
+feed for the current OS, compares the appcast version with the running
+`Qt.application.version`, and shows a download action in Settings when a
+newer installer is available.
 
-## Example feed
+This is not full automatic updating. Users still download and run the
+new DMG, AppImage, or MSI themselves. On Windows the MSI has a stable
+`UpgradeCode` and `MajorUpgrade`, so a newer MSI upgrades the existing
+installation when its product version increases.
 
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-    <channel>
-        <title>Compact Phone</title>
-        <link>https://compactphone.eu/</link>
-        <language>en</language>
-        <item>
-            <title>Version 0.4.0</title>
-            <pubDate>Mon, 09 Jun 2025 12:00:00 +0000</pubDate>
-            <enclosure
-                url="https://compactphone.eu/downloads/compactphone-0.4.0.dmg"
-                sparkle:shortVersionString="0.4.0"
-                sparkle:version="0.4.0"
-                sparkle:edSignature="MEQCIH...base64..."
-                length="34000000"
-                type="application/octet-stream" />
-            <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <ul>
-                    <li>Codec picker in account editor</li>
-                    <li>Global hotkeys (answer, hangup, mute)</li>
-                </ul>
-            ]]></description>
-        </item>
-    </channel>
-</rss>
-```
+## Public feeds
 
-## Keys to procure
+Each platform release workflow uploads one appcast next to the installer:
 
-1. **EdDSA key pair** for Sparkle 2:
-   ```sh
-   git clone https://github.com/sparkle-project/Sparkle.git
-   cd Sparkle/bin && ./generate_keys
-   # Stores private key in macOS Keychain; prints the public key.
-   ```
-   Keep the private key **offline**. Embed the public key in the macOS app
-   bundle's Info.plist (`SUPublicEDKey`) when full Sparkle integration lands.
+| Platform | Feed |
+|---|---|
+| macOS | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-macos.xml` |
+| Linux | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-linux.xml` |
+| Windows | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-windows.xml` |
 
-2. **Hosting** — any static host works (GitHub Pages, S3, Cloudflare R2,
-   plain nginx). The feed URL must be HTTPS.
+GitHub's `/releases/latest/download/...` endpoint redirects to the
+newest non-prerelease release. Test tags such as `v0.1.0-test7` are
+uploaded as prereleases and do not become the public update feed.
 
-## Release procedure (manual)
+## Generation
 
-After publishing a signed/notarized DMG and signed MSI:
+`tools/release/generate-appcast.py` writes one feed entry for one
+artifact. The release workflows call it after packaging and, for signed
+platforms, after signing so the uploaded file and feed metadata match.
+
+Optional Ed25519 signing is supported through the
+`SPARKLE_ED25519_PRIVATE_KEY` Actions secret. The current in-tree
+checker does not verify this signature; it is forward-compatible
+hygiene for adopting Sparkle/WinSparkle later.
+
+## Version guard
+
+The release workflows run `tools/release/verify-release-version.py`
+before spending hours building. It compares the release tag core version
+with `project(CompactPhone VERSION ...)` in `CMakeLists.txt`.
+
+Examples:
 
 ```sh
-# Sign the artifact with the offline EdDSA key
-sign_update compactphone-0.4.0.dmg
-
-# Append an <item> block to appcast.xml and upload.
+python3 tools/release/verify-release-version.py v0.1.0
+python3 tools/release/verify-release-version.py refs/tags/v0.1.0-test7
 ```
 
-Automation (a `release-feed.yml` workflow) is a follow-up task once the
-hosting URL is registered.
+`v0.1.0-test7` is accepted when CMake says `0.1.0`; `v0.1.1` fails
+until the project version is bumped to `0.1.1`.

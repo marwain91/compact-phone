@@ -14,18 +14,15 @@ namespace compactphone {
 namespace {
 // Per-OS appcast lives as an asset on every GitHub Release; /latest/
 // redirects to whatever the newest tag is, so the URL never changes
-// even as versions roll. release-macos.yml / release-windows.yml
-// generate and upload these via tools/release/generate-appcast.py.
+// even as versions roll. The release workflows generate and upload
+// these via tools/release/generate-appcast.py.
 constexpr const char *kDefaultFeed =
 #if defined(Q_OS_MACOS)
     "https://github.com/marwain91/compact-phone/releases/latest/download/appcast-macos.xml";
 #elif defined(Q_OS_WIN)
     "https://github.com/marwain91/compact-phone/releases/latest/download/appcast-windows.xml";
 #else
-    // Linux has no signed-release path yet; UpdateChecker silently
-    // 404s on these platforms until that exists. Pointing it at the
-    // macOS feed would lie about what artifact is downloadable.
-    "";
+    "https://github.com/marwain91/compact-phone/releases/latest/download/appcast-linux.xml";
 #endif
 }
 
