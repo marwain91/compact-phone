@@ -123,9 +123,18 @@ jobs:
           echo "PKG_CONFIG_PATH=$HOME/pjproject/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Configure
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
+          sentry_args=()
+          if [[ -n "${SENTRY_DSN:-}" ]]; then
+            sentry_args+=("-DVCPKG_MANIFEST_FEATURES=sentry")
+            sentry_args+=("-DCOMPACTPHONE_ENABLE_SENTRY=ON")
+            sentry_args+=("-DCOMPACTPHONE_SENTRY_DSN=${SENTRY_DSN}")
+          fi
           cmake --preset macos \
-            -DVCPKG_OVERLAY_TRIPLETS="${{ github.workspace }}/tools/release/triplets"
+            -DVCPKG_OVERLAY_TRIPLETS="${{ github.workspace }}/tools/release/triplets" \
+            "${sentry_args[@]}"
 
       - name: Build
         run: cmake --build --preset macos

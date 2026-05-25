@@ -16,8 +16,12 @@ File issues at https://github.com/marwain91/compact-phone/issues with:
 
 For crashes, please also attach the latest entry from the
 `~/Library/Application Support/Compact Phone/.sentry-native/` (macOS)
-or equivalent path. If crash reporting is opt-in enabled, the report
-likely already reached Sentry — mention the time of the crash.
+or equivalent path when one exists. Release builds can include opt-in
+Sentry crash reporting when the project `SENTRY_DSN` secret is
+configured. If the user enabled **Send crash reports**, the crash report
+likely already reached Sentry — mention the time of the crash. SIP
+credentials, account data, diagnostics exports, and logs are not
+attached automatically.
 
 ## Building from source
 

@@ -177,10 +177,19 @@ jobs:
 
       - name: Configure
         shell: pwsh
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
+          $sentryArgs = ""
+          if (-not [string]::IsNullOrWhiteSpace($env:SENTRY_DSN)) {
+            $sentryArgs = " -DVCPKG_MANIFEST_FEATURES=sentry " +
+                "-DCOMPACTPHONE_ENABLE_SENTRY=ON " +
+                "-DCOMPACTPHONE_SENTRY_DSN=`"$env:SENTRY_DSN`""
+          }
           $cmd = "`"$env:VSDEVCMD`" -arch=amd64 -host_arch=amd64 " +
               "&& cmake --preset windows -B C:\b " +
-              "-DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake"
+              "-DCMAKE_TOOLCHAIN_FILE=C:/v/scripts/buildsystems/vcpkg.cmake" +
+              $sentryArgs
           cmd /c $cmd
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

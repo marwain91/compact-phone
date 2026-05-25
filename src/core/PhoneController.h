@@ -95,6 +95,7 @@ class PhoneController : public QObject {
     Q_PROPERTY(bool autoRecordEnabled READ autoRecordEnabled WRITE setAutoRecordEnabled NOTIFY autoRecordEnabledChanged)
     Q_PROPERTY(bool enterpriseFeaturesEnabled READ enterpriseFeaturesEnabled WRITE setEnterpriseFeaturesEnabled NOTIFY enterpriseFeaturesEnabledChanged)
     Q_PROPERTY(bool crashReportingEnabled READ crashReportingEnabled WRITE setCrashReportingEnabled NOTIFY crashReportingEnabledChanged)
+    Q_PROPERTY(bool crashReportingAvailable READ crashReportingAvailable CONSTANT)
     Q_PROPERTY(bool alwaysOnTop READ alwaysOnTop WRITE setAlwaysOnTop NOTIFY alwaysOnTopChanged)
     QML_ELEMENT
     QML_SINGLETON
@@ -143,6 +144,7 @@ public:
     void setEnterpriseFeaturesEnabled(bool enabled);
     bool crashReportingEnabled() const;
     void setCrashReportingEnabled(bool enabled);
+    bool crashReportingAvailable() const;
     bool alwaysOnTop() const;
     void setAlwaysOnTop(bool enabled);
 

@@ -48,7 +48,7 @@ an internal extension).
 | **Auto-record** | Record every answered call to a local WAV file. Path configurable; defaults to `~/Library/Application Support/Compact Phone/recordings` on macOS, equivalent on Windows/Linux. |
 | **Recordings folder** | Custom location for recordings. Pick a directory the user has write access to. |
 | **Enterprise features** | Gates the **Messages** (SIP MESSAGE / instant messaging) and **Lines** (BLF / line monitoring) tabs in the sidebar. Off by default; most personal users never need them. |
-| **Crash reporting** | Opt-in Sentry reports. Disabled by default. Only honored if the build was configured with `-DCOMPACTPHONE_ENABLE_SENTRY=ON`. |
+| **Crash reporting** | Opt-in Sentry crash reports. Disabled by default. Available only in release builds that were built with a `SENTRY_DSN`; unavailable builds show the toggle disabled. SIP credentials, account data, logs, and diagnostics exports are not uploaded automatically. |
 | **Diagnostics** | View / export the in-app log. Attach to bug reports. |
 
 ## Where settings are stored

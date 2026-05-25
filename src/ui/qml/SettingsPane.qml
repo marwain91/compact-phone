@@ -942,7 +942,9 @@ Item {
                                         font.weight: Font.Medium
                                     }
                                     Text {
-                                        text: qsTr("Anonymous, opt-in. SIP credentials are never sent.")
+                                        text: PhoneController.crashReportingAvailable
+                                            ? qsTr("Anonymous, opt-in. SIP credentials are never sent.")
+                                            : qsTr("Unavailable in this build.")
                                         color: Theme.textTertiary
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fxs
@@ -952,8 +954,11 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.crashReportingEnabled
-                                    onToggled: PhoneController.crashReportingEnabled = checked
+                                    enabled: PhoneController.crashReportingAvailable
+                                    checked: PhoneController.crashReportingAvailable
+                                        && PhoneController.crashReportingEnabled
+                                    onToggled: if (PhoneController.crashReportingAvailable)
+                                        PhoneController.crashReportingEnabled = checked
                                 }
                             }
                         }

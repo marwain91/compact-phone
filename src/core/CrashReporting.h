@@ -4,6 +4,13 @@
 
 namespace compactphone::crash {
 
+// Validate the DSN shape before passing it into the native SDK. This is
+// deliberately conservative: crash reporting must fail closed.
+bool isValidSentryDsn(const QString &dsn);
+
+// True only when this build has Sentry support and a usable embedded DSN.
+bool configuredSentryAvailable();
+
 // Initialize the crash reporter (Sentry). No-op build unless COMPACTPHONE_ENABLE_SENTRY
 // was set at configure time AND the user has opted in via Settings → Privacy.
 //
@@ -12,6 +19,9 @@ namespace compactphone::crash {
 //
 // userConsent: true once the user has explicitly opted in via Settings.
 void initSentry(const QString &dsn, bool userConsent);
+
+// Initialize using the DSN embedded at build time. Safe no-op when unavailable.
+void initConfiguredSentry(bool userConsent);
 
 // Flush any pending events and shut down the reporter. Safe to call even
 // if init was never called.

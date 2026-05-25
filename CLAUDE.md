@@ -368,6 +368,19 @@ Cheap checks are allowed on PR/main push: secret scanning and docs
 dispatch. `ci.yml` and `linux-builder-image.yml` are manual-only for
 this reason. The release workflows are tag-only.
 
+### Optional Sentry crash reporting in release builds
+
+Release workflows enable Sentry only when `secrets.SENTRY_DSN` is
+configured. In that case they pass `-DVCPKG_MANIFEST_FEATURES=sentry`,
+`-DCOMPACTPHONE_ENABLE_SENTRY=ON`, and
+`-DCOMPACTPHONE_SENTRY_DSN=...` during CMake configure. Both public
+tags and `-test` prerelease tags can include Sentry.
+
+The runtime upload path is still gated by the Settings -> Advanced
+**Send crash reports** toggle. Builds without an embedded DSN show the
+toggle as unavailable. Do not attach diagnostics exports, logs, SIP
+credentials, or account data automatically.
+
 ### GitHub-hosted `macos-14` pool contention — bump to `macos-15`
 
 Free-tier `macos-14` (Sonoma, Apple Silicon) runners are heavily

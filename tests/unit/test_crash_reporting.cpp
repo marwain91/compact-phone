@@ -15,6 +15,28 @@ TEST(CrashReportingTest, InitWithoutDsnIsSafe)
     crash::shutdown();
 }
 
+TEST(CrashReportingTest, DsnValidationRejectsUnsafeOrMalformedValues)
+{
+    EXPECT_FALSE(crash::isValidSentryDsn(QString()));
+    EXPECT_FALSE(crash::isValidSentryDsn(QStringLiteral("not a url")));
+    EXPECT_FALSE(crash::isValidSentryDsn(QStringLiteral("file:///tmp/report")));
+    EXPECT_FALSE(crash::isValidSentryDsn(QStringLiteral("https:///1")));
+}
+
+TEST(CrashReportingTest, DsnValidationAcceptsHttpsSentryLikeUrl)
+{
+    EXPECT_TRUE(crash::isValidSentryDsn(
+        QStringLiteral("https://public@example.ingest.sentry.io/123")));
+}
+
+TEST(CrashReportingTest, ConfiguredInitAndAvailabilityAreSafeWithoutBuildDsn)
+{
+    EXPECT_FALSE(crash::configuredSentryAvailable());
+    crash::initConfiguredSentry(false);
+    crash::initConfiguredSentry(true);
+    crash::shutdown();
+}
+
 TEST(CrashReportingTest, InitWithDsnButNoConsentIsNoOp)
 {
     crash::initSentry(QStringLiteral("https://abc@sentry.example/1"), false);

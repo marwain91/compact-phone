@@ -94,9 +94,18 @@ jobs:
         run: docker compose -f tools/dev/docker-compose.yml up -d --no-build dev
 
       - name: Configure + build
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
+          sentry_args=()
+          if [[ -n "${SENTRY_DSN:-}" ]]; then
+            sentry_args+=("-DVCPKG_MANIFEST_FEATURES=sentry")
+            sentry_args+=("-DCOMPACTPHONE_ENABLE_SENTRY=ON")
+            sentry_args+=("-DCOMPACTPHONE_SENTRY_DSN=${SENTRY_DSN}")
+          fi
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
-            bash -c "cmake --preset linux && cmake --build --preset linux"
+            bash -lc 'cmake --preset linux "$@" && cmake --build --preset linux' \
+            bash "${sentry_args[@]}"
 
       - name: Bundle into AppImage
         run: |
