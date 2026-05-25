@@ -131,6 +131,10 @@ if(COMPACTPHONE_ENABLE_SENTRY)
     target_link_libraries(compactphone_core PUBLIC sentry::sentry)
     target_compile_definitions(compactphone_core
         PUBLIC COMPACTPHONE_ENABLE_SENTRY=1)
+    if(COMPACTPHONE_SENTRY_DSN)
+        target_compile_definitions(compactphone_core
+            PUBLIC COMPACTPHONE_SENTRY_DSN="${COMPACTPHONE_SENTRY_DSN}")
+    endif()
 endif()
 target_compile_definitions(compactphone_core PRIVATE
     COMPACTPHONE_VERSION="${PROJECT_VERSION}"

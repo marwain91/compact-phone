@@ -14,5 +14,13 @@
     "qtdeclarative",
     "qtquickcontrols2"
   ],
+  "features": {
+    "sentry": {
+      "description": "Build with sentry-native crash reporting support",
+      "dependencies": [
+        "sentry-native"
+      ]
+    }
+  },
   "overrides": []
 }
