@@ -5,6 +5,7 @@
 #include <QString>
 #include <QVariantMap>
 #include <QTimer>
+#include <QUrl>
 #include <QtQmlIntegration>
 
 #include <memory>
@@ -59,6 +60,8 @@ class PhoneController : public QObject {
     Q_PROPERTY(int incomingCallId READ incomingCallId NOTIFY incomingCallChanged)
     Q_PROPERTY(QString incomingCallFrom READ incomingCallFrom NOTIFY incomingCallChanged)
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
+    Q_PROPERTY(QString latestUpdateVersion READ latestUpdateVersion NOTIFY latestUpdateChanged)
+    Q_PROPERTY(QString latestUpdateUrl READ latestUpdateUrl NOTIFY latestUpdateChanged)
     Q_PROPERTY(QAbstractListModel *contacts READ contactsModel CONSTANT)
     Q_PROPERTY(QAbstractListModel *history READ historyModel CONSTANT)
     Q_PROPERTY(QAbstractListModel *conversations READ conversationsModel CONSTANT)
@@ -124,6 +127,8 @@ public:
     Q_INVOKABLE bool declineIncoming();
 
     QString notice() const { return m_notice; }
+    QString latestUpdateVersion() const;
+    QString latestUpdateUrl() const;
     Q_INVOKABLE bool blindTransfer(int callId, const QString &targetUri);
     Q_INVOKABLE bool attendedTransfer(int activeCallId, int destCallId);
     Q_INVOKABLE bool mergeCalls(int activeCallId, int heldCallId);
@@ -172,6 +177,7 @@ public:
     Q_INVOKABLE QStringList recentLogLines() const;
     Q_INVOKABLE bool exportDiagnostics(const QString &path) const;
     Q_INVOKABLE void checkForUpdates();
+    Q_INVOKABLE void openLatestUpdateUrl();
 
     // Generic auto-provisioning. providerId selects a backend (e.g. "daktela").
     // On success a new SIP account is added via addAccount() and its id is
@@ -262,6 +268,7 @@ signals:
     void callStateChanged();
     void incomingCallChanged();
     void noticeChanged();
+    void latestUpdateChanged();
     void dialerUriChanged();
     void logLevelChanged();
     void ringtoneEnabledChanged();
@@ -304,6 +311,8 @@ signals:
 private:
     QString m_notice;
     QTimer m_noticeTimer;
+    QString m_latestUpdateVersion;
+    QUrl m_latestUpdateUrl;
 
     std::unique_ptr<persistence::Database>      m_db;
     std::unique_ptr<platform::IKeychain>        m_keychain;

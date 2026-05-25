@@ -15,10 +15,12 @@ asset of that name on the most recent published release.
 | Linux (AppImage) | `https://github.com/marwain91/compact-phone/releases/latest/download/Compact-Phone-Linux-x86_64.AppImage` |
 | Windows (MSI) | `https://github.com/marwain91/compact-phone/releases/latest/download/Compact-Phone-Windows.msi` |
 | macOS appcast (auto-update feed) | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-macos.xml` |
-| Windows appcast | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-windows.xml` *(once PR #7 lands)* |
+| Linux appcast (update feed) | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-linux.xml` |
+| Windows appcast (update feed) | `https://github.com/marwain91/compact-phone/releases/latest/download/appcast-windows.xml` |
 
-The macOS DMG + appcast and Windows MSI are produced by the tag release
-workflows. Linux AppImage is produced from `release-linux.yml`.
+The platform artifacts and appcasts are produced by the tag release
+workflows: `release-macos.yml`, `release-linux.yml`, and
+`release-windows.yml`.
 
 ## Landing-page integration (MyWebs side)
 
@@ -63,7 +65,8 @@ Two trade-offs the stable-filename pattern accepts:
    Releases page (`/releases/tag/v0.1.0`) and grab from there. Most
    users want "the latest" and that's what the buttons deliver.
 
-The auto-update path (Sparkle appcast) does carry the version inside
+The update-check path (Sparkle appcast) does carry the version inside
 its XML (`sparkle:shortVersionString`), so UpdateChecker still compares
-correctly across versions. The stable URL is purely for the landing-page
-download button experience.
+correctly across versions and can open the matching installer download.
+The stable URL is purely for the landing-page download button
+experience.
