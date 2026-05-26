@@ -189,6 +189,13 @@ target_compile_definitions(compactphone-headless PRIVATE
 )
 
 if(APPLE)
+    # MACOSX_PACKAGE_LOCATION places these compliance files under
+    # Contents/Resources/ in the bundle during the normal build.
+    target_sources(compactphone PRIVATE ${COMPACTPHONE_LICENCE_FILES})
+    set_source_files_properties(${COMPACTPHONE_LICENCE_FILES} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources"
+    )
+
     set(_compactphone_icns "${CMAKE_SOURCE_DIR}/branding/compactphone.icns")
     if(EXISTS "${_compactphone_icns}")
         target_sources(compactphone PRIVATE "${_compactphone_icns}")
@@ -247,6 +254,7 @@ qt_add_qml_module(compactphone
         ui/qml/components/AppCheckBox.qml
         ui/qml/components/AppSwitch.qml
         ui/qml/components/BrandMark.qml
+        ui/qml/components/DaktelaMark.qml
         ui/qml/components/ThemeCard.qml
     SOURCES
         core/PhoneController.h
@@ -281,6 +289,11 @@ target_link_libraries(compactphone
         Qt6::QuickControls2
         compactphone_core
 )
+if(TARGET Qt6::QMinimalIntegrationPlugin)
+    qt_import_plugins(compactphone
+        INCLUDE Qt6::QMinimalIntegrationPlugin
+    )
+endif()
 
 set_target_properties(compactphone PROPERTIES
     MACOSX_BUNDLE TRUE

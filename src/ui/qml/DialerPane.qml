@@ -96,14 +96,23 @@ ColumnLayout {
 
     // Pull the currently active account's display info so the status pill
     // can read "Registered · ext 204" the way the design calls for.
+    function _isDaktelaAccount(label, domain) {
+        const accountLabel = (label || "").toLowerCase()
+        const accountDomain = (domain || "").toLowerCase()
+        return accountLabel.indexOf("daktela") >= 0
+            || accountDomain.indexOf("daktela") >= 0
+    }
+
     function _activeAccountInfo() {
         const m = PhoneController.accounts
         if (!m || m.rowCount() === 0) {
-            return { hasAny: false, registered: false, ext: "" }
+            return { hasAny: false, registered: false, ext: "", label: "", domain: "", isDaktela: false }
         }
         const aid = PhoneController.activeAccountId
         const usernameRole = Qt.UserRole + 3       // UsernameRole
+        const domainRole   = Qt.UserRole + 4       // DomainRole
         const regStateRole = Qt.UserRole + 8       // RegistrationStateRole
+        const labelRole    = Qt.UserRole + 10      // LabelRole
         const idRole       = Qt.UserRole + 1       // IdRole
         let row = -1
         for (let i = 0; i < m.rowCount(); i++) {
@@ -111,10 +120,15 @@ ColumnLayout {
         }
         if (row < 0) row = 0
         const idx = m.index(row, 0)
+        const label = m.data(idx, labelRole) || ""
+        const domain = m.data(idx, domainRole) || ""
         return {
             hasAny: true,
             registered: m.data(idx, regStateRole) === "registered",
-            ext: m.data(idx, usernameRole) || ""
+            ext: m.data(idx, usernameRole) || "",
+            label: label,
+            domain: domain,
+            isDaktela: root._isDaktelaAccount(label, domain)
         }
     }
 
@@ -181,6 +195,16 @@ ColumnLayout {
                 }
 
                 Item { Layout.fillWidth: true }
+
+                DaktelaMark {
+                    objectName: "dialerDaktelaMark"
+                    visible: statusPill.info.isDaktela
+                    markWidth: 54
+                    markHeight: 16
+                    Layout.preferredWidth: markWidth
+                    Layout.preferredHeight: markHeight
+                    Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                }
 
                 AppComboBox {
                     id: accountCombo
@@ -458,6 +482,7 @@ ColumnLayout {
             held: model.held
             muted: model.muted
             recording: model.recording
+            daktelaAccount: root._activeAccountInfo().isDaktela
         }
     }
 }

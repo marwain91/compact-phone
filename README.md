@@ -19,10 +19,13 @@ Built on Qt 6 and PJSIP, GPL-3.0-or-later.
 
 ## Install
 
-Pre-built signed installers:
-- **macOS** — `compactphone-<version>.dmg` (forthcoming on release).
-- **Windows** — `compactphone-<version>.msi` (forthcoming on release).
-- **Linux** — see "Build from source" below; AppImage on the roadmap.
+Pre-built release artifacts:
+- **macOS** — `Compact-Phone-macOS.dmg`.
+- **Windows** — `Compact-Phone-Windows.msi`.
+- **Linux** — `Compact-Phone-Linux-x86_64.AppImage`.
+
+Release downloads are published from tagged GitHub releases. Stable download
+URLs are documented in [`docs/download-urls.md`](docs/download-urls.md).
 
 ## Build prerequisites
 

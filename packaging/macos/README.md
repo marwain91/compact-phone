@@ -80,5 +80,5 @@ ride along inside the bundle into the DMG.
 
 ## What's still missing
 
-- Apple Developer ID procurement.
-- The sleep/wake re-registration hook (task #15).
+- Apple Developer ID procurement and the matching GitHub release secrets for
+  signed, notarized production DMGs.

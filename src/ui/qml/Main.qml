@@ -259,6 +259,42 @@ ApplicationWindow {
         }
     }
 
+    Rectangle {
+        id: sidebarOpenHandle
+        objectName: "sidebarOpenHandle"
+        visible: !window.sidebarExpanded
+        anchors.left: parent.left
+        anchors.leftMargin: Theme.s6
+        anchors.verticalCenter: parent.verticalCenter
+        width: 22
+        height: 46
+        radius: 11
+        z: 20
+        color: Theme.surface
+        border.color: Theme.border
+        border.width: 1
+
+        AppIcon {
+            anchors.centerIn: parent
+            path: Icons.chevronRight
+            color: Theme.textSecondary
+            width: 14
+            height: 14
+            stroke: 2.1
+        }
+
+        MouseArea {
+            id: sidebarOpenTap
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            ToolTip.visible: containsMouse
+            ToolTip.delay: 380
+            ToolTip.text: qsTr("Open sidebar (⌘B)")
+            onClicked: window.sidebarExpanded = true
+        }
+    }
+
 
     IncomingCallDialog { id: incomingDialog }
 
