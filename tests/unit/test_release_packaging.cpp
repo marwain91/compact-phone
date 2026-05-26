@@ -1,0 +1,43 @@
+#include <gtest/gtest.h>
+
+#include <QFile>
+#include <QString>
+#include <QTextStream>
+
+namespace {
+
+QString readProjectFile(const QString &relativePath)
+{
+    QFile file(QStringLiteral(COMPACTPHONE_SOURCE_DIR) + relativePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        ADD_FAILURE() << "Could not open " << relativePath.toStdString();
+        return {};
+    }
+
+    QTextStream in(&file);
+    return in.readAll();
+}
+
+} // namespace
+
+TEST(ReleasePackaging, MacOSBundleCopiesLicenseResourcesFromExecutableTargetDirectory)
+{
+    const auto rootCmake = readProjectFile(QStringLiteral("/CMakeLists.txt"));
+    const auto appCmake = readProjectFile(QStringLiteral("/src/CMakeLists.txt"));
+    ASSERT_FALSE(rootCmake.isEmpty());
+    ASSERT_FALSE(appCmake.isEmpty());
+
+    const auto licenseListOffset =
+        rootCmake.indexOf(QStringLiteral("set(COMPACTPHONE_LICENCE_FILES"));
+    const auto appDirectoryOffset =
+        rootCmake.indexOf(QStringLiteral("add_subdirectory(src)"));
+    ASSERT_GE(licenseListOffset, 0);
+    ASSERT_GE(appDirectoryOffset, 0);
+    EXPECT_LT(licenseListOffset, appDirectoryOffset);
+
+    EXPECT_TRUE(appCmake.contains(QStringLiteral(
+        "target_sources(compactphone PRIVATE ${COMPACTPHONE_LICENCE_FILES})")));
+    EXPECT_TRUE(appCmake.contains(QStringLiteral(
+        "set_source_files_properties(${COMPACTPHONE_LICENCE_FILES} PROPERTIES")));
+    EXPECT_TRUE(appCmake.contains(QStringLiteral("MACOSX_PACKAGE_LOCATION \"Resources\"")));
+}

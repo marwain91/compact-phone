@@ -1,7 +1,7 @@
 # CompactPhone — Project Status
 
-**Branch:** `v0.1-internal-alpha` (carries v0.1 + v0.2a–d + v0.3a–c)
-**Tests:** 1 unit suite + 1 integration suite, 100% passing in the Linux dev container against Asterisk-in-docker.
+**Branch:** `main` preparing first public release `v0.1.0`.
+**Tests:** 193 CTest cases passing in the Linux dev container: 169 unit/static-contract tests + 24 Asterisk-backed integration tests.
 
 ## What's done
 
@@ -36,12 +36,11 @@
 
 ## Test suite
 
-**Unit (4 suites, ~15 tests):**
-- SipEngine lifecycle, Database migrations, Keychain (memory + file), AccountsManager update/setDefault, ContactsManager, HistoryManager
+**Unit/static (169 tests across 3 executables):**
+- SIP engine lifecycle, database migrations, keychains, account/call/contact/history/message/line/settings managers, models, provisioning, update checks, QML layout contracts, and release-packaging contracts.
 
-**Integration (9 tests, 3 disabled):**
-- RegisterUdp, OutboundCall, CallLifecycle, Hold/Unhold, DTMF, RegisterTls — all PASS
-- InboundCall, BlindTransfer, AttendedTransfer — DISABLED: multi-account self-routing through the same SipEngine triggers PJSIP_EUNSUPTRANSPORT. The code paths are exercised; a proper end-to-end test needs an external SIP client originating calls (third party). Tracked as a v0.4 QA task.
+**Integration (24 tests):**
+- Register, outbound/inbound call flow, hold/unhold, DTMF, TLS registration, transfers, forwarding, conference, recording, instant messages, and call policies — all PASS against the Asterisk fixture.
 
 ## What's NOT done (path to v1.0 GA)
 
@@ -50,11 +49,10 @@ These are all v0.4 / pre-GA work — none of them affect the core SIP feature se
 | Item | Milestone | Why deferred |
 |---|---|---|
 | macOS audio acceptance (real CoreAudio, headset, mic permissions) | Manual, host-side | Requires running on macOS host; can't be done in Linux container |
-| macOS DMG + notarization | v0.4 | Procurement of Apple Developer ID |
-| Windows MSI + Authenticode signing | v0.4 | Procurement of EV cert, plus PJSIP Windows build via vcpkg |
+| Signed/notarized macOS production DMG | v0.4 | Procurement of Apple Developer ID and release secrets |
+| Signed Windows MSI | v0.4 | Procurement of EV/OV certificate and Authenticode release wiring |
 | Auto-update (Sparkle, WinSparkle) | v0.4 | Tied to installers |
-| Native keychain backends (macOS Security.framework, Windows wincred, Linux libsecret) | v0.4 | Tied to installers; file backend works as fallback |
-| Tray icon + autostart | v0.4 | OS integration |
+| Autostart/login item polish | v0.4 | OS integration |
 | Crash reporting (Sentry) | Release hardening | Optional release wiring exists; needs project `SENTRY_DSN` secret and live crash validation |
 | NAT matrix QA (same-LAN, STUN, symmetric NAT, TLS-only egress) | Pre-GA | Real PBX matrix |
 | Interop matrix QA (Asterisk, FreeSWITCH, 3CX, cloud PBX) | Pre-GA | Real PBX matrix |
@@ -66,5 +64,5 @@ These are all v0.4 / pre-GA work — none of them affect the core SIP feature se
 ## Suggested next move
 
 1. **Run the macOS acceptance test** on host — first time the audio path runs end-to-end. Procedure in `docs/acceptance/v0.1.md` (extends to all of v0.2 + v0.3 since the audio path is unchanged).
-2. If acceptance passes, merge `v0.1-internal-alpha` to `main` and tag `v0.3.0`.
-3. Plan v0.4 (installers + signing + native keychains + tray icon + auto-update) as the path to v1.0 GA.
+2. If acceptance passes and release secrets are ready, tag `v0.1.0`.
+3. Plan post-0.1 hardening: signing/notarization, auto-update, NAT/interop QA, and remaining OS integration.

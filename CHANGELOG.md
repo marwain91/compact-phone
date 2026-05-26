@@ -6,6 +6,8 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-26
+
 ### Added
 - Boot-time provisioning: CLI flags (`--sip-server`, `--sip-user`,
   `--sip-password-file`, `--config`) and a JSON provisioning file
@@ -28,6 +30,9 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
   and an explicit user opt-in.
 - Native keychain backends: macOS Security.framework + Windows
   Credential Manager. AES file fallback for everything else.
+- Daktela account provisioning and Daktela-specific branding in the dialer
+  and active-call views.
+- Collapsed-sidebar opener handle for returning to the navigation rail.
 
 ### Changed
 - Settings pane is now split into General / Audio / Calls / Advanced
@@ -36,6 +41,8 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
   so the running app stays visually aligned with the dock icon.
 - Main window gradient now follows the active theme's accent tint
   rather than a hard-coded color.
+- Active-call controls now resize and space themselves within the compact
+  window, including when the sidebar is expanded.
 
 ### Packaging
 - macOS `.icns`, Windows `.ico`, and Linux hicolor PNG set generated

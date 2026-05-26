@@ -13,6 +13,7 @@ ColumnLayout {
     property bool held: false
     property bool muted: false
     property bool recording: false
+    property bool daktelaAccount: false
 
     property bool showDtmf: false
     readonly property bool ended: state === "ended"
@@ -47,8 +48,22 @@ ColumnLayout {
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: Theme.s24
+            anchors.leftMargin: Theme.s14
+            anchors.rightMargin: Theme.s14
+            anchors.topMargin: Theme.s24
+            anchors.bottomMargin: Theme.s24
             spacing: Theme.s16
+
+            DaktelaMark {
+                objectName: "activeCallDaktelaMark"
+                visible: root.daktelaAccount && !root.showDtmf
+                markWidth: 126
+                markHeight: 32
+                Layout.preferredWidth: markWidth
+                Layout.preferredHeight: markHeight
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: Theme.s2
+            }
 
             // Compact caller header — shown only when the keypad is open so the
             // user can still see who they're talking to.
@@ -219,19 +234,36 @@ ColumnLayout {
             Item { Layout.fillHeight: true }
 
             RowLayout {
+                id: actionsRow
+                objectName: "activeCallActionsRow"
                 Layout.fillWidth: true
+                Layout.preferredWidth: parent.width
                 Layout.alignment: Qt.AlignHCenter
-                spacing: Theme.s10
+                spacing: actionSpacing
                 enabled: !root.ended
                 opacity: root.ended ? 0.45 : 1.0
 
+                readonly property int visibleActionCount: 5 + (mergeAction.visible ? 1 : 0)
+                readonly property int actionSpacing: width < 250 ? Theme.s4 : Theme.s8
+                readonly property real actionSlotWidth: visibleActionCount <= 0 ? 0
+                    : Math.max(34, Math.floor((width - Math.max(0, visibleActionCount - 1) * actionSpacing) / visibleActionCount))
+                readonly property int actionButtonDiameter: Math.max(34, Math.min(44, Math.floor(actionSlotWidth)))
+                readonly property int actionIconSize: actionButtonDiameter < 40 ? 16 : 18
+                readonly property int actionRecordIconSize: actionButtonDiameter < 40 ? 12 : 14
+                readonly property int actionLabelSize: actionSlotWidth < 39 ? 8 : Theme.fxs
+                readonly property real contentWidth: visibleActionCount * actionButtonDiameter
+                    + Math.max(0, visibleActionCount - 1) * actionSpacing
+
                 ColumnLayout {
+                    Layout.preferredWidth: actionsRow.actionSlotWidth
+                    Layout.minimumWidth: actionsRow.actionSlotWidth
+                    Layout.maximumWidth: actionsRow.actionSlotWidth
                     spacing: Theme.s2
                     IconButton {
                         Layout.alignment: Qt.AlignHCenter
                         iconPath: root.muted ? Icons.micOff : Icons.mic
-                        diameter: 44
-                        iconSize: 18
+                        diameter: actionsRow.actionButtonDiameter
+                        iconSize: actionsRow.actionIconSize
                         bgColor: root.muted ? Theme.accentSoft : Theme.surfaceHi
                         bgHover: root.muted ? Theme.accentSoft : Theme.border
                         tint: root.muted ? Theme.accent : Theme.textPrimary
@@ -240,19 +272,26 @@ ColumnLayout {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
+                        Layout.fillWidth: true
                         text: root.muted ? qsTr("Unmute") : qsTr("Mute")
                         color: Theme.textTertiary
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fxs
+                        font.pixelSize: actionsRow.actionLabelSize
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
                     }
                 }
                 ColumnLayout {
+                    Layout.preferredWidth: actionsRow.actionSlotWidth
+                    Layout.minimumWidth: actionsRow.actionSlotWidth
+                    Layout.maximumWidth: actionsRow.actionSlotWidth
                     spacing: Theme.s4
                     IconButton {
                         Layout.alignment: Qt.AlignHCenter
                         iconPath: root.held ? Icons.play : Icons.pause
-                        diameter: 44
-                        iconSize: 18
+                        diameter: actionsRow.actionButtonDiameter
+                        iconSize: actionsRow.actionIconSize
                         bgColor: root.held ? Theme.warningSoft : Theme.surfaceHi
                         bgHover: root.held ? Theme.warning : Theme.border
                         tint: root.held ? Theme.warning : Theme.textPrimary
@@ -262,19 +301,26 @@ ColumnLayout {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
+                        Layout.fillWidth: true
                         text: root.held ? qsTr("Resume") : qsTr("Hold")
                         color: Theme.textTertiary
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fxs
+                        font.pixelSize: actionsRow.actionLabelSize
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
                     }
                 }
                 ColumnLayout {
+                    Layout.preferredWidth: actionsRow.actionSlotWidth
+                    Layout.minimumWidth: actionsRow.actionSlotWidth
+                    Layout.maximumWidth: actionsRow.actionSlotWidth
                     spacing: Theme.s4
                     IconButton {
                         Layout.alignment: Qt.AlignHCenter
                         iconPath: Icons.keypad
-                        diameter: 44
-                        iconSize: 18
+                        diameter: actionsRow.actionButtonDiameter
+                        iconSize: actionsRow.actionIconSize
                         bgColor: root.showDtmf ? Theme.accentSoft : Theme.surfaceHi
                         bgHover: Theme.border
                         tint: root.showDtmf ? Theme.accent : Theme.textPrimary
@@ -283,38 +329,52 @@ ColumnLayout {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
+                        Layout.fillWidth: true
                         text: qsTr("Keypad")
                         color: Theme.textTertiary
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fxs
+                        font.pixelSize: actionsRow.actionLabelSize
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
                     }
                 }
                 ColumnLayout {
+                    Layout.preferredWidth: actionsRow.actionSlotWidth
+                    Layout.minimumWidth: actionsRow.actionSlotWidth
+                    Layout.maximumWidth: actionsRow.actionSlotWidth
                     spacing: Theme.s4
                     IconButton {
                         Layout.alignment: Qt.AlignHCenter
                         iconPath: Icons.transfer
-                        diameter: 44
-                        iconSize: 18
+                        diameter: actionsRow.actionButtonDiameter
+                        iconSize: actionsRow.actionIconSize
                         bgColor: Theme.surfaceHi
                         bgHover: Theme.border
                         onClicked: transferDialog.openFor(root.callId)
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
+                        Layout.fillWidth: true
                         text: qsTr("Transfer")
                         color: Theme.textTertiary
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fxs
+                        font.pixelSize: actionsRow.actionLabelSize
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
                     }
                 }
                 ColumnLayout {
+                    Layout.preferredWidth: actionsRow.actionSlotWidth
+                    Layout.minimumWidth: actionsRow.actionSlotWidth
+                    Layout.maximumWidth: actionsRow.actionSlotWidth
                     spacing: Theme.s4
                     IconButton {
                         Layout.alignment: Qt.AlignHCenter
                         iconPath: Icons.record
-                        diameter: 44
-                        iconSize: 14
+                        diameter: actionsRow.actionButtonDiameter
+                        iconSize: actionsRow.actionRecordIconSize
                         bgColor: root.recording ? Theme.dangerSoft : Theme.surfaceHi
                         bgHover: root.recording ? Theme.dangerSoft : Theme.border
                         tint: root.recording ? Theme.danger : Theme.textPrimary
@@ -330,23 +390,31 @@ ColumnLayout {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
+                        Layout.fillWidth: true
                         text: root.recording ? qsTr("Recording") : qsTr("Record")
                         color: root.recording ? Theme.danger : Theme.textTertiary
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fxs
+                        font.pixelSize: actionsRow.actionLabelSize
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
                     }
                 }
                 ColumnLayout {
+                    id: mergeAction
                     // Merge appears only when there's another held call to
                     // bridge with — the C++ side returns -1 otherwise.
                     visible: !root.ended
                             && PhoneController.firstHeldCallId(root.callId) > 0
+                    Layout.preferredWidth: actionsRow.actionSlotWidth
+                    Layout.minimumWidth: actionsRow.actionSlotWidth
+                    Layout.maximumWidth: actionsRow.actionSlotWidth
                     spacing: Theme.s4
                     IconButton {
                         Layout.alignment: Qt.AlignHCenter
                         iconPath: Icons.users
-                        diameter: 44
-                        iconSize: 18
+                        diameter: actionsRow.actionButtonDiameter
+                        iconSize: actionsRow.actionIconSize
                         bgColor: Theme.surfaceHi
                         bgHover: Theme.border
                         ToolTip.visible: hovered
@@ -359,10 +427,14 @@ ColumnLayout {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
+                        Layout.fillWidth: true
                         text: qsTr("Merge")
                         color: Theme.textTertiary
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fxs
+                        font.pixelSize: actionsRow.actionLabelSize
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
                     }
                 }
             }

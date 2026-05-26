@@ -36,6 +36,41 @@ gtest_discover_tests(test_unit
     PROPERTIES LABELS "unit"
 )
 
+add_executable(test_qml_layout
+    unit/test_active_call_layout.cpp
+    unit/test_daktela_branding_layout.cpp
+)
+target_link_libraries(test_qml_layout
+    PRIVATE
+        GTest::gtest
+        GTest::gtest_main
+        Qt6::Core
+)
+target_compile_definitions(test_qml_layout PRIVATE
+    COMPACTPHONE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+gtest_discover_tests(test_qml_layout
+    DISCOVERY_TIMEOUT 30
+    PROPERTIES LABELS "unit"
+)
+
+add_executable(test_release_packaging
+    unit/test_release_packaging.cpp
+)
+target_link_libraries(test_release_packaging
+    PRIVATE
+        GTest::gtest
+        GTest::gtest_main
+        Qt6::Core
+)
+target_compile_definitions(test_release_packaging PRIVATE
+    COMPACTPHONE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+gtest_discover_tests(test_release_packaging
+    DISCOVERY_TIMEOUT 30
+    PROPERTIES LABELS "unit"
+)
+
 add_executable(test_integration
     integration/test_register_udp.cpp
     integration/test_outbound_call_echo.cpp
