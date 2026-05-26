@@ -41,3 +41,13 @@ TEST(ReleasePackaging, MacOSBundleCopiesLicenseResourcesFromExecutableTargetDire
         "set_source_files_properties(${COMPACTPHONE_LICENCE_FILES} PROPERTIES")));
     EXPECT_TRUE(appCmake.contains(QStringLiteral("MACOSX_PACKAGE_LOCATION \"Resources\"")));
 }
+
+TEST(ReleasePackaging, SentryEnabledBuildAvoidsUnavailableDefaultPiiSetter)
+{
+    const auto crashReporting =
+        readProjectFile(QStringLiteral("/src/core/CrashReporting.cpp"));
+    ASSERT_FALSE(crashReporting.isEmpty());
+
+    EXPECT_FALSE(crashReporting.contains(
+        QStringLiteral("sentry_options_set_send_default_pii")));
+}

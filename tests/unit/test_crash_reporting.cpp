@@ -29,9 +29,13 @@ TEST(CrashReportingTest, DsnValidationAcceptsHttpsSentryLikeUrl)
         QStringLiteral("https://public@example.ingest.sentry.io/123")));
 }
 
-TEST(CrashReportingTest, ConfiguredInitAndAvailabilityAreSafeWithoutBuildDsn)
+TEST(CrashReportingTest, ConfiguredInitAndAvailabilityReflectBuildDsn)
 {
+#if defined(COMPACTPHONE_ENABLE_SENTRY) && defined(COMPACTPHONE_SENTRY_DSN)
+    EXPECT_TRUE(crash::configuredSentryAvailable());
+#else
     EXPECT_FALSE(crash::configuredSentryAvailable());
+#endif
     crash::initConfiguredSentry(false);
     crash::initConfiguredSentry(true);
     crash::shutdown();
