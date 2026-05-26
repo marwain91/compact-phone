@@ -51,3 +51,23 @@ TEST(ReleasePackaging, SentryEnabledBuildAvoidsUnavailableDefaultPiiSetter)
     EXPECT_FALSE(crashReporting.contains(
         QStringLiteral("sentry_options_set_send_default_pii")));
 }
+
+TEST(ReleasePackaging, LinuxReleaseMakesDockerDistArtifactsHostWritable)
+{
+    const auto workflow =
+        readProjectFile(QStringLiteral("/.github/workflows/release-linux.yml"));
+    ASSERT_FALSE(workflow.isEmpty());
+
+    const auto bundleOffset =
+        workflow.indexOf(QStringLiteral("- name: Bundle into AppImage"));
+    const auto chownOffset =
+        workflow.indexOf(QStringLiteral("sudo chown -R \"$USER:$USER\" dist"));
+    const auto appcastOffset =
+        workflow.indexOf(QStringLiteral("- name: Generate Linux appcast"));
+
+    ASSERT_GE(bundleOffset, 0);
+    ASSERT_GE(appcastOffset, 0);
+    ASSERT_GE(chownOffset, 0);
+    EXPECT_LT(bundleOffset, chownOffset);
+    EXPECT_LT(chownOffset, appcastOffset);
+}
