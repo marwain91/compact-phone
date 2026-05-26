@@ -111,6 +111,7 @@ jobs:
         run: |
           docker compose -f tools/dev/docker-compose.yml exec -T dev \
             bash tools/release/build-linux-appimage.sh
+          sudo chown -R "$USER:$USER" dist
 
       - name: Generate Linux appcast
         env:
