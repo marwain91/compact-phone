@@ -62,8 +62,7 @@ void initSentry(const QString &dsn, bool userConsent)
         ("compactphone@" COMPACTPHONE_VERSION));
     sentry_options_set_database_path(opts, ".sentry-native");
     sentry_options_set_auto_session_tracking(opts, 0);
-    // Strip PII the SDK might otherwise grab. SIP credentials never go.
-    sentry_options_set_send_default_pii(opts, 0);
+    // Do not set user/context data. SIP credentials never go to crash reports.
 
     if (sentry_init(opts) == 0) {
         s_initialized = true;
