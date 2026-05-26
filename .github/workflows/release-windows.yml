@@ -48,21 +48,32 @@ jobs:
           }
           python tools/release/verify-release-version.py $env:RELEASE_TAG
 
-      - name: Validate production signing config
+      - name: Check Windows signing config
+        id: signing-config
         shell: pwsh
         env:
           REF_NAME: ${{ env.RELEASE_TAG }}
           CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
         run: |
+          $hasThumbprint = -not [string]::IsNullOrWhiteSpace($env:CODE_SIGN_THUMBPRINT)
           if ($env:REF_NAME -like "*-test*") {
-            Write-Host "Test tag detected; unsigned Windows artifact is allowed."
-            exit 0
+            Write-Host "Test tag detected; unsigned Windows artifact is allowed when no thumbprint is configured."
+            "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } elseif ($hasThumbprint) {
+            "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            Write-Warning "Skipping Windows production artifact because CODE_SIGN_THUMBPRINT is not configured"
+            "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           }
-          if ([string]::IsNullOrWhiteSpace($env:CODE_SIGN_THUMBPRINT)) {
-            throw "CODE_SIGN_THUMBPRINT is required for production Windows releases"
+
+          if ($hasThumbprint) {
+            "has_thumbprint=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "has_thumbprint=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           }
 
       - name: Restore vcpkg + installed deps cache
+        if: steps.signing-config.outputs.publish == 'true'
         id: vcpkg-cache
         uses: actions/cache/restore@v5
         with:
@@ -74,6 +85,7 @@ jobs:
             vcpkg-windows-shortpath-
 
       - name: Setup vcpkg (at C:\v)
+        if: steps.signing-config.outputs.publish == 'true'
         shell: pwsh
         run: |
           if (-not (Test-Path C:\v)) {
@@ -83,10 +95,12 @@ jobs:
           "VCPKG_ROOT=C:\v" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install WiX 4
+        if: steps.signing-config.outputs.publish == 'true'
         shell: pwsh
         run: dotnet tool install --global wix --version 4.0.6
 
       - name: Cache PJSIP build (short path)
+        if: steps.signing-config.outputs.publish == 'true'
         id: pjsip-cache
         uses: actions/cache/restore@v5
         with:
@@ -94,10 +108,11 @@ jobs:
           key: pjsip-windows-2.17-v6-md
 
       - name: Add msbuild to PATH
+        if: steps.signing-config.outputs.publish == 'true'
         uses: microsoft/setup-msbuild@v3
 
       - name: Build PJSIP (at C:\p)
-        if: steps.pjsip-cache.outputs.cache-hit != 'true'
+        if: steps.signing-config.outputs.publish == 'true' && steps.pjsip-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path C:\p -Force | Out-Null
@@ -146,7 +161,7 @@ jobs:
           Pop-Location
 
       - name: Save PJSIP build cache
-        if: success() && steps.pjsip-cache.outputs.cache-hit != 'true'
+        if: steps.signing-config.outputs.publish == 'true' && success() && steps.pjsip-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v5
         with:
@@ -154,11 +169,13 @@ jobs:
           key: ${{ steps.pjsip-cache.outputs.cache-primary-key }}
 
       - name: Export PJSIP_ROOT
+        if: steps.signing-config.outputs.publish == 'true'
         shell: pwsh
         run: |
           "PJSIP_ROOT=C:\p\pjproject-2.17" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Locate VS Dev Command Prompt
+        if: steps.signing-config.outputs.publish == 'true'
         shell: pwsh
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} `
@@ -176,6 +193,7 @@ jobs:
           "VSDEVCMD=$devcmd" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Configure
+        if: steps.signing-config.outputs.publish == 'true'
         shell: pwsh
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -194,7 +212,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Save vcpkg + installed deps cache
-        if: success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        if: steps.signing-config.outputs.publish == 'true' && success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v5
         with:
@@ -204,6 +222,7 @@ jobs:
           key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Build
+        if: steps.signing-config.outputs.publish == 'true'
         shell: pwsh
         run: |
           $cmd = "`"$env:VSDEVCMD`" -arch=amd64 -host_arch=amd64 " +
@@ -212,6 +231,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Stage runtime (windeployqt)
+        if: steps.signing-config.outputs.publish == 'true'
         shell: pwsh
         run: |
           $stage = "C:\b\stage"
@@ -244,6 +264,7 @@ jobs:
           Copy-Item THIRD_PARTY_LICENSES.md "$stage\THIRD_PARTY_LICENSES.md"
 
       - name: Build MSI
+        if: steps.signing-config.outputs.publish == 'true'
         shell: pwsh
         env:
           REF_NAME: ${{ env.RELEASE_TAG }}
@@ -260,6 +281,7 @@ jobs:
               -out "dist\Compact-Phone-Windows.msi"
 
       - name: Sign MSI (gated on cert secret)
+        if: steps.signing-config.outputs.publish == 'true' && (steps.signing-config.outputs.has_thumbprint == 'true' || contains(env.RELEASE_TAG, '-test'))
         shell: pwsh
         env:
           CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
@@ -267,11 +289,8 @@ jobs:
           REF_NAME: ${{ env.RELEASE_TAG }}
         run: |
           if ([string]::IsNullOrEmpty($env:CODE_SIGN_THUMBPRINT)) {
-            if ($env:REF_NAME -like "*-test*") {
-              Write-Host "CODE_SIGN_THUMBPRINT not set — uploading unsigned test MSI"
-              exit 0
-            }
-            throw "CODE_SIGN_THUMBPRINT is required for production Windows releases"
+            Write-Host "CODE_SIGN_THUMBPRINT not set; uploading unsigned test MSI"
+            exit 0
           }
           $ts = if ([string]::IsNullOrEmpty($env:TIMESTAMP_URL)) {
             "http://timestamp.digicert.com" } else { $env:TIMESTAMP_URL }
@@ -279,6 +298,7 @@ jobs:
               /tr $ts /td sha256 /fd sha256 dist\*.msi
 
       - name: Generate Windows appcast
+        if: steps.signing-config.outputs.publish == 'true'
         shell: pwsh
         env:
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
@@ -300,6 +320,7 @@ jobs:
               --output dist\appcast-windows.xml
 
       - name: Upload MSI + appcast to release
+        if: steps.signing-config.outputs.publish == 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -308,3 +329,10 @@ jobs:
             dist/*.msi
             dist/appcast-windows.xml
           fail_on_unmatched_files: true
+
+      - name: Summarize skipped Windows release
+        if: steps.signing-config.outputs.publish != 'true'
+        shell: pwsh
+        run: |
+          "Windows production artifact skipped because CODE_SIGN_THUMBPRINT is not configured." |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append

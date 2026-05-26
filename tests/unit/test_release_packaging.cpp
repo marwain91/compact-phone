@@ -71,3 +71,31 @@ TEST(ReleasePackaging, LinuxReleaseMakesDockerDistArtifactsHostWritable)
     EXPECT_LT(bundleOffset, chownOffset);
     EXPECT_LT(chownOffset, appcastOffset);
 }
+
+TEST(ReleasePackaging, WindowsReleaseSkipsProductionArtifactWithoutSigningSecret)
+{
+    const auto workflow =
+        readProjectFile(QStringLiteral("/.github/workflows/release-windows.yml"));
+    ASSERT_FALSE(workflow.isEmpty());
+
+    const auto configOffset =
+        workflow.indexOf(QStringLiteral("- name: Check Windows signing config"));
+    const auto restoreOffset =
+        workflow.indexOf(QStringLiteral("- name: Restore vcpkg + installed deps cache"));
+    const auto uploadOffset =
+        workflow.indexOf(QStringLiteral("- name: Upload MSI + appcast to release"));
+
+    ASSERT_GE(configOffset, 0);
+    ASSERT_GE(restoreOffset, 0);
+    ASSERT_GE(uploadOffset, 0);
+    EXPECT_LT(configOffset, restoreOffset);
+
+    EXPECT_TRUE(workflow.contains(QStringLiteral("publish=true")));
+    EXPECT_TRUE(workflow.contains(QStringLiteral("publish=false")));
+    EXPECT_TRUE(workflow.contains(
+        QStringLiteral("if: steps.signing-config.outputs.publish == 'true'")));
+    EXPECT_TRUE(workflow.contains(QStringLiteral(
+        "Skipping Windows production artifact because CODE_SIGN_THUMBPRINT is not configured")));
+    EXPECT_FALSE(workflow.contains(QStringLiteral(
+        "throw \"CODE_SIGN_THUMBPRINT is required for production Windows releases\"")));
+}
