@@ -161,6 +161,77 @@ jobs:
           path: .vcpkg-cache
           key: vcpkg-linux-partial-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
+  # Asterisk-backed integration suite (register, call, hold, transfer,
+  # conference, DTMF, recording, mute, audio playback, live RTP stats). Uses
+  # docker compose so the dev container reaches the Asterisk container by its
+  # `asterisk:5060` alias — the same wiring as `make test-integration` locally.
+  #
+  # Runs on a GitHub-hosted arm64 runner (ubuntu-24.04-arm, free for public
+  # repos — NOT self-hosted, which CLAUDE.md "Things I avoid" rules out). arm64
+  # is deliberate: these tests do full pjsua2 audio init + live SIP calls, and
+  # pjsua2 audio init SIGSEGVs on GitHub x86_64 runners (the same root cause the
+  # unit job excludes SipEngineLifecycle for — see CLAUDE.md "Linux x86_64 unit
+  # test segfaults"). arm64 matches the dev container / VPS where the suite is
+  # green. Separate job so a media-stack crash here never masks the unit gate.
+  #
+  # NOTE: there is no prebuilt arm64 GHCR builder image, so this job cold-builds
+  # the dev image (PJSIP) and the arm64-linux vcpkg deps (Qt) on first run —
+  # long, but manual dispatch only and the vcpkg cache amortises later runs.
+  integration-tests:
+    name: Asterisk integration tests (arm64)
+    runs-on: ubuntu-24.04-arm
+    env:
+      VCPKG_ARCHIVES_DIR: ${{ github.workspace }}/.vcpkg-cache
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare vcpkg binary cache
+        run: mkdir -p "$VCPKG_ARCHIVES_DIR"
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-linux-arm64-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/dev/triplets/**', 'tools/dev/Dockerfile') }}
+          restore-keys: |
+            vcpkg-linux-arm64-
+
+      - name: Build dev image + start Asterisk
+        run: docker compose -f tools/dev/docker-compose.yml up -d --build
+
+      - name: Configure
+        run: |
+          docker compose -f tools/dev/docker-compose.yml exec -T dev \
+            cmake --preset linux
+
+      - name: Build
+        run: |
+          docker compose -f tools/dev/docker-compose.yml exec -T dev \
+            cmake --build --preset linux
+
+      - name: Run integration tests
+        run: |
+          docker compose -f tools/dev/docker-compose.yml exec -T dev \
+            bash -c "cd /workspace/build/linux && \
+              ctest --output-on-failure -L integration"
+
+      - name: Asterisk logs on failure
+        if: failure()
+        run: docker compose -f tools/dev/docker-compose.yml logs asterisk
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tools/dev/docker-compose.yml down -v
+
+      - name: Save vcpkg binary cache
+        if: success() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: .vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
   # Routine PRs do not run this job. Platform packages are built by the
   # tag-triggered release-{macos,linux,windows}.yml workflows, which are the
   # single source of truth for signing, packaging, and publishing.

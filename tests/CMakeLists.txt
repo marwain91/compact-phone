@@ -87,6 +87,9 @@ add_executable(test_integration
     integration/test_call_recording.cpp
     integration/test_instant_message.cpp
     integration/test_call_policies.cpp
+    integration/test_mute.cpp
+    integration/test_audio_playback.cpp
+    integration/test_stream_stats_live.cpp
 )
 target_link_libraries(test_integration
     PRIVATE GTest::gtest GTest::gtest_main Qt6::Core compactphone_core
