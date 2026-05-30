@@ -249,3 +249,108 @@ TEST_F(AccountsManagerUpdateTest, UpdateRoundTripsSecurityAndTransportFields)
     EXPECT_EQ(loaded->codecs, "opus,alaw");
     EXPECT_EQ(loaded->authRealm, "new.realm");
 }
+
+// setEnabled has its own UPDATE ... SET enabled bind site, distinct from add()
+// and update(). Prove the flag is *persisted* (survives a cold reload), not
+// just flipped in the in-memory entry. We assert only the persisted column and
+// the bool return — never live registration state, which routes into pjsua2.
+TEST_F(AccountsManagerUpdateTest, SetEnabledPersistsFlagAcrossReload)
+{
+    compactphone::sip::AccountId id = compactphone::sip::kInvalidAccountId;
+    {
+        compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+        compactphone::sip::Account a;
+        a.username = "1001";
+        a.domain = "127.0.0.1:9"; // unroutable, no real registration attempt
+        a.enabled = false;
+        a.registerOnStartup = false;
+        id = mgr.add(a, "secret");
+        ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
+
+        // false -> true: persists and (headlessly) creates a pj account.
+        ASSERT_TRUE(mgr.setEnabled(id, true));
+    }
+
+    {
+        compactphone::sip::AccountsManager reloaded(&engine, &db, &kc);
+        const auto loaded = reloaded.find(id);
+        ASSERT_TRUE(loaded.has_value());
+        EXPECT_TRUE(loaded->enabled);
+
+        // true -> false: persists the disable via the unregister path.
+        ASSERT_TRUE(reloaded.setEnabled(id, false));
+    }
+
+    compactphone::sip::AccountsManager reloaded2(&engine, &db, &kc);
+    const auto loaded2 = reloaded2.find(id);
+    ASSERT_TRUE(loaded2.has_value());
+    EXPECT_FALSE(loaded2->enabled);
+}
+
+// Two contract branches of setEnabled that the persistence test doesn't reach:
+// (a) requesting the value the account already has returns true and leaves it
+// disabled (the no-op fast path), and (b) an unknown id returns false instead
+// of crashing past the find_if. UpdateUnknownIdReturnsFalse covers
+// update/remove/setDefault but not setEnabled. (The no-op assertion pins the
+// observable result, not the in-memory fast path specifically — a redundant
+// UPDATE would leave the same persisted value; the reload just confirms the
+// account is still durably disabled afterwards.)
+TEST_F(AccountsManagerUpdateTest, SetEnabledNoOpAndUnknownId)
+{
+    compactphone::sip::AccountId id = compactphone::sip::kInvalidAccountId;
+    {
+        compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+        compactphone::sip::Account a;
+        a.username = "1001";
+        a.domain = "pbx.example.com";
+        a.enabled = false;
+        id = mgr.add(a, "secret");
+        ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
+
+        // Already disabled: requesting disabled again returns true, stays off.
+        EXPECT_TRUE(mgr.setEnabled(id, false));
+        EXPECT_FALSE(mgr.find(id).value().enabled);
+
+        // Unknown id: false, no crash past find_if.
+        EXPECT_FALSE(mgr.setEnabled(9999, true));
+    }
+
+    compactphone::sip::AccountsManager reloaded(&engine, &db, &kc);
+    const auto loaded = reloaded.find(id);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_FALSE(loaded->enabled);
+}
+
+// SetDefaultFlipsFlagAndClearsOthers asserts the in-memory entries, but not the
+// persisted single-default invariant: setDefault runs UPDATE ... SET is_default
+// = 0 WHERE is_default = 1 then sets the new one, inside a transaction. Reload
+// from the same DB and prove exactly one account is default and it is the one
+// we chose — catches a drift where the clear-others UPDATE stops persisting.
+TEST_F(AccountsManagerUpdateTest, SetDefaultPersistsSingleDefaultInvariant)
+{
+    compactphone::sip::AccountId idA = compactphone::sip::kInvalidAccountId;
+    compactphone::sip::AccountId idB = compactphone::sip::kInvalidAccountId;
+    {
+        compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+        compactphone::sip::Account a, b;
+        a.username = "u1"; a.domain = "d"; a.enabled = false; a.isDefault = true;
+        b.username = "u2"; b.domain = "d"; b.enabled = false;
+        idA = mgr.add(a, "pa");
+        idB = mgr.add(b, "pb");
+        ASSERT_NE(idA, compactphone::sip::kInvalidAccountId);
+        ASSERT_NE(idB, compactphone::sip::kInvalidAccountId);
+
+        ASSERT_TRUE(mgr.setDefault(idB));
+    }
+
+    compactphone::sip::AccountsManager reloaded(&engine, &db, &kc);
+    const auto accounts = reloaded.list();
+    ASSERT_EQ(accounts.size(), 2u);
+    int defaults = 0;
+    compactphone::sip::AccountId defaultId = compactphone::sip::kInvalidAccountId;
+    for (const auto &acc : accounts) {
+        if (acc.isDefault) { ++defaults; defaultId = acc.id; }
+    }
+    EXPECT_EQ(defaults, 1);
+    EXPECT_EQ(defaultId, idB);
+}
