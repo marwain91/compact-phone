@@ -14,6 +14,7 @@ add_library(compactphone_core STATIC
     core/UrlDispatcher.cpp
     core/CallEntry.h
     core/CallEntry.cpp
+    core/CallSnapshotSource.h
     core/CallSessionTracker.h
     core/CallSessionTracker.cpp
     core/CallsController.h

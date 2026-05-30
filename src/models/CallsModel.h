@@ -7,7 +7,7 @@
 
 #include <vector>
 
-namespace compactphone::sip { class CallManager; }
+namespace compactphone::sip { class CallSnapshotSource; }
 
 namespace compactphone::models {
 
@@ -26,7 +26,7 @@ public:
         DirectionRole,
     };
 
-    explicit CallsModel(sip::CallManager *cm, QObject *parent = nullptr);
+    explicit CallsModel(sip::CallSnapshotSource *source, QObject *parent = nullptr);
 
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -35,7 +35,7 @@ public:
     Q_INVOKABLE void refresh();
 
 private:
-    sip::CallManager *m_cm;
+    sip::CallSnapshotSource *m_source;
     std::vector<sip::CallEntry> m_snapshot;
 };
 
