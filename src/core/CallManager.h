@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Account.h"
+#include "CallSnapshotSource.h"
 
 #include <QObject>
 
@@ -33,7 +34,7 @@ enum class CallState {
     Disconnected,
 };
 
-class CallManager : public QObject {
+class CallManager : public QObject, public CallSnapshotSource {
     Q_OBJECT
 signals:
     // Emitted whenever the set or state of calls changes (added, removed,
@@ -133,7 +134,8 @@ public:
     CallId activeCallId() const { return m_activeCallId; }
 
     // Returns a copy of every active call's current state, for QML.
-    std::vector<CallEntry> snapshot() const;
+    // Implements CallSnapshotSource so CallsModel can be driven by a fake.
+    std::vector<CallEntry> snapshot() const override;
 
     // Erases the call entry with this id. Called via QMetaObject::invokeMethod
     // on the Qt main thread from CallImpl after DISCONNECTED is dispatched.

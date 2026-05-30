@@ -27,6 +27,7 @@ add_executable(test_unit
     unit/test_stream_stats.cpp
     unit/test_url_dispatcher.cpp
     unit/test_daktela_provider.cpp
+    unit/test_calls_model.cpp
 )
 target_link_libraries(test_unit
     PRIVATE GTest::gtest GTest::gtest_main Qt6::Test compactphone_core

@@ -1,13 +1,13 @@
 #include "CallsModel.h"
 
-#include "core/CallManager.h"
+#include "core/CallSnapshotSource.h"
 
 #include <algorithm>
 
 namespace compactphone::models {
 
-CallsModel::CallsModel(sip::CallManager *cm, QObject *parent)
-    : QAbstractListModel(parent), m_cm(cm)
+CallsModel::CallsModel(sip::CallSnapshotSource *source, QObject *parent)
+    : QAbstractListModel(parent), m_source(source)
 {
     refresh();
 }
@@ -59,7 +59,7 @@ void CallsModel::refresh()
 {
     // Incremental diff so QML delegates keep their local state (e.g. the
     // in-call DTMF keypad toggle) when call fields like held/muted change.
-    auto next = m_cm ? m_cm->snapshot() : std::vector<sip::CallEntry>{};
+    auto next = m_source ? m_source->snapshot() : std::vector<sip::CallEntry>{};
 
     // Step 1 — remove rows present in m_snapshot but not in next.
     for (int i = static_cast<int>(m_snapshot.size()) - 1; i >= 0; --i) {
