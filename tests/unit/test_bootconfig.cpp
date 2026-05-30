@@ -599,12 +599,10 @@ TEST(BootConfigTest, HostnameThatAlreadyCarriesAPortIsLeftUnchanged)
               "pbx.example.com:5060");
 }
 
-// Characterizes CURRENT behaviour, which looks like a bug: an IPv6 literal
-// supplied already-bracketed but without a port is wrapped a second time,
-// yielding a double-bracketed, unconnectable address. See SUSPECTED BUGS in
-// the qa-coverage report. If serverWithOptionalPort() is fixed to detect the
-// existing brackets, update this expectation to "[2001:db8::1]:5060".
-TEST(BootConfigTest, AlreadyBracketedIpv6WithoutPortIsDoubleBracketed)
+// An IPv6 literal supplied already-bracketed but without a port gets the port
+// appended in place — NOT wrapped a second time into "[[2001:db8::1]]:5060"
+// (a previous bug; see serverWithOptionalPort()).
+TEST(BootConfigTest, AlreadyBracketedIpv6WithoutPortGetsPortAppended)
 {
     const auto cfg = parseCommandLine(args({
         "--sip-server", "[2001:db8::1]",
@@ -613,7 +611,7 @@ TEST(BootConfigTest, AlreadyBracketedIpv6WithoutPortIsDoubleBracketed)
     }));
     ASSERT_EQ(cfg.accounts.size(), 1);
     EXPECT_EQ(cfg.accounts.first().params.value("domain").toString(),
-              "[[2001:db8::1]]:5060");
+              "[2001:db8::1]:5060");
 }
 
 // --- resolvePassword failure branches -------------------------------------
