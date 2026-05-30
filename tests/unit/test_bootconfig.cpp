@@ -557,3 +557,82 @@ TEST(BootConfigTest, RegisterOnStartCanBeDisabled)
     EXPECT_FALSE(cfg.accounts.first().params
                      .value("registerOnStartup").toBool());
 }
+
+// --- server / --sip-port assembly (the IPv6 bracket logic) ----------------
+// serverWithOptionalPort() is file-internal; exercise it through the public
+// --sip-server / --sip-port seam and observe the resulting "domain". A bug
+// here produces an unconnectable registrar address.
+
+TEST(BootConfigTest, BareIpv6ServerIsBracketedWithExplicitPort)
+{
+    const auto cfg = parseCommandLine(args({
+        "--sip-server", "2001:db8::1",
+        "--sip-port", "5060",
+        "--sip-user", "1001",
+    }));
+    ASSERT_EQ(cfg.accounts.size(), 1);
+    EXPECT_EQ(cfg.accounts.first().params.value("domain").toString(),
+              "[2001:db8::1]:5060");
+}
+
+TEST(BootConfigTest, AlreadyBracketedIpv6WithPortIsLeftUnchanged)
+{
+    const auto cfg = parseCommandLine(args({
+        "--sip-server", "[2001:db8::1]:5061",
+        "--sip-port", "5070",
+        "--sip-user", "1001",
+    }));
+    ASSERT_EQ(cfg.accounts.size(), 1);
+    EXPECT_EQ(cfg.accounts.first().params.value("domain").toString(),
+              "[2001:db8::1]:5061");
+}
+
+TEST(BootConfigTest, HostnameThatAlreadyCarriesAPortIsLeftUnchanged)
+{
+    const auto cfg = parseCommandLine(args({
+        "--sip-server", "pbx.example.com:5060",
+        "--sip-port", "5070",
+        "--sip-user", "1001",
+    }));
+    ASSERT_EQ(cfg.accounts.size(), 1);
+    EXPECT_EQ(cfg.accounts.first().params.value("domain").toString(),
+              "pbx.example.com:5060");
+}
+
+// Characterizes CURRENT behaviour, which looks like a bug: an IPv6 literal
+// supplied already-bracketed but without a port is wrapped a second time,
+// yielding a double-bracketed, unconnectable address. See SUSPECTED BUGS in
+// the qa-coverage report. If serverWithOptionalPort() is fixed to detect the
+// existing brackets, update this expectation to "[2001:db8::1]:5060".
+TEST(BootConfigTest, AlreadyBracketedIpv6WithoutPortIsDoubleBracketed)
+{
+    const auto cfg = parseCommandLine(args({
+        "--sip-server", "[2001:db8::1]",
+        "--sip-port", "5060",
+        "--sip-user", "1001",
+    }));
+    ASSERT_EQ(cfg.accounts.size(), 1);
+    EXPECT_EQ(cfg.accounts.first().params.value("domain").toString(),
+              "[[2001:db8::1]]:5060");
+}
+
+// --- resolvePassword failure branches -------------------------------------
+// The happy @file / @env / literal paths are already covered; pin the
+// failure paths so a missing secret degrades to empty (warn) rather than
+// throwing or returning garbage, which would break headless provisioning.
+
+TEST(BootConfigTest, ResolvePasswordFromMissingFileIsEmpty)
+{
+    const QString missing =
+        QDir::tempPath() + QStringLiteral("/cp-does-not-exist-XYZ.secret");
+    QFile::remove(missing); // ensure absent
+    EXPECT_TRUE(resolvePassword(QStringLiteral("@file:") + missing).isEmpty());
+}
+
+TEST(BootConfigTest, ResolvePasswordFromUnsetEnvIsEmpty)
+{
+    qunsetenv("COMPACTPHONE_DEFINITELY_UNSET_PWD");
+    EXPECT_TRUE(
+        resolvePassword(QStringLiteral("@env:COMPACTPHONE_DEFINITELY_UNSET_PWD"))
+            .isEmpty());
+}
