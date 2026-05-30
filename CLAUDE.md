@@ -423,8 +423,28 @@ Gotchas:
   account, and the `TRUSTED_SIGNING_ENDPOINT` host (`weu` = westeurope).
 - A new signing identity earns SmartScreen reputation over the first
   installs; "unknown publisher" fading is expected, not a misconfig.
-- `CODE_SIGN_THUMBPRINT` secret and `TIMESTAMP_URL` var are now orphaned
-  — safe to delete once Artifact Signing is proven on a production tag.
+- The action input is `signing-account-name` (azure/trusted-signing-action
+  v2 renamed it from `trusted-signing-account-name`, which still works but
+  logs a deprecation warning — fixed in #59). Don't revert it.
+- **The signer cert is short-lived — ~3 days.** Artifact Signing mints a
+  fresh per-operation certificate (`O=Jiri Havlicek`, issued by `Microsoft
+  ID Verified CS AOC CA 04`). The **RFC3161 timestamp is what keeps the
+  signature valid after the cert expires** — Windows checks "was the cert
+  valid at the timestamped moment?". This is why `timestamp-rfc3161:
+  http://timestamp.acs.microsoft.com` is mandatory, not optional. A signed
+  installer from a tag last month is still trusted today.
+- Verifying off-Windows: `osslsigncode verify` parses the chain but reports
+  "unable to get local issuer certificate / Failed" because Linux CA
+  bundles hold TLS web-PKI roots, NOT code-signing roots. That's expected,
+  not a bad signature — the chain anchors to `Microsoft Identity
+  Verification Root Certificate Authority 2020`, which ships in the Windows
+  trust store. To confirm trust, check on Windows (Properties → Digital
+  Signatures) or supply the MS code-signing root via `-CAfile`.
+- There was never a `CODE_SIGN_THUMBPRINT` secret or `TIMESTAMP_URL` var
+  configured (the old workflow referenced them but they were unset — that's
+  why production Windows releases were skipped, not signed). Nothing to
+  clean up. Signing is proven: v0.1.0's MSI was built+signed via manual
+  `workflow_dispatch` (tag `v0.1.0`, source_ref `v0.1.0`) after the cutover.
 
 ### GitHub-hosted `macos-14` pool contention — bump to `macos-15`
 
