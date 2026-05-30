@@ -3,22 +3,27 @@
 This directory holds the WiX 4 installer source and the build/sign pipeline
 for the Compact Phone MSI.
 
-## Prerequisites you must procure
+## Signing — Azure Artifact Signing
 
-1. **EV code-signing certificate** — required so Windows SmartScreen trusts
-   the installer immediately on first download. Standard (non-EV) certs work
-   but require building reputation, which means the first thousands of users
-   see a scary warning.
-   - Vendors: DigiCert, Sectigo, GlobalSign (~$300–$500/year).
-   - Lead time: 1–2 weeks for company verification.
-   - The cert is bound to a hardware token (USB key); signing must run on
-     a machine that physically holds the token, OR you proxy through a
-     KMS like SignPath / SSL.com Cloud Signing.
-   - Capture the SHA-1 thumbprint of the cert after install: `certutil -store My`.
-2. **Timestamp authority URL** — bundled with most cert vendors. Defaults
-   used by the signing step: `http://timestamp.digicert.com`.
-3. **WiX Toolset v4** — `dotnet tool install --global wix --version 4.0.6` on the Windows
-   build runner.
+The MSI is signed with **Azure Artifact Signing** (formerly "Trusted
+Signing"), a managed signing service — there is **no EV certificate,
+hardware token, or thumbprint** to procure or guard. Microsoft's CA chains
+the signature to a root Windows already trusts, so SmartScreen treats it
+like any other commercially-signed installer (reputation still accrues over
+the first installs — see below).
+
+The Azure resources are already provisioned (signing account `CompactPhone`,
+certificate profile `CompactPhone`, westeurope). CI authenticates via an
+OIDC federated credential — no secret is stored. See CLAUDE.md
+("Windows MSI is signed with Azure Artifact Signing") for the account/role/
+secret details and how to re-provision if the identity ever changes.
+
+## Prerequisites
+
+1. **WiX Toolset v4** — `dotnet tool install --global wix --version 4.0.6` on
+   the Windows build runner.
+2. **Azure CLI** (only for *local* signing, not for CI) —
+   `az login` against the subscription that owns the signing account.
 
 ## Build steps (manual)
 
@@ -59,30 +64,46 @@ wix build packaging\windows\installer.wxs dist\stage-files.wxs -arch x64 `
     -d Version="0.3.0" `
     -out "dist\compactphone-0.3.0.msi"
 
-# 4. Sign (with EV cert in cert store)
-& signtool sign /v `
-    /sha1 $env:CODE_SIGN_THUMBPRINT `
-    /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
+# 4. Sign with Azure Artifact Signing.
+#    In CI this is done by azure/trusted-signing-action; locally you sign
+#    via the Trusted Signing dlib + signtool after `az login`. Install the
+#    dlib once: `dotnet tool install --global Azure.CodeSigning.Dlib` (or
+#    download Microsoft.Trusted.Signing.Client), then:
+& signtool sign /v /fd SHA256 `
+    /tr http://timestamp.acs.microsoft.com /td SHA256 `
+    /dlib "<path>\Azure.CodeSigning.Dlib.dll" `
+    /dmdf metadata.json `
     dist\compactphone-0.3.0.msi
+# metadata.json: { "Endpoint": "https://weu.codesigning.azure.net/",
+#   "CodeSigningAccountName": "CompactPhone",
+#   "CertificateProfileName": "CompactPhone" }
 ```
+
+Most of the time you do **not** sign locally — push a tag and let CI sign
+(a `-test` tag signs too, when the profile is configured, so you can prove
+the pipeline without a public release).
 
 ## CI
 
 `.github/workflows/release-windows.yml` fires on tags matching `v*`, builds
-the MSI, and uploads it to the matching GitHub release. Tags containing
-`-test` may upload unsigned dev artifacts; production tags fail if
-`CODE_SIGN_THUMBPRINT` is not configured.
+the MSI, signs it via Azure Artifact Signing (OIDC login in the `release`
+environment), and uploads it to the matching GitHub release. The
+`signing-config` step decides two things: whether to `publish` at all and
+whether to `should_sign`. A production tag without `TRUSTED_SIGNING_PROFILE`
+configured is **skipped, not failed** (a job summary explains why);
+`-test` tags always publish and sign when the profile is configured.
 
 ## SmartScreen reputation
 
-Even with EV signing the first few installs may show SmartScreen warnings
-until Microsoft accumulates positive telemetry. To accelerate:
+Artifact Signing chains to a trusted Microsoft CA, but a *new* signing
+identity still earns SmartScreen reputation over the first installs, so
+early downloads may show a warning that fades — this is expected, not a
+misconfiguration. To accelerate:
 - Submit the signed binary to Microsoft Defender for analysis:
   https://www.microsoft.com/en-us/wdsi/filesubmission
-- Bundle the same EV cert thumbprint across every release.
+- Keep using the same Artifact Signing certificate profile across releases
+  so reputation accrues to one identity.
 
 ## What's still missing
 
-- Self-hosted signing runner provisioning notes if the EV certificate cannot
-  be exposed to GitHub-hosted runners.
 - Auto-update hookup (WinSparkle) — see task #8.
