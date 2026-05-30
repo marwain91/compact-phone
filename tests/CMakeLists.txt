@@ -8,6 +8,7 @@ add_executable(test_unit
     unit/test_database.cpp
     unit/test_keychain.cpp
     unit/test_accounts_manager_update.cpp
+    unit/test_accounts_manager_password.cpp
     unit/test_call_session_tracker.cpp
     unit/test_contacts_manager.cpp
     unit/test_history_manager.cpp
