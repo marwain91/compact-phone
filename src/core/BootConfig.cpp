@@ -462,6 +462,13 @@ QString serverWithOptionalPort(const QString &server, const QString &port)
     if (trimmedServer.isEmpty() || trimmedPort.isEmpty() || hasPort(trimmedServer)) {
         return trimmedServer;
     }
+    // Already-bracketed IPv6 literal without a port: append the port without
+    // re-wrapping (otherwise "[2001:db8::1]" would become "[[2001:db8::1]]:p").
+    if (trimmedServer.startsWith(QLatin1Char('['))
+        && trimmedServer.endsWith(QLatin1Char(']'))) {
+        return trimmedServer + QLatin1Char(':') + trimmedPort;
+    }
+    // Bare IPv6 literal (contains ':'): bracket it before adding the port.
     if (trimmedServer.contains(QLatin1Char(':'))) {
         return QStringLiteral("[%1]:%2").arg(trimmedServer, trimmedPort);
     }

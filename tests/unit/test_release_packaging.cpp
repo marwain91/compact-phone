@@ -94,8 +94,9 @@ TEST(ReleasePackaging, WindowsReleaseSkipsProductionArtifactWithoutSigningSecret
     EXPECT_TRUE(workflow.contains(QStringLiteral("publish=false")));
     EXPECT_TRUE(workflow.contains(
         QStringLiteral("if: steps.signing-config.outputs.publish == 'true'")));
+    // Signing migrated to Azure Artifact Signing: the production gate now keys
+    // off TRUSTED_SIGNING_PROFILE, not the retired CODE_SIGN_THUMBPRINT.
     EXPECT_TRUE(workflow.contains(QStringLiteral(
-        "Skipping Windows production artifact because CODE_SIGN_THUMBPRINT is not configured")));
-    EXPECT_FALSE(workflow.contains(QStringLiteral(
-        "throw \"CODE_SIGN_THUMBPRINT is required for production Windows releases\"")));
+        "Skipping Windows production artifact because TRUSTED_SIGNING_PROFILE is not configured")));
+    EXPECT_FALSE(workflow.contains(QStringLiteral("CODE_SIGN_THUMBPRINT")));
 }
