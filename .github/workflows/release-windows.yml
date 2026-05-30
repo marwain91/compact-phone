@@ -1,8 +1,10 @@
 name: Release · Windows
 
-# Fires on every v* tag. Builds the MSI, signs it, and uploads to the
-# matching GitHub Release. Tags containing "-test" may produce unsigned dev
-# artifacts; production tags fail if signing is not configured.
+# Fires on every v* tag. Builds the MSI, signs it via Azure Trusted
+# Signing (OIDC login, no stored secret — federated credential scoped to
+# the 'release' environment), and uploads to the matching GitHub Release.
+# Tags containing "-test" may produce unsigned dev artifacts; production
+# tags fail if signing is not configured (see TRUSTED_SIGNING_PROFILE gate).
 #
 # Keep the C:\v, C:\p, C:\b short-path layout and PJSIP cache key stable;
 # Windows Qt/vcpkg paths get long enough to hit MAX_PATH otherwise.
@@ -24,6 +26,7 @@ on:
 
 permissions:
   contents: write   # needed to attach assets to the release
+  id-token: write   # OIDC token exchange for Azure Trusted Signing login
 
 env:
   # Exercise GitHub's upcoming default now so release workflows do not
@@ -35,6 +38,10 @@ env:
 jobs:
   build-sign-publish:
     runs-on: windows-2022
+    # OIDC federated credential is scoped to this environment
+    # (subject: repo:marwain91/compact-phone:environment:release),
+    # so one credential covers every v* tag instead of one per tag.
+    environment: release
     steps:
       - uses: actions/checkout@v6
         with:
@@ -53,23 +60,25 @@ jobs:
         shell: pwsh
         env:
           REF_NAME: ${{ env.RELEASE_TAG }}
-          CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
+          TRUSTED_SIGNING_PROFILE: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
         run: |
-          $hasThumbprint = -not [string]::IsNullOrWhiteSpace($env:CODE_SIGN_THUMBPRINT)
+          # Artifact Signing (formerly Trusted Signing) replaces the old
+          # cert-store thumbprint signing. Production tags publish only when
+          # signing is configured; otherwise the Windows artifact is skipped
+          # (not failed). -test tags always publish, and sign only when a
+          # profile is configured.
+          $hasProfile = -not [string]::IsNullOrWhiteSpace($env:TRUSTED_SIGNING_PROFILE)
           if ($env:REF_NAME -like "*-test*") {
-            Write-Host "Test tag detected; unsigned Windows artifact is allowed when no thumbprint is configured."
+            Write-Host "Test tag detected; artifact is published, and signed only when Artifact Signing is configured."
             "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          } elseif ($hasThumbprint) {
+            "should_sign=$($hasProfile.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } elseif ($hasProfile) {
             "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "should_sign=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
-            Write-Warning "Skipping Windows production artifact because CODE_SIGN_THUMBPRINT is not configured"
+            Write-Warning "Skipping Windows production artifact because TRUSTED_SIGNING_PROFILE is not configured"
             "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          }
-
-          if ($hasThumbprint) {
-            "has_thumbprint=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          } else {
-            "has_thumbprint=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "should_sign=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           }
 
       - name: Restore vcpkg + installed deps cache
@@ -280,22 +289,26 @@ jobs:
               -d Version=$version `
               -out "dist\Compact-Phone-Windows.msi"
 
-      - name: Sign MSI (gated on cert secret)
-        if: steps.signing-config.outputs.publish == 'true' && (steps.signing-config.outputs.has_thumbprint == 'true' || contains(env.RELEASE_TAG, '-test'))
-        shell: pwsh
-        env:
-          CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
-          TIMESTAMP_URL: ${{ vars.TIMESTAMP_URL }}
-          REF_NAME: ${{ env.RELEASE_TAG }}
-        run: |
-          if ([string]::IsNullOrEmpty($env:CODE_SIGN_THUMBPRINT)) {
-            Write-Host "CODE_SIGN_THUMBPRINT not set; uploading unsigned test MSI"
-            exit 0
-          }
-          $ts = if ([string]::IsNullOrEmpty($env:TIMESTAMP_URL)) {
-            "http://timestamp.digicert.com" } else { $env:TIMESTAMP_URL }
-          & "signtool" sign /v /sha1 $env:CODE_SIGN_THUMBPRINT `
-              /tr $ts /td sha256 /fd sha256 dist\*.msi
+      - name: Azure login (OIDC)
+        if: steps.signing-config.outputs.should_sign == 'true'
+        uses: azure/login@v3
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign MSI (Azure Artifact Signing)
+        if: steps.signing-config.outputs.should_sign == 'true'
+        uses: azure/trusted-signing-action@v2.0.0
+        with:
+          endpoint:                     ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name:     ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+          files-folder:        dist
+          files-folder-filter: msi
+          file-digest:         SHA256
+          timestamp-rfc3161:   http://timestamp.acs.microsoft.com
+          timestamp-digest:    SHA256
 
       - name: Generate Windows appcast
         if: steps.signing-config.outputs.publish == 'true'
@@ -334,5 +347,5 @@ jobs:
         if: steps.signing-config.outputs.publish != 'true'
         shell: pwsh
         run: |
-          "Windows production artifact skipped because CODE_SIGN_THUMBPRINT is not configured." |
+          "Windows production artifact skipped because TRUSTED_SIGNING_PROFILE is not configured." |
               Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
