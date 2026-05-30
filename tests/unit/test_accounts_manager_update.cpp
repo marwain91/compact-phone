@@ -177,3 +177,75 @@ TEST_F(AccountsManagerUpdateTest, RemoveDeletesDatabaseRowAndPassword)
     compactphone::sip::AccountsManager reloaded(&engine, &db, &kc);
     EXPECT_FALSE(reloaded.find(id).has_value());
 }
+
+// The full-account round-trip above asserts ~18 fields but omits three that
+// are bound on write yet never proven to survive a reload: zrtpEnabled (media
+// encryption — security relevant), codecs, and authRealm. Pin them so an
+// insert/rowToAccount column drift on any of these is caught.
+TEST_F(AccountsManagerUpdateTest, AddRoundTripsZrtpCodecsAndAuthRealm)
+{
+    compactphone::sip::AccountId id = compactphone::sip::kInvalidAccountId;
+    {
+        compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+        compactphone::sip::Account a;
+        a.username = "1001";
+        a.domain = "pbx.example.com";
+        a.enabled = false;
+        a.zrtpEnabled = true;
+        a.codecs = "opus,alaw";
+        a.authRealm = "realm.example";
+        id = mgr.add(a, "secret");
+        ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
+    }
+
+    compactphone::sip::AccountsManager reloaded(&engine, &db, &kc);
+    const auto loaded = reloaded.find(id);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_TRUE(loaded->zrtpEnabled);
+    EXPECT_EQ(loaded->codecs, "opus,alaw");
+    EXPECT_EQ(loaded->authRealm, "realm.example");
+}
+
+// UpdatePersistsChangedFields proves only displayName/dtmfMethod/proxy survive
+// update(). update() has its own column-bind code distinct from add(); pin the
+// security/transport fields against the update path so a drift between the two
+// bind sites is caught.
+TEST_F(AccountsManagerUpdateTest, UpdateRoundTripsSecurityAndTransportFields)
+{
+    compactphone::sip::AccountId id = compactphone::sip::kInvalidAccountId;
+    {
+        compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+        compactphone::sip::Account a;
+        a.username = "1001";
+        a.domain = "pbx.example.com";
+        a.enabled = false;
+        // Start at non-target values so the update must actually change them.
+        a.transport = compactphone::sip::Transport::Udp;
+        a.srtpMode = compactphone::sip::SrtpMode::Disabled;
+        a.allowUntrustedCert = false;
+        a.zrtpEnabled = false;
+        a.codecs = "ulaw";
+        a.authRealm = "old.realm";
+        id = mgr.add(a, "secret");
+        ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
+
+        auto edited = mgr.find(id).value();
+        edited.transport = compactphone::sip::Transport::Tls;
+        edited.srtpMode = compactphone::sip::SrtpMode::Required;
+        edited.allowUntrustedCert = true;
+        edited.zrtpEnabled = true;
+        edited.codecs = "opus,alaw";
+        edited.authRealm = "new.realm";
+        ASSERT_TRUE(mgr.update(edited));
+    }
+
+    compactphone::sip::AccountsManager reloaded(&engine, &db, &kc);
+    const auto loaded = reloaded.find(id);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->transport, compactphone::sip::Transport::Tls);
+    EXPECT_EQ(loaded->srtpMode, compactphone::sip::SrtpMode::Required);
+    EXPECT_TRUE(loaded->allowUntrustedCert);
+    EXPECT_TRUE(loaded->zrtpEnabled);
+    EXPECT_EQ(loaded->codecs, "opus,alaw");
+    EXPECT_EQ(loaded->authRealm, "new.realm");
+}

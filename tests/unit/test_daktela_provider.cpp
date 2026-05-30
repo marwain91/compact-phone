@@ -263,3 +263,106 @@ TEST(DaktelaProviderTest, EndToEndPayloadParsing)
     EXPECT_EQ(params.value("displayName").toString(), "Alice phone");
     EXPECT_EQ(params.value("codecs").toString(), "alaw");
 }
+
+// --- buildAccountParams: media-security mapping branches -------------------
+// mapSrtp/mapDtmf/mapTransport decide the account's media-security posture from
+// untrusted provisioning data. The happy paths are covered above; these pin
+// the branches that were not — getting them wrong silently weakens encryption
+// or DTMF signalling.
+
+TEST(DaktelaProviderTest, BuildAccountParamsExplicitSrtpFalseDisablesEvenOnTls)
+{
+    // A server that explicitly says srtp:false must yield "disabled", NOT the
+    // TLS-default "optional". Pinning false != optional is the whole point.
+    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
+    QJsonObject sip{ {"name", "1001"}, {"transport", "tls"}, {"srtp", false} };
+    const auto params = DaktelaProvider::buildAccountParams(host, sip, "X");
+    EXPECT_EQ(params.value("srtpMode").toString(), "disabled");
+}
+
+TEST(DaktelaProviderTest, BuildAccountParamsExplicitSrtpTrueRequiredOnUdp)
+{
+    // The bool branch wins over transport: srtp:true is "required" even on udp.
+    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
+    QJsonObject sip{ {"name", "1001"}, {"transport", "udp"}, {"srtp", true} };
+    const auto params = DaktelaProvider::buildAccountParams(host, sip, "X");
+    EXPECT_EQ(params.value("srtpMode").toString(), "required");
+}
+
+TEST(DaktelaProviderTest, BuildAccountParamsMapsInfoDtmfModes)
+{
+    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
+    for (const char *raw : {"info", "sip-info"}) {
+        QJsonObject sip{ {"name", "1001"}, {"dtmfmode", raw} };
+        const auto params = DaktelaProvider::buildAccountParams(host, sip, "X");
+        EXPECT_EQ(params.value("dtmfMethod").toString(), "info")
+            << "dtmfmode=" << raw;
+    }
+}
+
+TEST(DaktelaProviderTest, BuildAccountParamsMapsInbandDtmfMode)
+{
+    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
+    QJsonObject sip{ {"name", "1001"}, {"dtmfmode", "inband"} };
+    const auto params = DaktelaProvider::buildAccountParams(host, sip, "X");
+    EXPECT_EQ(params.value("dtmfMethod").toString(), "inband");
+}
+
+TEST(DaktelaProviderTest, BuildAccountParamsMapsTcpTransportAndFoldsCase)
+{
+    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
+    QJsonObject tcp{ {"name", "1001"}, {"transport", "TCP"} };
+    EXPECT_EQ(DaktelaProvider::buildAccountParams(host, tcp, "X")
+                  .value("transport").toString(), "tcp");
+    QJsonObject tls{ {"name", "1001"}, {"transport", "Tls"} };
+    EXPECT_EQ(DaktelaProvider::buildAccountParams(host, tls, "X")
+                  .value("transport").toString(), "tls");
+}
+
+// --- extractExtensionName: alt-key / numeric / non-object branches ---------
+// Picks which SIP extension is provisioned — a wrong result means wrong
+// identity/credentials. The string-and-name-key paths are covered above.
+
+TEST(DaktelaProviderTest, ExtractExtensionNameFromAltKeyExtensionSipDevice)
+{
+    // extension object with neither "name" nor "extension", only the third
+    // fallback key.
+    QJsonObject ext{ {"extension_sip_device", "3003"} };
+    QJsonObject user{ {"extension", ext} };
+    QJsonObject root{ {"user", user} };
+    QString err;
+    EXPECT_EQ(DaktelaProvider::extractExtensionName(root, &err), "3003");
+    EXPECT_TRUE(err.isEmpty());
+}
+
+TEST(DaktelaProviderTest, ExtractExtensionNameSkipsEmptyNameForNextKey)
+{
+    // An empty "name" must not be returned — the loop falls through to the
+    // next candidate key (pins the !isEmpty() guard).
+    QJsonObject ext{ {"name", ""}, {"extension", "4004"} };
+    QJsonObject user{ {"extension", ext} };
+    QJsonObject root{ {"user", user} };
+    QString err;
+    EXPECT_EQ(DaktelaProvider::extractExtensionName(root, &err), "4004");
+    EXPECT_TRUE(err.isEmpty());
+}
+
+TEST(DaktelaProviderTest, ExtractExtensionNameFromNumericNameField)
+{
+    // A JSON number extension is coerced to its integer string form, not
+    // dropped (the isDouble() branch).
+    QJsonObject ext{ {"name", 1001} };
+    QJsonObject user{ {"extension", ext} };
+    QJsonObject root{ {"user", user} };
+    QString err;
+    EXPECT_EQ(DaktelaProvider::extractExtensionName(root, &err), "1001");
+    EXPECT_TRUE(err.isEmpty());
+}
+
+TEST(DaktelaProviderTest, ExtractExtensionNameRejectsNonObjectResult)
+{
+    QString err;
+    EXPECT_TRUE(
+        DaktelaProvider::extractExtensionName(QJsonValue(3.14), &err).isEmpty());
+    EXPECT_FALSE(err.isEmpty());
+}
