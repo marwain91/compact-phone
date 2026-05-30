@@ -381,6 +381,51 @@ The runtime upload path is still gated by the Settings -> Advanced
 toggle as unavailable. Do not attach diagnostics exports, logs, SIP
 credentials, or account data automatically.
 
+### Windows MSI is signed with Azure Artifact Signing, not a cert thumbprint
+
+`release-windows.yml` used to sign via `signtool /sha1 <CODE_SIGN_THUMBPRINT>`
+(a cert in the runner's store). It now signs through **Azure Artifact
+Signing** (formerly "Trusted Signing") via `azure/trusted-signing-action`.
+There is no PFX or thumbprint anywhere.
+
+How it authenticates — **OIDC federated credential, no stored secret**:
+
+- The `build-sign-publish` job declares `environment: release`. The
+  federated credential on the Azure app registration
+  (`compact-phone-trusted-signing`, appId `4d3654ab-...`) is scoped to
+  subject `repo:marwain91/compact-phone:environment:release`, so **one
+  credential covers every `v*` tag** instead of one per tag. If you move
+  signing off the `release` environment, the OIDC subject no longer
+  matches and login fails — update the federated credential to match.
+- The app's SP has the **`Artifact Signing Certificate Profile Signer`**
+  role on the `CompactPhone` signing account (RG `CompactPhone`,
+  westeurope). Note the role was renamed from "Trusted Signing ..." —
+  the old name `az role ... "Trusted Signing Certificate Profile Signer"`
+  returns "Role doesn't exist".
+- Six `release`-environment secrets drive it: `AZURE_CLIENT_ID`,
+  `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `TRUSTED_SIGNING_ENDPOINT`
+  (`https://weu.codesigning.azure.net/` — region-specific, must match the
+  account's region), `TRUSTED_SIGNING_ACCOUNT` (`CompactPhone`),
+  `TRUSTED_SIGNING_PROFILE` (`CompactPhone`).
+
+Gotchas:
+
+- The production gate now checks `TRUSTED_SIGNING_PROFILE`, not
+  `CODE_SIGN_THUMBPRINT`. The `Check Windows signing config` step
+  (`id: signing-config`) emits two outputs: `publish` (build at all?) and
+  `should_sign` (run the Artifact Signing step?). Production tags only
+  `publish` when a profile is configured — otherwise the whole Windows
+  job is skipped, not failed (carried over from #56). `-test` tags always
+  publish and **sign when a profile is configured**, so you can prove
+  signing end-to-end on a prerelease tag (e.g. `v0.1.1-test1`) without
+  cutting a public release.
+- Region must line up three ways: the identity validation, the signing
+  account, and the `TRUSTED_SIGNING_ENDPOINT` host (`weu` = westeurope).
+- A new signing identity earns SmartScreen reputation over the first
+  installs; "unknown publisher" fading is expected, not a misconfig.
+- `CODE_SIGN_THUMBPRINT` secret and `TIMESTAMP_URL` var are now orphaned
+  — safe to delete once Artifact Signing is proven on a production tag.
+
 ### GitHub-hosted `macos-14` pool contention — bump to `macos-15`
 
 Free-tier `macos-14` (Sonoma, Apple Silicon) runners are heavily
