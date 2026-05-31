@@ -33,6 +33,12 @@ regexes = [
     '''YOUR[_-]?(?:TOKEN|API[_-]?KEY|PASSWORD)[_-]?HERE''',
     '''\bexample\.com\b''',
     '''\bcompactphone1[0-9]{3}\b''',  # local test Asterisk passwords
+
+    # GitHub Actions cache keys for the out-of-band PJSIP build. The literal
+    # `key:` plus a hyphenated value trips the generic-api-key entropy rule,
+    # but these are cache names, not secrets (e.g. pjsip-macos-2.17-v1,
+    # pjsip-windows-2.17-v6-md).
+    '''pjsip-(?:macos|windows|linux)-\d+\.\d+-v[0-9a-z.-]+''',
 ]
 
 # Per-rule overrides, e.g. for build-system tokens that look like secrets
