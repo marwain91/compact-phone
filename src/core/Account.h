@@ -17,6 +17,7 @@ enum class DtmfMethod { Inband, Rfc2833, Info };
 struct Account {
     AccountId id = kInvalidAccountId;
     std::string label;          // human-readable, UI only (e.g. "Work Office")
+    std::string provider;       // provisioning provider id ("daktela"), "" = manual
     std::string displayName;    // SIP From: display name
     std::string username;
     std::string domain;

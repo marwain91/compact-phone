@@ -64,6 +64,7 @@ QVariant AccountsModel::data(const QModelIndex &index, int role) const
         const auto &l = a.label.empty() ? a.displayName : a.label;
         return QString::fromStdString(l);
     }
+    case ProviderRole: return QString::fromStdString(a.provider);
     }
     return {};
 }
@@ -81,6 +82,7 @@ QHash<int, QByteArray> AccountsModel::roleNames() const
         {RegistrationStateRole, "registrationState"},
         {RegistrationErrorRole, "registrationError"},
         {LabelRole, "label"},
+        {ProviderRole, "provider"},
     };
 }
 

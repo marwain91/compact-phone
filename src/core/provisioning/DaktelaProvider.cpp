@@ -199,6 +199,7 @@ QVariantMap DaktelaProvider::buildAccountParams(const QUrl &host,
     const auto title = obj.value(QStringLiteral("title")).toString();
 
     QVariantMap p;
+    p[QStringLiteral("provider")] = QStringLiteral("daktela");
     p[QStringLiteral("label")] = QObject::tr("Daktela — %1").arg(host.host());
     p[QStringLiteral("displayName")] = title.isEmpty() ? displayName : title;
     p[QStringLiteral("username")] = name;

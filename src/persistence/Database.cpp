@@ -16,6 +16,7 @@ constexpr const char *kBaselineSchema = R"SQL(
 CREATE TABLE accounts (
     id INTEGER PRIMARY KEY,
     label TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
     display_name TEXT NOT NULL,
     username TEXT NOT NULL,
     domain TEXT NOT NULL,

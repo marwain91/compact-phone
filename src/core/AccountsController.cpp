@@ -25,6 +25,7 @@ void applyParams(sip::Account &a, const QVariantMap &p)
         return p.contains(k) ? p.value(k).toInt() : fallback;
     };
     if (p.contains("label"))               a.label = str("label");
+    if (p.contains("provider"))            a.provider = str("provider");
     if (p.contains("displayName"))         a.displayName = str("displayName");
     if (p.contains("username"))            a.username = str("username");
     if (p.contains("domain"))              a.domain = str("domain");
@@ -183,6 +184,7 @@ QVariantMap AccountsController::accountSnapshot(int accountId) const
     QVariantMap m;
     m["accountId"] = a.id;
     m["label"] = QString::fromStdString(a.label);
+    m["provider"] = QString::fromStdString(a.provider);
     m["displayName"] = QString::fromStdString(a.displayName);
     m["username"] = QString::fromStdString(a.username);
     m["domain"] = QString::fromStdString(a.domain);

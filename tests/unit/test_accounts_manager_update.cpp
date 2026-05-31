@@ -194,6 +194,7 @@ TEST_F(AccountsManagerUpdateTest, AddRoundTripsZrtpCodecsAndAuthRealm)
         a.zrtpEnabled = true;
         a.codecs = "opus,alaw";
         a.authRealm = "realm.example";
+        a.provider = "daktela";
         id = mgr.add(a, "secret");
         ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
     }
@@ -204,6 +205,7 @@ TEST_F(AccountsManagerUpdateTest, AddRoundTripsZrtpCodecsAndAuthRealm)
     EXPECT_TRUE(loaded->zrtpEnabled);
     EXPECT_EQ(loaded->codecs, "opus,alaw");
     EXPECT_EQ(loaded->authRealm, "realm.example");
+    EXPECT_EQ(loaded->provider, "daktela");
 }
 
 // UpdatePersistsChangedFields proves only displayName/dtmfMethod/proxy survive
@@ -226,6 +228,7 @@ TEST_F(AccountsManagerUpdateTest, UpdateRoundTripsSecurityAndTransportFields)
         a.zrtpEnabled = false;
         a.codecs = "ulaw";
         a.authRealm = "old.realm";
+        a.provider = "";
         id = mgr.add(a, "secret");
         ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
 
@@ -236,6 +239,7 @@ TEST_F(AccountsManagerUpdateTest, UpdateRoundTripsSecurityAndTransportFields)
         edited.zrtpEnabled = true;
         edited.codecs = "opus,alaw";
         edited.authRealm = "new.realm";
+        edited.provider = "daktela";
         ASSERT_TRUE(mgr.update(edited));
     }
 
@@ -248,6 +252,7 @@ TEST_F(AccountsManagerUpdateTest, UpdateRoundTripsSecurityAndTransportFields)
     EXPECT_TRUE(loaded->zrtpEnabled);
     EXPECT_EQ(loaded->codecs, "opus,alaw");
     EXPECT_EQ(loaded->authRealm, "new.realm");
+    EXPECT_EQ(loaded->provider, "daktela");
 }
 
 // setEnabled has its own UPDATE ... SET enabled bind site, distinct from add()
