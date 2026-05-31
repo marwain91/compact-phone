@@ -14,11 +14,11 @@ namespace compactphone {
 //
 // Backends:
 //   macOS   → NSWorkspaceDidWakeNotification
-//   Windows → WM_POWERBROADCAST (PBT_APMRESUMESUSPEND)  — TODO
+//   Windows → WM_POWERBROADCAST (PBT_APMRESUMESUSPEND)
 //   Linux   → org.freedesktop.login1 PrepareForSleep DBus — TODO
 //
-// Until the Windows / Linux backends ship, this class is a no-op there
-// and the network watcher keeps the re-REGISTER loop sound.
+// Until the Linux backend ships, this class is a no-op there and the
+// network watcher keeps the re-REGISTER loop sound.
 class PowerMonitor : public QObject {
     Q_OBJECT
 public:

@@ -3,6 +3,8 @@
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
 
+#include <cstring>
+
 namespace compactphone::persistence {
 
 namespace {
@@ -115,7 +117,7 @@ bool columnExists(sqlite3 *db, const char *table, const char *column)
     bool found = false;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         const auto *name = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
-        if (name && column == std::string(name)) {
+        if (name && std::strcmp(column, name) == 0) {
             found = true;
             break;
         }
