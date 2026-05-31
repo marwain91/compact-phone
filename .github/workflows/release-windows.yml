@@ -35,8 +35,17 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   BUILD_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
 
+# Serialize runs for the same tag (a tag push + a manual dispatch can collide)
+# so two jobs never upload the same release assets at once. cancel-in-progress
+# is false: a signing/publish in flight must never be interrupted. Uses the raw
+# github/inputs expression because env.* is unavailable in concurrency.
+concurrency:
+  group: release-windows-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   build-sign-publish:
+    name: Build, sign + publish MSI
     runs-on: windows-2022
     # OIDC federated credential is scoped to this environment
     # (subject: repo:marwain91/compact-phone:environment:release),
@@ -47,6 +56,10 @@ jobs:
         with:
           ref: ${{ env.BUILD_REF }}
 
+      # Runs unconditionally, before the signing-config publish gate below.
+      # A production tag with no signing profile validates here, then the rest
+      # of the job is skipped (publish=false) rather than failed — see the
+      # "Check Windows signing config" step and CLAUDE.md (#56).
       - name: Validate release tag
         shell: pwsh
         run: |
@@ -299,7 +312,10 @@ jobs:
 
       - name: Sign MSI (Azure Artifact Signing)
         if: steps.signing-config.outputs.should_sign == 'true'
-        uses: azure/trusted-signing-action@v2.0.0
+        # Float on the major tag like every other action in the suite, so
+        # in-line v2 patch fixes (e.g. the signing-account-name rename, #59)
+        # are picked up automatically.
+        uses: azure/trusted-signing-action@v2
         with:
           endpoint:                 ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
           signing-account-name:     ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}

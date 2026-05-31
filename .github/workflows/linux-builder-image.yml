@@ -20,7 +20,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-publish:
+  build-image:
+    name: Build + publish Linux builder image
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6

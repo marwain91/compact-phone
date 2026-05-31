@@ -32,8 +32,17 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   BUILD_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
 
+# Serialize runs for the same tag (a tag push + a manual dispatch can collide)
+# so two jobs never upload the same release assets at once. cancel-in-progress
+# is false: a publish in flight must never be interrupted. Uses the raw
+# github/inputs expression because env.* is unavailable in concurrency.
+concurrency:
+  group: release-linux-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   build-publish:
+    name: Build + publish Linux AppImage
     runs-on: ubuntu-22.04
     env:
       VCPKG_ARCHIVES_DIR: ${{ github.workspace }}/.vcpkg-cache
