@@ -11,6 +11,17 @@ namespace compactphone::persistence { class Database; }
 
 namespace compactphone::sip {
 
+// One row per distinct peer: the most recent message plus the count of
+// unread incoming messages, computed in a single query (see
+// MessagesManager::conversationSummaries).
+struct ConversationSummary {
+    std::string peer;
+    std::string lastBody;
+    MessageDirection lastDirection = MessageDirection::Outgoing;
+    std::int64_t lastCreatedAtMs = 0;
+    int unreadCount = 0;
+};
+
 // SQLite-backed CRUD for the `messages` table (SIP MESSAGE history).
 // Emits messagesChanged() whenever the underlying table is mutated so
 // listening models can refresh.
@@ -32,6 +43,11 @@ public:
     // Messages for a specific peer, oldest first (for thread rendering).
     std::vector<Message> listByPeer(const std::string &peer,
                                     int limit = 500) const;
+
+    // One summary row per peer (last message + unread count), newest-active
+    // first, in a single query. Replaces the peers()+listByPeer() N+1 the
+    // conversation list used to do.
+    std::vector<ConversationSummary> conversationSummaries() const;
 
     // Mark all unread incoming messages from `peer` as read.
     bool markPeerRead(const std::string &peer);

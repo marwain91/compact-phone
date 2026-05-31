@@ -68,6 +68,41 @@ TEST(MessagesManagerTest, AppendListPeersUnreadAndMarkRead)
     EXPECT_EQ(changedSignals, 4);
 }
 
+TEST(MessagesManagerTest, ConversationSummariesReturnLastAndUnreadInOnePass)
+{
+    compactphone::persistence::Database db;
+    ASSERT_TRUE(db.openInMemory());
+    compactphone::sip::MessagesManager manager(&db);
+
+    const auto append = [&](const std::string &peer,
+                            compactphone::sip::MessageDirection dir,
+                            const std::string &body, std::int64_t t, bool read) {
+        compactphone::sip::Message m;
+        m.accountId = 1;
+        m.peerUri = peer;
+        m.direction = dir;
+        m.body = body;
+        m.createdAtMs = t;
+        m.read = read;
+        ASSERT_TRUE(manager.append(m));
+    };
+    using D = compactphone::sip::MessageDirection;
+    append("sip:bob@example.com", D::Incoming, "hi", 1000, false);
+    append("sip:alice@example.com", D::Outgoing, "yo", 2000, true);
+    append("sip:bob@example.com", D::Incoming, "again", 3000, false);
+
+    const auto sums = manager.conversationSummaries();
+    ASSERT_EQ(sums.size(), 2u);
+    // Newest-active first: bob (3000) then alice (2000).
+    EXPECT_EQ(sums[0].peer, "sip:bob@example.com");
+    EXPECT_EQ(sums[0].lastBody, "again");
+    EXPECT_EQ(sums[0].lastDirection, D::Incoming);
+    EXPECT_EQ(sums[0].lastCreatedAtMs, 3000);
+    EXPECT_EQ(sums[0].unreadCount, 2);
+    EXPECT_EQ(sums[1].peer, "sip:alice@example.com");
+    EXPECT_EQ(sums[1].unreadCount, 0);
+}
+
 TEST(MessagesManagerTest, HandlesMissingDatabaseGracefully)
 {
     compactphone::sip::MessagesManager manager(nullptr);
@@ -77,6 +112,7 @@ TEST(MessagesManagerTest, HandlesMissingDatabaseGracefully)
     EXPECT_TRUE(manager.list().empty());
     EXPECT_TRUE(manager.peers().empty());
     EXPECT_TRUE(manager.listByPeer("sip:any@example.com").empty());
+    EXPECT_TRUE(manager.conversationSummaries().empty());
     EXPECT_FALSE(manager.markPeerRead("sip:any@example.com"));
     EXPECT_EQ(manager.unreadCount(), 0);
 }

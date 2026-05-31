@@ -55,23 +55,16 @@ void ConversationsModel::refresh()
     beginResetModel();
     m_rows.clear();
     if (m_mgr) {
-        for (const auto &p : m_mgr->peers()) {
-            const auto msgs = m_mgr->listByPeer(p, 1000);
-            if (msgs.empty()) continue;
-            const auto &last = msgs.back();
+        for (const auto &s : m_mgr->conversationSummaries()) {
             Row r;
-            r.peer = QString::fromStdString(p);
-            r.lastBody = QString::fromStdString(last.body);
+            r.peer = QString::fromStdString(s.peer);
+            r.lastBody = QString::fromStdString(s.lastBody);
             r.lastDirection =
-                last.direction == sip::MessageDirection::Incoming
+                s.lastDirection == sip::MessageDirection::Incoming
                     ? QStringLiteral("in")
                     : QStringLiteral("out");
-            r.lastCreatedAtMs = last.createdAtMs;
-            for (const auto &m : msgs) {
-                if (m.direction == sip::MessageDirection::Incoming && !m.read) {
-                    r.unread = true; break;
-                }
-            }
+            r.lastCreatedAtMs = s.lastCreatedAtMs;
+            r.unread = s.unreadCount > 0;
             m_rows.push_back(std::move(r));
         }
     }

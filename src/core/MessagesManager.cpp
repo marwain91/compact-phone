@@ -126,6 +126,41 @@ std::vector<Message> MessagesManager::listByPeer(const std::string &peer,
     return out;
 }
 
+std::vector<ConversationSummary> MessagesManager::conversationSummaries() const
+{
+    std::vector<ConversationSummary> out;
+    if (!m_db || !m_db->handle()) return out;
+    sqlite3_stmt *stmt = nullptr;
+    // Window functions give us, per peer in one pass: the newest message
+    // (rn = 1) and the unread-incoming count for the whole partition.
+    const char *sql =
+        "SELECT peer_uri, body, direction, created_at_ms, unread_count FROM ("
+        "  SELECT peer_uri, body, direction, created_at_ms,"
+        "    SUM(CASE WHEN direction = 'in' AND read = 0 THEN 1 ELSE 0 END)"
+        "      OVER (PARTITION BY peer_uri) AS unread_count,"
+        "    ROW_NUMBER() OVER (PARTITION BY peer_uri"
+        "      ORDER BY created_at_ms DESC) AS rn"
+        "  FROM messages"
+        ") WHERE rn = 1 ORDER BY created_at_ms DESC";
+    if (sqlite3_prepare_v2(m_db->handle(), sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        spdlog::error("MessagesManager::conversationSummaries prepare: {}",
+                      sqlite3_errmsg(m_db->handle()));
+        return out;
+    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        ConversationSummary s;
+        s.peer = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
+        s.lastBody = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+        s.lastDirection =
+            fromStr(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2)));
+        s.lastCreatedAtMs = sqlite3_column_int64(stmt, 3);
+        s.unreadCount = sqlite3_column_int(stmt, 4);
+        out.push_back(std::move(s));
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
 bool MessagesManager::markPeerRead(const std::string &peer)
 {
     if (!m_db || !m_db->handle()) return false;
