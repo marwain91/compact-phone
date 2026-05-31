@@ -9,6 +9,7 @@
 #include <QtQmlIntegration>
 
 #include "ContactsController.h"
+#include "LinesController.h"
 #include "MessagesController.h"
 #include "SettingsController.h"
 
@@ -70,7 +71,7 @@ class PhoneController : public QObject {
     Q_PROPERTY(compactphone::ContactsController *contacts READ contactsController CONSTANT)
     Q_PROPERTY(QAbstractListModel *history READ historyModel CONSTANT)
     Q_PROPERTY(compactphone::MessagesController *messaging READ messagesController CONSTANT)
-    Q_PROPERTY(QAbstractListModel *lines READ linesModel CONSTANT)
+    Q_PROPERTY(compactphone::LinesController *lines READ linesController CONSTANT)
     Q_PROPERTY(QString dialerUri READ dialerUri WRITE setDialerUri NOTIFY dialerUriChanged)
     Q_PROPERTY(int registeredAccountCount READ registeredAccountCount NOTIFY registeredAccountCountChanged)
     Q_PROPERTY(int activeAccountId READ activeAccountId WRITE setActiveAccountId NOTIFY activeAccountIdChanged)
@@ -130,12 +131,9 @@ public:
 
     ContactsController *contactsController() const;
     MessagesController *messagesController() const;
+    LinesController *linesController() const;
     QAbstractListModel *historyModel() const;
-    QAbstractListModel *linesModel() const;
 
-    Q_INVOKABLE int addWatchedLine(const QString &uri, const QString &label);
-    Q_INVOKABLE bool removeWatchedLine(int lineId);
-    Q_INVOKABLE void dialLine(int lineId);
     QString dialerUri() const { return m_dialerUri; }
     void setDialerUri(const QString &u);
 
@@ -228,6 +226,7 @@ private:
     std::unique_ptr<MessagesController>         m_messagesController;
     std::unique_ptr<sip::LinesManager>          m_linesMgr;
     std::unique_ptr<models::LinesModel>         m_linesModel;
+    std::unique_ptr<LinesController>            m_linesController;
     std::unique_ptr<sip::SettingsManager>       m_settings;
     std::unique_ptr<AccountsController>         m_accountsController;
     std::unique_ptr<CallsController>            m_callsController;

@@ -126,6 +126,15 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
         },
         [this](const QString &text) { postNotice(text); },
         this);
+    m_linesController = std::make_unique<LinesController>(
+        m_linesMgr.get(), m_linesModel.get(),
+        [this] {
+            return m_accountsController ? m_accountsController->activeAccountId() : -1;
+        },
+        this);
+    // dialLine places a real call (trusted in-app action).
+    connect(m_linesController.get(), &LinesController::callRequested,
+            this, &PhoneController::dial);
 
     connect(m_accountsController.get(), &AccountsController::registeredAccountCountChanged,
             this, &PhoneController::registeredAccountCountChanged);
@@ -358,6 +367,7 @@ PhoneController::~PhoneController()
     m_accountsController.reset();
     m_contactsController.reset();
     m_messagesController.reset();
+    m_linesController.reset();
     m_linesModel.reset();
     m_linesMgr.reset();
     m_conversationsModel.reset();
@@ -540,31 +550,9 @@ MessagesController *PhoneController::messagesController() const
     return m_messagesController.get();
 }
 
-QAbstractListModel *PhoneController::linesModel() const
+LinesController *PhoneController::linesController() const
 {
-    return m_linesModel.get();
-}
-
-int PhoneController::addWatchedLine(const QString &uri, const QString &label)
-{
-    if (!m_linesMgr || !m_accountsController) return -1;
-    const auto aid = m_accountsController->activeAccountId();
-    if (aid <= 0) return -1;
-    return m_linesMgr->add(aid, uri.toStdString(), label.toStdString());
-}
-
-bool PhoneController::removeWatchedLine(int lineId)
-{
-    return m_linesMgr
-        && m_linesMgr->remove(static_cast<sip::WatchedLineId>(lineId));
-}
-
-void PhoneController::dialLine(int lineId)
-{
-    if (!m_linesMgr) return;
-    if (auto l = m_linesMgr->find(static_cast<sip::WatchedLineId>(lineId))) {
-        dial(QString::fromStdString(l->uri));
-    }
+    return m_linesController.get();
 }
 
 
