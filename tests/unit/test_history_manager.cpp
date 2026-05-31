@@ -106,3 +106,15 @@ TEST_F(HistoryManagerTest, ListHonorsLimit)
     EXPECT_EQ(entries[0].remoteUri, "sip:limit-4@example.com");
     EXPECT_EQ(entries[1].remoteUri, "sip:limit-3@example.com");
 }
+
+TEST(HistoryManagerStandalone, HandlesMissingDatabaseGracefully)
+{
+    compactphone::sip::HistoryManager mgr(nullptr);
+    compactphone::sip::HistoryEntry e;
+    e.accountId = 1;
+    e.remoteUri = "sip:x@example.com";
+
+    EXPECT_EQ(mgr.append(e), compactphone::sip::kInvalidHistoryId);
+    EXPECT_TRUE(mgr.list().empty());
+    EXPECT_FALSE(mgr.findById(1).has_value());
+}

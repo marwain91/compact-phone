@@ -82,7 +82,9 @@ SettingsController::SettingsController(sip::SipEngine *engine,
         if (!capStr.empty()) mgr.setCaptureDev(std::stoi(capStr));
         const auto pbStr = m_settings->getOr("playback_device_id", "");
         if (!pbStr.empty()) mgr.setPlaybackDev(std::stoi(pbStr));
-    } catch (...) {}
+    } catch (...) {
+        spdlog::warn("SettingsController: applying stored audio devices failed");
+    }
 }
 
 SettingsController::~SettingsController() = default;
@@ -259,7 +261,9 @@ QVariantList SettingsController::audioInputs() const
             m["name"] = QString::fromStdString(devs[i].name);
             out.append(m);
         }
-    } catch (...) {}
+    } catch (...) {
+        spdlog::warn("SettingsController: audio input enumeration failed");
+    }
     return out;
 }
 
@@ -277,7 +281,9 @@ QVariantList SettingsController::audioOutputs() const
             m["name"] = QString::fromStdString(devs[i].name);
             out.append(m);
         }
-    } catch (...) {}
+    } catch (...) {
+        spdlog::warn("SettingsController: audio output enumeration failed");
+    }
     return out;
 }
 
@@ -323,7 +329,7 @@ void SettingsController::refreshAudioDevices()
 {
     if (!m_engine || !m_engine->endpoint()) return;
     try { m_engine->endpoint()->audDevManager().refreshDevs(); }
-    catch (...) {}
+    catch (...) { spdlog::warn("SettingsController: audio device refresh failed"); }
     emit audioDevicesChanged();
     emit captureDeviceIdChanged();
     emit playbackDeviceIdChanged();

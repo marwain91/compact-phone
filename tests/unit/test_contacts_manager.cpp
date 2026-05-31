@@ -76,3 +76,18 @@ TEST_F(ContactsManagerTest, ListOrdersByDisplayName)
     EXPECT_EQ(contacts[0].displayName, "Amy");
     EXPECT_EQ(contacts[1].displayName, "Zed");
 }
+
+TEST(ContactsManagerStandalone, HandlesMissingDatabaseGracefully)
+{
+    compactphone::sip::ContactsManager mgr(nullptr);
+    compactphone::sip::Contact c;
+    c.displayName = "X";
+    c.sipUri = "sip:x@example.com";
+
+    EXPECT_EQ(mgr.add(c), compactphone::sip::kInvalidContactId);
+    EXPECT_FALSE(mgr.update(c));
+    EXPECT_FALSE(mgr.remove(1));
+    EXPECT_TRUE(mgr.list().empty());
+    EXPECT_FALSE(mgr.findById(1).has_value());
+    EXPECT_FALSE(mgr.findByUri("sip:x@example.com").has_value());
+}

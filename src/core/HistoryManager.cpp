@@ -1,5 +1,6 @@
 #include "HistoryManager.h"
 #include "persistence/Database.h"
+#include "persistence/SqliteUtil.h"
 
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
@@ -8,17 +9,8 @@ namespace compactphone::sip {
 
 namespace {
 
-void bindText(sqlite3_stmt *stmt, int idx, const std::string &s)
-{
-    sqlite3_bind_text(stmt, idx, s.data(), static_cast<int>(s.size()),
-                      SQLITE_TRANSIENT);
-}
-
-std::string readText(sqlite3_stmt *s, int col)
-{
-    const auto *t = reinterpret_cast<const char *>(sqlite3_column_text(s, col));
-    return t ? std::string(t) : std::string{};
-}
+using persistence::bindText;
+using persistence::readText;
 
 HistoryEntry rowToEntry(sqlite3_stmt *stmt)
 {
@@ -42,6 +34,7 @@ HistoryManager::HistoryManager(persistence::Database *db) : m_db(db) {}
 
 HistoryId HistoryManager::append(const HistoryEntry &e)
 {
+    if (!m_db || !m_db->handle()) return kInvalidHistoryId;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "INSERT INTO call_history (account_id, direction, remote_uri, "
@@ -69,6 +62,7 @@ HistoryId HistoryManager::append(const HistoryEntry &e)
 std::vector<HistoryEntry> HistoryManager::list(int limit) const
 {
     std::vector<HistoryEntry> out;
+    if (!m_db || !m_db->handle()) return out;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "SELECT id, account_id, direction, remote_uri, remote_display, "
@@ -85,6 +79,7 @@ std::vector<HistoryEntry> HistoryManager::list(int limit) const
 
 std::optional<HistoryEntry> HistoryManager::findById(HistoryId id) const
 {
+    if (!m_db || !m_db->handle()) return std::nullopt;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "SELECT id, account_id, direction, remote_uri, remote_display, "
