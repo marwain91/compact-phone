@@ -163,9 +163,11 @@ bool FileKeychain::loadOrCreateMasterKey()
         spdlog::error("FileKeychain: master key write failed");
         return false;
     }
+    // Restrict to owner-only BEFORE writing the secret, so the key bytes are
+    // never momentarily readable under the process umask.
+    kf.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     kf.write(reinterpret_cast<const char *>(key.data()), kKeySize);
     kf.close();
-    kf.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     m_masterKey.assign(reinterpret_cast<const char *>(key.data()), kKeySize);
     return true;
 }
@@ -248,11 +250,12 @@ bool FileKeychain::persist()
 
     QFile f(QString::fromStdString(m_path));
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    // Restrict to owner-only on the empty file, before writing ciphertext.
+    f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     f.write(m_salt.data(), static_cast<int>(m_salt.size()));
     f.write(iv);
     f.write(ct);
     f.close();
-    f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     return true;
 }
 
