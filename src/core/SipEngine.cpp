@@ -54,17 +54,19 @@ bool SipEngine::start(int sipPort)
             spdlog::warn("SipEngine: TCP transport create failed: {}", e.info());
         }
 
-        // TLS transport for sips:/transport=tls accounts. Per-account TLS
-        // verification policy is enforced on pj::AccountConfig::sipConfig.tlsConfig;
-        // the transport-level tlsConfig here is the unbound default.
+        // TLS transport for sips:/transport=tls accounts. Each TLS account
+        // gets its OWN transport carrying its own verify policy, bound via
+        // AccountConfig::sipConfig::transportId (see
+        // AccountsManager::registerAccount). This shared transport is only a
+        // fallback for any TLS connection not bound to a per-account
+        // transport, so it MUST fail closed: verify the server certificate by
+        // default. Accounts that explicitly opt into allowUntrustedCert get a
+        // permissive per-account transport instead — a misconfiguration or a
+        // MITM can never silently downgrade a default account to no-verify.
         pj::TransportConfig tlsCfg;
         tlsCfg.port = 0;
         tlsCfg.tlsConfig.method = PJSIP_TLSV1_2_METHOD;
-        // v0.2c limitation: TLS verify is transport-level in PJSUA2, not
-        // per-account. We default to permissive here so self-signed test
-        // PBXes work; per-account allowUntrustedCert becomes functional in
-        // v0.3 via per-account transport allocation.
-        tlsCfg.tlsConfig.verifyServer = false;
+        tlsCfg.tlsConfig.verifyServer = true;
         tlsCfg.tlsConfig.verifyClient = false;
         try {
             m_endpoint->transportCreate(PJSIP_TRANSPORT_TLS, tlsCfg);
