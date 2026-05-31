@@ -1,6 +1,7 @@
 #include "AccountsManager.h"
 #include "SipEngine.h"
 #include "persistence/Database.h"
+#include "persistence/SqliteUtil.h"
 #include "platform/Keychain.h"
 
 #include <pjsua-lib/pjsua.h>
@@ -40,14 +41,10 @@ std::string newPasswordRef()
     return QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
 }
 
-// Helper: bind a std::string by value (sqlite3 copies with SQLITE_TRANSIENT).
-void bindText(sqlite3_stmt *stmt, int idx, const std::string &s)
-{
-    sqlite3_bind_text(stmt, idx, s.data(), static_cast<int>(s.size()),
-                      SQLITE_TRANSIENT);
-}
-
 } // namespace
+
+using persistence::bindText;
+using persistence::readText;
 
 class AccountsManager::AccountImpl : public pj::Account {
 public:
@@ -179,10 +176,6 @@ void AccountsManager::loadFromDatabase()
                       sqlite3_errmsg(m_db->handle()));
         return;
     }
-    auto readText = [](sqlite3_stmt *s, int col) {
-        const auto *t = reinterpret_cast<const char *>(sqlite3_column_text(s, col));
-        return t ? std::string(t) : std::string{};
-    };
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         auto entry = std::make_unique<Entry>();
         auto &a = entry->account;

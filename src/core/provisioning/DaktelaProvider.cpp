@@ -382,6 +382,9 @@ void DaktelaProvider::startWhoamiFetch()
     emit progress(QStringLiteral("fetching-user"));
     QNetworkRequest req(whoamiUrl(m_host));
     req.setRawHeader("X-AUTH-TOKEN", m_accessToken.toUtf8());
+    // Don't let a cross-host redirect replay the auth token to another origin.
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::SameOriginRedirectPolicy);
     req.setTransferTimeout(kHttpTimeoutMs);
     auto *next = m_nam->get(req);
     QPointer<DaktelaProvider> self(this);
@@ -422,6 +425,9 @@ void DaktelaProvider::onWhoamiReply(QNetworkReply *r)
 
     QNetworkRequest req(sipDeviceUrl(m_host, m_extensionName));
     req.setRawHeader("X-AUTH-TOKEN", m_accessToken.toUtf8());
+    // Don't let a cross-host redirect replay the auth token to another origin.
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::SameOriginRedirectPolicy);
     req.setTransferTimeout(kHttpTimeoutMs);
     auto *next = m_nam->get(req);
     QPointer<DaktelaProvider> self(this);
