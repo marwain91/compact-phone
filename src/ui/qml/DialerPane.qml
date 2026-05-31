@@ -253,7 +253,7 @@ ColumnLayout {
                 visible: favoritesRep.count > 0
                 Repeater {
                     id: favoritesRep
-                    model: PhoneController.contacts
+                    model: PhoneController.contacts.model
                     delegate: Rectangle {
                         visible: favorite
                         width: visible ? favLabel.implicitWidth + Theme.s14 : 0
@@ -276,7 +276,7 @@ ColumnLayout {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: PhoneController.dialContact(contactId)
+                            onClicked: PhoneController.contacts.dial(contactId)
                         }
                     }
                 }

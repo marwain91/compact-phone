@@ -14,7 +14,6 @@
 #include "CallEntry.h"
 #include "CallManager.h"
 #include "ContactsManager.h"
-#include "ContactImporter.h"
 #include "CrashReporting.h"
 #include "LogBuffer.h"
 #include "HistoryManager.h"
@@ -87,6 +86,11 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
     m_contacts = std::make_unique<sip::ContactsManager>(m_db.get());
     m_contactsModel = std::make_unique<models::ContactsModel>(m_contacts.get(), this);
+    m_contactsController = std::make_unique<ContactsController>(
+        m_contacts.get(), m_contactsModel.get(), this);
+    // dialContact pre-fills the dialer; the controller stays dialer-agnostic.
+    connect(m_contactsController.get(), &ContactsController::dialRequested,
+            this, &PhoneController::setDialerUri);
     m_historyMgr = std::make_unique<sip::HistoryManager>(m_db.get());
     m_historyModel = std::make_unique<models::HistoryModel>(m_historyMgr.get(), this);
 
@@ -346,6 +350,7 @@ PhoneController::~PhoneController()
     m_callsController.reset();
     m_settingsController.reset();
     m_accountsController.reset();
+    m_contactsController.reset();
     m_linesModel.reset();
     m_linesMgr.reset();
     m_conversationsModel.reset();
@@ -627,9 +632,9 @@ void PhoneController::postNotice(const QString &text, int autoDismissMs)
     if (autoDismissMs > 0) m_noticeTimer.start(autoDismissMs);
 }
 
-QAbstractListModel *PhoneController::contactsModel() const
+ContactsController *PhoneController::contactsController() const
 {
-    return m_contactsModel.get();
+    return m_contactsController.get();
 }
 
 QAbstractListModel *PhoneController::historyModel() const
@@ -642,19 +647,6 @@ void PhoneController::setDialerUri(const QString &u)
     if (m_dialerUri == u) return;
     m_dialerUri = u;
     emit dialerUriChanged();
-}
-
-int PhoneController::addContact(const QString &displayName,
-                                const QString &sipUri,
-                                const QString &phone)
-{
-    sip::Contact c;
-    c.displayName = displayName.toStdString();
-    c.sipUri = sipUri.toStdString();
-    c.phone = phone.toStdString();
-    const auto id = m_contacts->add(c);
-    m_contactsModel->refresh();
-    return id;
 }
 
 void PhoneController::checkForUpdates()
@@ -800,80 +792,6 @@ bool PhoneController::exportDiagnostics(const QString &path) const
     w << "\n--- Recent log ---\n";
     w << LogBuffer::instance().asText() << "\n";
     return true;
-}
-
-int PhoneController::importContactsFromFile(const QString &path)
-{
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        spdlog::warn("importContactsFromFile: cannot open {}: {}",
-                     path.toStdString(),
-                     f.errorString().toStdString());
-        return 0;
-    }
-    const QString text = QString::fromUtf8(f.readAll());
-    ImportResult result;
-    const QString lower = path.toLower();
-    if (lower.endsWith(".csv")) {
-        result = contact_import::parseCsv(text);
-    } else {
-        // Default to vCard for .vcf and anything else.
-        result = contact_import::parseVCard(text);
-    }
-
-    int imported = 0;
-    for (const auto &c : result.contacts) {
-        sip::Contact sc;
-        sc.displayName = c.displayName.toStdString();
-        sc.sipUri = c.sipUri.toStdString();
-        sc.phone = c.phone.toStdString();
-        if (m_contacts->add(sc) != sip::kInvalidContactId) imported++;
-    }
-    if (imported > 0) m_contactsModel->refresh();
-    spdlog::info("importContactsFromFile: imported {} contacts from {} "
-                 "({} dropped)",
-                 imported, path.toStdString(), result.errors);
-    return imported;
-}
-
-bool PhoneController::updateContact(int contactId,
-                                    const QString &displayName,
-                                    const QString &sipUri,
-                                    const QString &phone)
-{
-    auto cur = m_contacts->findById(static_cast<sip::ContactId>(contactId));
-    if (!cur) return false;
-    cur->displayName = displayName.toStdString();
-    cur->sipUri = sipUri.toStdString();
-    cur->phone = phone.toStdString();
-    const bool ok = m_contacts->update(*cur);
-    if (ok) m_contactsModel->refresh();
-    return ok;
-}
-
-bool PhoneController::removeContact(int contactId)
-{
-    const bool ok = m_contacts->remove(static_cast<sip::ContactId>(contactId));
-    if (ok) m_contactsModel->refresh();
-    return ok;
-}
-
-bool PhoneController::setContactFavorite(int contactId, bool favorite)
-{
-    auto cur = m_contacts->findById(static_cast<sip::ContactId>(contactId));
-    if (!cur) return false;
-    if (cur->favorite == favorite) return true;
-    cur->favorite = favorite;
-    const bool ok = m_contacts->update(*cur);
-    if (ok) m_contactsModel->refresh();
-    return ok;
-}
-
-void PhoneController::dialContact(int contactId)
-{
-    auto c = m_contacts->findById(static_cast<sip::ContactId>(contactId));
-    if (!c) return;
-    setDialerUri(QString::fromStdString(c->sipUri));
 }
 
 void PhoneController::redialFromHistory(int historyId)

@@ -8,6 +8,7 @@
 #include <QUrl>
 #include <QtQmlIntegration>
 
+#include "ContactsController.h"
 #include "SettingsController.h"
 
 #include <memory>
@@ -65,7 +66,7 @@ class PhoneController : public QObject {
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     Q_PROPERTY(QString latestUpdateVersion READ latestUpdateVersion NOTIFY latestUpdateChanged)
     Q_PROPERTY(QString latestUpdateUrl READ latestUpdateUrl NOTIFY latestUpdateChanged)
-    Q_PROPERTY(QAbstractListModel *contacts READ contactsModel CONSTANT)
+    Q_PROPERTY(compactphone::ContactsController *contacts READ contactsController CONSTANT)
     Q_PROPERTY(QAbstractListModel *history READ historyModel CONSTANT)
     Q_PROPERTY(QAbstractListModel *conversations READ conversationsModel CONSTANT)
     Q_PROPERTY(QAbstractListModel *messages READ messagesModel CONSTANT)
@@ -128,7 +129,7 @@ public:
     Q_INVOKABLE int firstHeldCallId(int excludeCallId) const;
     Q_INVOKABLE void dismissNotice();
 
-    QAbstractListModel *contactsModel() const;
+    ContactsController *contactsController() const;
     QAbstractListModel *historyModel() const;
     QAbstractListModel *conversationsModel() const;
     QAbstractListModel *messagesModel() const;
@@ -145,11 +146,6 @@ public:
     Q_INVOKABLE void markConversationRead(const QString &peerUri);
     QString dialerUri() const { return m_dialerUri; }
     void setDialerUri(const QString &u);
-
-    Q_INVOKABLE int addContact(const QString &displayName,
-                               const QString &sipUri,
-                               const QString &phone);
-    Q_INVOKABLE int importContactsFromFile(const QString &path);
 
     Q_INVOKABLE QStringList recentLogLines() const;
     Q_INVOKABLE bool exportDiagnostics(const QString &path) const;
@@ -182,13 +178,6 @@ public:
     // Returns a QVariantMap with keys: mos (double), lossPct (double),
     // rttMs (int), jitterMs (int). Missing/unavailable fields are -1.
     Q_INVOKABLE QVariantMap streamStats(int callId) const;
-    Q_INVOKABLE bool updateContact(int contactId,
-                                   const QString &displayName,
-                                   const QString &sipUri,
-                                   const QString &phone);
-    Q_INVOKABLE bool removeContact(int contactId);
-    Q_INVOKABLE bool setContactFavorite(int contactId, bool favorite);
-    Q_INVOKABLE void dialContact(int contactId);
     Q_INVOKABLE void redialFromHistory(int historyId);
 
     int registeredAccountCount() const;
@@ -239,6 +228,7 @@ private:
     std::unique_ptr<models::CallsModel>         m_callsModel;
     std::unique_ptr<sip::ContactsManager>       m_contacts;
     std::unique_ptr<models::ContactsModel>      m_contactsModel;
+    std::unique_ptr<ContactsController>         m_contactsController;
     std::unique_ptr<sip::HistoryManager>        m_historyMgr;
     std::unique_ptr<models::HistoryModel>       m_historyModel;
     std::unique_ptr<sip::MessagesManager>       m_messagesMgr;
