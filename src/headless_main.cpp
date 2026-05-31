@@ -2,6 +2,7 @@
 #include "core/AccountsManager.h"
 #include "core/BootConfig.h"
 #include "core/CallManager.h"
+#include "core/CoreSipGraph.h"
 #include "core/SipEngine.h"
 #include "core/platform/Keychain_memory.h"
 #include "models/AccountsModel.h"
@@ -76,14 +77,11 @@ public:
             return 2;
         }
 
-        m_accounts = std::make_unique<compactphone::sip::AccountsManager>(
-            &m_engine, &m_db, &m_keychain);
-        m_accountsModel =
-            std::make_unique<compactphone::models::AccountsModel>(m_accounts.get());
-        m_accountsController = std::make_unique<compactphone::AccountsController>(
-            m_accounts.get(), m_accountsModel.get(), &m_engine);
-        m_calls = std::make_unique<compactphone::sip::CallManager>(
-            m_accounts.get());
+        auto core = compactphone::buildCoreSipGraph(&m_engine, &m_db, &m_keychain);
+        m_accounts = std::move(core.accounts);
+        m_accountsModel = std::move(core.accountsModel);
+        m_accountsController = std::move(core.accountsController);
+        m_calls = std::move(core.calls);
 
         m_autoAnswer =
             m_cfg.headlessAutoAnswer.value_or(m_cfg.autoAnswer.value_or(false));

@@ -60,6 +60,8 @@ add_library(compactphone_core STATIC
     core/CallManager.cpp
     core/CallRecorder.h
     core/CallRecorder.cpp
+    core/CoreSipGraph.h
+    core/CoreSipGraph.cpp
     core/TransferTracker.h
     core/RingtonePlayer.h
     core/RingtonePlayer.cpp

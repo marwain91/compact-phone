@@ -12,6 +12,7 @@
 #include "CallEntry.h"
 #include "CallManager.h"
 #include "ContactsManager.h"
+#include "CoreSipGraph.h"
 #include "CrashReporting.h"
 #include "LogBuffer.h"
 #include "HistoryManager.h"
@@ -75,11 +76,11 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
         spdlog::error("PhoneController: SipEngine failed to start");
     }
 
-    m_accounts = std::make_unique<sip::AccountsManager>(
-        m_engine.get(), m_db.get(), m_keychain.get());
-    m_accountsModel = std::make_unique<models::AccountsModel>(m_accounts.get(), this);
-
-    m_calls = std::make_unique<sip::CallManager>(m_accounts.get());
+    auto core = buildCoreSipGraph(m_engine.get(), m_db.get(), m_keychain.get(), this);
+    m_accounts = std::move(core.accounts);
+    m_accountsModel = std::move(core.accountsModel);
+    m_accountsController = std::move(core.accountsController);
+    m_calls = std::move(core.calls);
     m_callsModel = std::make_unique<models::CallsModel>(m_calls.get(), this);
 
     m_contacts = std::make_unique<sip::ContactsManager>(m_db.get());
@@ -101,8 +102,6 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
     m_settings = std::make_unique<sip::SettingsManager>(m_db.get());
 
-    m_accountsController = std::make_unique<AccountsController>(
-        m_accounts.get(), m_accountsModel.get(), m_engine.get(), this);
     m_settingsController = std::make_unique<SettingsController>(
         m_engine.get(), m_settings.get(), dataPath, this);
     m_callsController = std::make_unique<CallsController>(
