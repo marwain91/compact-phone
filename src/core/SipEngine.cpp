@@ -204,4 +204,73 @@ void SipEngine::applyCodecPriority(const std::vector<std::string> &priorityOrder
     }
 }
 
+std::vector<SipEngine::AudioDevice> SipEngine::audioDevices() const
+{
+    std::vector<AudioDevice> out;
+    if (!m_endpoint) return out;
+    try {
+        const auto devs = m_endpoint->audDevManager().enumDev2();
+        for (size_t i = 0; i < devs.size(); ++i) {
+            AudioDevice d;
+            d.id = static_cast<int>(i);
+            d.name = devs[i].name;
+            d.inputCount = devs[i].inputCount;
+            d.outputCount = devs[i].outputCount;
+            out.push_back(std::move(d));
+        }
+    } catch (const pj::Error &e) {
+        spdlog::warn("SipEngine::audioDevices: {}", e.info());
+    }
+    return out;
+}
+
+int SipEngine::captureDevice() const
+{
+    if (!m_endpoint) return -1;
+    try { return m_endpoint->audDevManager().getCaptureDev(); }
+    catch (const pj::Error &e) {
+        spdlog::warn("SipEngine::captureDevice: {}", e.info());
+        return -1;
+    }
+}
+
+int SipEngine::playbackDevice() const
+{
+    if (!m_endpoint) return -1;
+    try { return m_endpoint->audDevManager().getPlaybackDev(); }
+    catch (const pj::Error &e) {
+        spdlog::warn("SipEngine::playbackDevice: {}", e.info());
+        return -1;
+    }
+}
+
+bool SipEngine::setCaptureDevice(int id)
+{
+    if (!m_endpoint) return false;
+    try { m_endpoint->audDevManager().setCaptureDev(id); return true; }
+    catch (const pj::Error &e) {
+        spdlog::warn("SipEngine::setCaptureDevice: {}", e.info());
+        return false;
+    }
+}
+
+bool SipEngine::setPlaybackDevice(int id)
+{
+    if (!m_endpoint) return false;
+    try { m_endpoint->audDevManager().setPlaybackDev(id); return true; }
+    catch (const pj::Error &e) {
+        spdlog::warn("SipEngine::setPlaybackDevice: {}", e.info());
+        return false;
+    }
+}
+
+void SipEngine::refreshAudioDevices()
+{
+    if (!m_endpoint) return;
+    try { m_endpoint->audDevManager().refreshDevs(); }
+    catch (const pj::Error &e) {
+        spdlog::warn("SipEngine::refreshAudioDevices: {}", e.info());
+    }
+}
+
 } // namespace compactphone::sip
