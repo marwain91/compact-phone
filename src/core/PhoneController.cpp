@@ -307,10 +307,14 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
         });
     }
 
-    // Click-to-call. macOS hands the app sip:/sips:/tel:/callto: URIs via
-    // QFileOpenEvent, which UrlDispatcher buffers + emits. We strip the
-    // scheme for tel:/callto: (they don't carry a host) so the bare
-    // number/extension can be normalized through the active account.
+    // External sip:/sips:/tel:/callto: URIs reach the app from an untrusted
+    // source (web pages, documents; macOS delivers them via QFileOpenEvent ->
+    // UrlDispatcher). We PRE-FILL the dialer and raise the window but do NOT
+    // place the call — the user must press Call. Auto-dialing here would let a
+    // malicious link silently call a premium-rate or attacker-controlled
+    // number with the user's account. We strip the scheme for tel:/callto:
+    // (no host) so the bare number/extension normalizes through the active
+    // account; sip:/sips: stay intact and normalize when the user dials.
     auto handleUri = [this](const QString &raw) {
         const QString trimmed = raw.trimmed();
         if (trimmed.isEmpty()) return;
@@ -321,9 +325,7 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
         } else if (lower.startsWith(QStringLiteral("callto:"))) {
             target = target.mid(7);
         }
-        // sip:/sips: stay intact — dial() will pass them through normalization.
         setDialerUri(target);
-        dial(target);
         emit trayShowRequested();
     };
     auto *dispatcher = UrlDispatcher::instance();
