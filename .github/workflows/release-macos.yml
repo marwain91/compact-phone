@@ -98,22 +98,30 @@ jobs:
         # Mirrors the fix already in ci.yml and tools/dev/Dockerfile.
         run: brew install cmake ninja pkg-config create-dmg autoconf autoconf-archive automake libtool
 
-      - name: Cache vcpkg
-        uses: actions/cache@v5
+      # Split restore/save (matching release-linux / release-windows) so a
+      # late failure — Apple notarization can fail after a 1h+ cold Qt build —
+      # never discards the freshly-built deps. The combined actions/cache@v5
+      # only saves on job success; the saves below run on success right after
+      # the build, plus a partial save on failure (see end of job).
+      - name: Restore vcpkg
+        id: vcpkg-tool-cache
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/vcpkg
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-
 
-      - name: Cache macOS vcpkg deps
-        uses: actions/cache@v5
+      - name: Restore macOS vcpkg deps
+        id: vcpkg-deps-cache
+        uses: actions/cache/restore@v5
         with:
           path: |
             ${{ github.workspace }}/.vcpkg-cache
             ${{ github.workspace }}/build/macos/vcpkg_installed
           key: vcpkg-macos-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/release/triplets/arm64-osx.cmake') }}
           restore-keys: |
+            vcpkg-macos-deps-partial-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/release/triplets/arm64-osx.cmake') }}-
             vcpkg-macos-deps-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Setup vcpkg
@@ -126,7 +134,19 @@ jobs:
           fi
           echo "VCPKG_ROOT=$WORKSPACE/vcpkg" >> "$GITHUB_ENV"
 
+      # PJSIP is a deterministic, out-of-band build (pinned 2.17 + fixed
+      # configure flags), so cache the install prefix and skip the compile on a
+      # hit — mirroring release-windows. Bump the key suffix when the version or
+      # configure flags change.
+      - name: Restore PJSIP build
+        id: pjsip-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/pjproject
+          key: pjsip-macos-2.17-v1
+
       - name: Build PJSIP
+        if: steps.pjsip-cache.outputs.cache-hit != 'true'
         run: |
           curl -sL https://github.com/pjsip/pjproject/archive/refs/tags/2.17.tar.gz | tar -xz
           cd pjproject-2.17
@@ -136,7 +156,18 @@ jobs:
             --disable-opencore-amr --disable-bcg729 --disable-sdl \
             --disable-ffmpeg --disable-v4l2 --disable-openh264
           make dep && make -j"$(sysctl -n hw.ncpu)" && make install
-          echo "PKG_CONFIG_PATH=$HOME/pjproject/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Save PJSIP build
+        if: success() && steps.pjsip-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: ~/pjproject
+          key: ${{ steps.pjsip-cache.outputs.cache-primary-key }}
+
+      # Export the pkg-config path whether PJSIP was rebuilt or restored.
+      - name: Export PKG_CONFIG_PATH
+        run: echo "PKG_CONFIG_PATH=$HOME/pjproject/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Configure
         env:
@@ -154,6 +185,28 @@ jobs:
 
       - name: Build
         run: cmake --build --preset macos
+
+      # Save the expensive vcpkg caches now, right after a successful build and
+      # BEFORE signing/notarization — so a late notarization failure does not
+      # discard the cold Qt build. (A build-time failure is caught by the
+      # partial save at the end of the job.)
+      - name: Save vcpkg
+        if: success() && steps.vcpkg-tool-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/vcpkg
+          key: ${{ steps.vcpkg-tool-cache.outputs.cache-primary-key }}
+
+      - name: Save macOS vcpkg deps
+        if: success() && steps.vcpkg-deps-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ${{ github.workspace }}/.vcpkg-cache
+            ${{ github.workspace }}/build/macos/vcpkg_installed
+          key: ${{ steps.vcpkg-deps-cache.outputs.cache-primary-key }}
 
       - name: Import signing identity
         env:
@@ -246,3 +299,17 @@ jobs:
             dist/*.dmg
             dist/appcast-macos.xml
           fail_on_unmatched_files: true
+
+      # If the job failed (e.g. the build itself died partway through vcpkg),
+      # save whatever deps were built under a run-scoped partial key so the
+      # next attempt resumes instead of recompiling Qt from scratch. Mirrors
+      # release-linux's partial save.
+      - name: Save partial macOS vcpkg deps
+        if: failure()
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ${{ github.workspace }}/.vcpkg-cache
+            ${{ github.workspace }}/build/macos/vcpkg_installed
+          key: vcpkg-macos-deps-partial-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'tools/release/triplets/arm64-osx.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
