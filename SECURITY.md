@@ -42,6 +42,25 @@ In scope:
   wrap from PJSIP).
 - Stored credentials (file keychain, native keychain shims).
 
+## Credential storage
+
+SIP passwords and provisioning tokens are stored per platform:
+
+- **macOS** — the OS Keychain (Security.framework), ACL/Touch ID-gated. It is
+  the authoritative store; credentials are never copied out into a weaker
+  on-disk store.
+- **Windows** — Windows Credential Manager.
+- **Linux** — there is no guaranteed OS keystore, so credentials live in an
+  AES-256-GCM file encrypted with a key derived (HKDF-SHA256) from a random
+  **per-installation** master key. The master key is stored in a sibling
+  `<keychain>.key` file with owner-only (`0600`) permissions.
+  - **Residual limitation:** an attacker with local read access to *both* the
+    keychain file and its sibling `.key` file can decrypt the store. The
+    encryption protects against the keychain file leaking on its own (backups,
+    file sync) — not against full local file-read by another process running
+    as the same user. Protect the account with full-disk encryption and a
+    login password.
+
 Out of scope:
 
 - Vulnerabilities in PJSIP itself — report to the
