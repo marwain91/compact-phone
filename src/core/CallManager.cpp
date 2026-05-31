@@ -1,6 +1,7 @@
 #include "CallManager.h"
 #include "AccountsManager.h"
 #include "CallEntry.h"
+#include "CallRecorder.h"
 
 #include <pjsua2.hpp>
 #include <spdlog/spdlog.h>
@@ -92,7 +93,8 @@ private:
 };
 
 CallManager::CallManager(AccountsManager *am, QObject *parent)
-    : QObject(parent), m_am(am) {}
+    : QObject(parent), m_am(am),
+      m_recorder(std::make_unique<CallRecorder>()) {}
 CallManager::~CallManager() = default;
 
 size_t CallManager::callCount() const
@@ -194,10 +196,10 @@ void CallManager::releaseCallToGrace(int callId)
     m_callAccount.erase(id);
     m_heldState.erase(id);
     m_mutedState.erase(id);
-    m_transferCleanup.erase(id);
+    m_transfers.drop(id);
     m_remoteUriCache.erase(id);
     m_remoteDisplayCache.erase(id);
-    m_recorders.erase(id);
+    m_recorder->drop(id);
     m_players.erase(id);
     m_lingeringCalls[id] = std::move(lingering);
 
@@ -231,10 +233,10 @@ void CallManager::eraseCall(int callId)
     m_callStates.erase(id);
     m_heldState.erase(id);
     m_mutedState.erase(id);
-    m_transferCleanup.erase(id);
+    m_transfers.drop(id);
     m_remoteUriCache.erase(id);
     m_remoteDisplayCache.erase(id);
-    m_recorders.erase(id);   // closes the WAV file if still recording
+    m_recorder->drop(id);   // closes the WAV file if still recording
     m_players.erase(id);
     if (present) emit callsChanged();
 
@@ -438,44 +440,23 @@ bool CallManager::startRecording(CallId id, const std::string &outputPath)
 {
     auto it = m_calls.find(id);
     if (it == m_calls.end() || outputPath.empty()) return false;
-    if (m_recorders.count(id)) return true;   // already recording
-
     auto *aud = firstActiveAudio(it->second.get());
     if (!aud) {
         spdlog::warn("CallManager::startRecording: no active audio yet on {}",
                      id);
         return false;
     }
-    try {
-        auto rec = std::make_unique<pj::AudioMediaRecorder>();
-        rec->createRecorder(outputPath);
-        // Mix both directions into the recorder.
-        auto &mgr = pj::Endpoint::instance().audDevManager();
-        mgr.getCaptureDevMedia().startTransmit(*rec);
-        aud->startTransmit(*rec);
-        m_recorders[id] = std::move(rec);
-        spdlog::info("CallManager: recording call {} -> {}", id, outputPath);
-        return true;
-    } catch (const pj::Error &e) {
-        spdlog::error("CallManager::startRecording: {}", e.info());
-        return false;
-    }
+    return m_recorder->start(id, aud, outputPath);
 }
 
 bool CallManager::stopRecording(CallId id)
 {
-    auto it = m_recorders.find(id);
-    if (it == m_recorders.end()) return false;
-    // Destroying the recorder flushes and closes the WAV file.
-    it->second.reset();
-    m_recorders.erase(it);
-    spdlog::info("CallManager: stopped recording call {}", id);
-    return true;
+    return m_recorder->stop(id);
 }
 
 bool CallManager::isRecording(CallId id) const
 {
-    return m_recorders.count(id) > 0;
+    return m_recorder->isRecording(id);
 }
 
 bool CallManager::playAudioFile(CallId id, const std::string &path, bool loop)
@@ -547,13 +528,13 @@ bool CallManager::blindTransfer(CallId id, const std::string &targetUri)
 {
     auto it = m_calls.find(id);
     if (it == m_calls.end()) return false;
-    m_transferCleanup[id] = {id};
+    m_transfers.record(id, {id});
     pj::CallOpParam prm;
     try {
         it->second->xfer(targetUri, prm);
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::blindTransfer: {}", e.info());
-        m_transferCleanup.erase(id);
+        m_transfers.drop(id);
         return false;
     }
     spdlog::info("Blind transfer of call {} to {}", id, targetUri);
@@ -567,13 +548,13 @@ bool CallManager::attendedTransfer(CallId activeCallId, CallId destCallId)
     auto destIt = m_calls.find(destCallId);
     if (activeIt == m_calls.end() || destIt == m_calls.end()) return false;
     if (activeCallId == destCallId) return false;
-    m_transferCleanup[activeCallId] = {activeCallId, destCallId};
+    m_transfers.record(activeCallId, {activeCallId, destCallId});
     pj::CallOpParam prm;
     try {
         activeIt->second->xferReplaces(*destIt->second, prm);
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::attendedTransfer: {}", e.info());
-        m_transferCleanup.erase(activeCallId);
+        m_transfers.drop(activeCallId);
         return false;
     }
     spdlog::info("Attended transfer of {} to {}", activeCallId, destCallId);
@@ -583,11 +564,8 @@ bool CallManager::attendedTransfer(CallId activeCallId, CallId destCallId)
 
 void CallManager::cleanupTransferredCalls(CallId transferCallId)
 {
-    auto cleanupIt = m_transferCleanup.find(transferCallId);
-    if (cleanupIt == m_transferCleanup.end()) return;
-
-    auto cleanupIds = std::move(cleanupIt->second);
-    m_transferCleanup.erase(cleanupIt);
+    const auto cleanupIds = m_transfers.take(transferCallId);
+    if (cleanupIds.empty()) return;
 
     for (const auto cleanupId : cleanupIds) {
         auto callIt = m_calls.find(cleanupId);
@@ -608,11 +586,8 @@ void CallManager::handleTransferStatus(CallId id, int statusCode,
 {
     if (!finalNotify) return;
 
-    auto cleanupIt = m_transferCleanup.find(id);
-    if (cleanupIt == m_transferCleanup.end()) return;
-
-    auto cleanupIds = std::move(cleanupIt->second);
-    m_transferCleanup.erase(cleanupIt);
+    const auto cleanupIds = m_transfers.take(id);
+    if (cleanupIds.empty()) return;
 
     if (statusCode < 200 || statusCode >= 300) {
         spdlog::warn("Transfer of call {} finished with {} {}", id,

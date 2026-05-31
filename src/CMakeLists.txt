@@ -49,6 +49,9 @@ add_library(compactphone_core STATIC
     core/ContactImporter.cpp
     core/CallManager.h
     core/CallManager.cpp
+    core/CallRecorder.h
+    core/CallRecorder.cpp
+    core/TransferTracker.h
     core/RingtonePlayer.h
     core/RingtonePlayer.cpp
     core/platform/Keychain.h

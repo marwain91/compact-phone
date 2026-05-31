@@ -2,6 +2,7 @@
 
 #include "Account.h"
 #include "CallSnapshotSource.h"
+#include "TransferTracker.h"
 
 #include <QObject>
 
@@ -14,13 +15,13 @@
 
 namespace pj {
 class AudioMediaPlayer;
-class AudioMediaRecorder;
 }
 
 namespace compactphone::sip {
 
 class AccountsManager;
 class CallImpl;
+class CallRecorder;
 struct CallEntry;
 
 using CallId = std::int32_t;
@@ -162,16 +163,16 @@ private:
     std::unordered_map<CallId, CallState> m_callStates;
     std::unordered_map<CallId, bool> m_heldState;
     std::unordered_map<CallId, bool> m_mutedState;
-    std::unordered_map<CallId, std::vector<CallId>> m_transferCleanup;
+    // Tracks calls to hang up once a REFER/transfer completes.
+    TransferTracker m_transfers;
     // Cached identity strings — PJSIP clears info.remoteUri after disconnect,
     // but the call card lingers for a grace period, so we remember the URI
     // here while the call is live.
     mutable std::unordered_map<CallId, std::string> m_remoteUriCache;
     mutable std::unordered_map<CallId, std::string> m_remoteDisplayCache;
-    // Active per-call recorder (owns a PJSIP conference-bridge slot;
-    // destroyed when the call ends or stopRecording is called).
-    std::unordered_map<CallId, std::unique_ptr<pj::AudioMediaRecorder>>
-        m_recorders;
+    // Owns the per-call WAV recorders (a PJSIP conference-bridge slot each;
+    // dropped when the call ends or stopRecording is called).
+    std::unique_ptr<CallRecorder> m_recorder;
     std::unordered_map<CallId, std::unique_ptr<pj::AudioMediaPlayer>>
         m_players;
     std::function<void(CallState)> m_cb;
