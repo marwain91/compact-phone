@@ -17,9 +17,17 @@ on:
       - 'web/docs/**'
   workflow_dispatch: {}
 
+# The job authenticates with the MYWEBS_DEPLOY_TOKEN PAT, not GITHUB_TOKEN,
+# and never checks out code — so the workflow's own token needs nothing.
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   trigger:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Dispatch redeploy-site to MyWebs
         env:
