@@ -86,3 +86,37 @@ TEST(SipUri, KeepsExplicitSipEvenWhenAccountIsTls)
                   compactphone::sip::Transport::Tls),
               "sip:alice@example.com");
 }
+
+// --- Injection hardening: an externally-supplied URI must not be able to
+// inject INVITE headers, routing params, or CRLF into the dialed target.
+
+TEST(SipUri, StripsEmbeddedUriHeaders)
+{
+    // ?Route=/&Call-Info= would rewrite the outgoing INVITE — drop everything
+    // from the first '?'.
+    EXPECT_EQ(compactphone::sip::normalizeSipTarget(
+                  "sip:bob@example.com?Route=<sip:evil.example>&Call-Info=x", "",
+                  compactphone::sip::Transport::Udp),
+              "sip:bob@example.com");
+}
+
+TEST(SipUri, KeepsTransportParamButDropsRoutingParams)
+{
+    // transport is legitimate and preserved; maddr/lr are routing params an
+    // attacker could use to redirect the call — dropped.
+    EXPECT_EQ(compactphone::sip::normalizeSipTarget(
+                  "sip:bob@example.com;transport=tcp;maddr=evil.example;lr", "",
+                  compactphone::sip::Transport::Udp),
+              "sip:bob@example.com;transport=tcp");
+}
+
+TEST(SipUri, StripsControlCharactersAndCrlf)
+{
+    // CR/LF in a dial target is the classic header-injection vector; removing
+    // it means no extra SIP header line can be smuggled in.
+    const auto out = compactphone::sip::normalizeSipTarget(
+        "sip:bob@example.com\r\nSubject: evil", "",
+        compactphone::sip::Transport::Udp);
+    EXPECT_EQ(out.find('\r'), std::string::npos);
+    EXPECT_EQ(out.find('\n'), std::string::npos);
+}
