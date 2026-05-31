@@ -32,22 +32,24 @@ QString callStateToString(sip::CallState s)
     return QStringLiteral("unknown");
 }
 
-std::optional<sip::CallEntry> findCallEntry(sip::CallManager *calls,
+// The helpers below operate on an already-taken snapshot so a single
+// CallManager::snapshot() (a PJSIP getInfo() per live call + a heap vector)
+// can be shared across one event handler instead of taken three times.
+std::optional<sip::CallEntry> findCallEntry(const std::vector<sip::CallEntry> &snap,
                                             sip::CallId id)
 {
-    if (!calls) return std::nullopt;
-    for (const auto &entry : calls->snapshot()) {
+    for (const auto &entry : snap) {
         if (entry.id == id) return entry;
     }
     return std::nullopt;
 }
 
-QString aggregateCallState(sip::CallManager *calls, sip::CallState fallback)
+QString aggregateCallState(const std::vector<sip::CallEntry> &snap,
+                           sip::CallState fallback)
 {
-    if (!calls) return callStateToString(fallback);
     bool hasCalling = false;
     bool hasEarly = false;
-    for (const auto &entry : calls->snapshot()) {
+    for (const auto &entry : snap) {
         if (entry.state == sip::CallState::Confirmed) {
             return QStringLiteral("active");
         }
@@ -57,6 +59,25 @@ QString aggregateCallState(sip::CallManager *calls, sip::CallState fallback)
     if (hasEarly) return QStringLiteral("early");
     if (hasCalling) return QStringLiteral("calling");
     return callStateToString(fallback);
+}
+
+bool snapshotIsRinging(const std::vector<sip::CallEntry> &snap)
+{
+    for (const auto &e : snap) {
+        // Inbound, pre-answer: the user needs to hear the ringtone.
+        if (e.direction == sip::CallDirection::Inbound
+            && e.state == sip::CallState::Calling) {
+            return true;
+        }
+        // Outbound, while the remote is alerted: local ringback until the
+        // remote answers (Confirmed), when PJSIP's audio routing takes over.
+        if (e.direction == sip::CallDirection::Outbound
+            && (e.state == sip::CallState::Calling
+                || e.state == sip::CallState::EarlyMedia)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -98,7 +119,7 @@ CallsController::CallsController(sip::AccountsManager *accounts,
                     refreshCallsModel();
                     {
                         m_incomingCallId = callId;
-                        if (auto e = findCallEntry(m_calls, callId)) {
+                        if (auto e = findCallEntry(m_calls->snapshot(), callId)) {
                             m_callSessions.noteIncoming(
                                 *e, QDateTime::currentMSecsSinceEpoch());
                             m_incomingCallFrom =
@@ -169,9 +190,12 @@ CallsController::CallsController(sip::AccountsManager *accounts,
         m_calls->setOnCallEvent([this](sip::CallId callId, sip::CallState s) {
             QMetaObject::invokeMethod(this, [this, callId, s] {
                 const auto now = QDateTime::currentMSecsSinceEpoch();
+                // One snapshot shared across this whole handler.
+                const auto snap = m_calls ? m_calls->snapshot()
+                                          : std::vector<sip::CallEntry>{};
                 sip::CallEntry entry;
                 entry.id = callId;
-                if (auto found = findCallEntry(m_calls, callId)) {
+                if (auto found = findCallEntry(snap, callId)) {
                     entry = *found;
                 }
 
@@ -184,9 +208,9 @@ CallsController::CallsController(sip::AccountsManager *accounts,
                     m_currentCallId = -1;
                 }
 
-                m_callState = aggregateCallState(m_calls, s);
+                m_callState = aggregateCallState(snap, s);
                 refreshCallsModel();
-                publishRingingState();
+                publishRingingState(snapshotIsRinging(snap));
                 if (s == sip::CallState::Disconnected && m_incomingCallId == callId) {
                     m_incomingCallId = -1;
                     m_incomingCallFrom.clear();
@@ -223,24 +247,7 @@ QAbstractListModel *CallsController::model() const
 bool CallsController::ringing() const
 {
     if (!m_calls) return false;
-    for (const auto &e : m_calls->snapshot()) {
-        // Inbound, pre-answer: the user needs to hear the ringtone so
-        // they know to pick up.
-        if (e.direction == sip::CallDirection::Inbound
-            && e.state == sip::CallState::Calling) {
-            return true;
-        }
-        // Outbound, while the remote is being alerted: play local ringback
-        // so the caller doesn't sit in silence. Once the remote answers
-        // (state moves to Confirmed) PJSIP's audio routing takes over and
-        // we stop the local tone.
-        if (e.direction == sip::CallDirection::Outbound
-            && (e.state == sip::CallState::Calling
-                || e.state == sip::CallState::EarlyMedia)) {
-            return true;
-        }
-    }
-    return false;
+    return snapshotIsRinging(m_calls->snapshot());
 }
 
 void CallsController::dial(const QString &uri)
@@ -347,7 +354,7 @@ bool CallsController::blindTransfer(int callId, const QString &targetUri)
 {
     if (!m_calls) return false;
     QString normalizedTarget = targetUri;
-    if (auto call = findCallEntry(m_calls, static_cast<sip::CallId>(callId))) {
+    if (auto call = findCallEntry(m_calls->snapshot(), static_cast<sip::CallId>(callId))) {
         if (m_accounts) {
             if (auto account = m_accounts->find(call->accountId)) {
                 normalizedTarget = QString::fromStdString(sip::normalizeSipTarget(
@@ -421,7 +428,12 @@ void CallsController::refreshCallsModel()
 
 void CallsController::publishRingingState()
 {
-    const bool now = ringing();
+    if (!m_calls) { publishRingingState(false); return; }
+    publishRingingState(snapshotIsRinging(m_calls->snapshot()));
+}
+
+void CallsController::publishRingingState(bool now)
+{
     if (now == m_ringing) return;
     m_ringing = now;
     emit ringingChanged(now);
