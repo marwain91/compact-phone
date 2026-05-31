@@ -11,7 +11,7 @@ Item {
         id: ringtonePicker
         title: qsTr("Choose ringtone")
         nameFilters: [qsTr("WAV files (*.wav)")]
-        onAccepted: PhoneController.ringtonePath = selectedFile
+        onAccepted: PhoneController.settings.ringtonePath = selectedFile
     }
 
     LogViewerDialog { id: logViewer }
@@ -135,8 +135,8 @@ Item {
                                         Layout.preferredHeight: 72
                                         themeId: modelData.id
                                         name: modelData.name
-                                        isCurrent: PhoneController.themeId === modelData.id
-                                        onClicked: PhoneController.themeId = modelData.id
+                                        isCurrent: PhoneController.settings.themeId === modelData.id
+                                        onClicked: PhoneController.settings.themeId = modelData.id
                                     }
                                 }
                             }
@@ -174,8 +174,8 @@ Item {
                                 }
                                 AppComboBox {
                                     model: ["trace", "debug", "info", "warn", "error"]
-                                    currentIndex: model.indexOf(PhoneController.logLevel)
-                                    onActivated: PhoneController.logLevel = currentText
+                                    currentIndex: model.indexOf(PhoneController.settings.logLevel)
+                                    onActivated: PhoneController.settings.logLevel = currentText
                                     implicitWidth: 110
                                 }
                             }
@@ -202,8 +202,8 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.alwaysOnTop
-                                    onToggled: PhoneController.alwaysOnTop = checked
+                                    checked: PhoneController.settings.alwaysOnTop
+                                    onToggled: PhoneController.settings.alwaysOnTop = checked
                                 }
                             }
 
@@ -305,17 +305,17 @@ Item {
                                 AppComboBox {
                                     id: micCombo
                                     Layout.fillWidth: true
-                                    model: PhoneController.audioInputs
+                                    model: PhoneController.settings.audioInputs
                                     textRole: "name"
                                     valueRole: "id"
                                     currentIndex: {
-                                        const cid = PhoneController.captureDeviceId
+                                        const cid = PhoneController.settings.captureDeviceId
                                         for (let i = 0; i < model.length; i++) {
                                             if (model[i].id === cid) return i
                                         }
                                         return 0
                                     }
-                                    onActivated: PhoneController.captureDeviceId = currentValue
+                                    onActivated: PhoneController.settings.captureDeviceId = currentValue
                                 }
                             }
 
@@ -332,17 +332,17 @@ Item {
                                 AppComboBox {
                                     id: spkCombo
                                     Layout.fillWidth: true
-                                    model: PhoneController.audioOutputs
+                                    model: PhoneController.settings.audioOutputs
                                     textRole: "name"
                                     valueRole: "id"
                                     currentIndex: {
-                                        const pid = PhoneController.playbackDeviceId
+                                        const pid = PhoneController.settings.playbackDeviceId
                                         for (let i = 0; i < model.length; i++) {
                                             if (model[i].id === pid) return i
                                         }
                                         return 0
                                     }
-                                    onActivated: PhoneController.playbackDeviceId = currentValue
+                                    onActivated: PhoneController.settings.playbackDeviceId = currentValue
                                 }
                             }
 
@@ -350,7 +350,7 @@ Item {
                                 variant: "ghost"
                                 size: "sm"
                                 text: qsTr("Refresh devices")
-                                onClicked: PhoneController.refreshAudioDevices()
+                                onClicked: PhoneController.settings.refreshAudioDevices()
                             }
                         }
                     }
@@ -398,8 +398,8 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.ringtoneEnabled
-                                    onToggled: PhoneController.ringtoneEnabled = checked
+                                    checked: PhoneController.settings.ringtoneEnabled
+                                    onToggled: PhoneController.settings.ringtoneEnabled = checked
                                 }
                             }
 
@@ -413,8 +413,8 @@ Item {
                                     spacing: 2
                                     Text {
                                         text: {
-                                            const p = PhoneController.ringtonePath
-                                            if (!p || p === PhoneController.defaultRingtonePath) return qsTr("Built-in tone")
+                                            const p = PhoneController.settings.ringtonePath
+                                            if (!p || p === PhoneController.settings.defaultRingtonePath) return qsTr("Built-in tone")
                                             const i = p.lastIndexOf("/")
                                             return i >= 0 ? p.substring(i + 1) : p
                                         }
@@ -447,8 +447,8 @@ Item {
                                     variant: "ghost"
                                     size: "sm"
                                     text: qsTr("Reset")
-                                    visible: PhoneController.ringtonePath !== PhoneController.defaultRingtonePath
-                                    onClicked: PhoneController.ringtonePath = PhoneController.defaultRingtonePath
+                                    visible: PhoneController.settings.ringtonePath !== PhoneController.settings.defaultRingtonePath
+                                    onClicked: PhoneController.settings.ringtonePath = PhoneController.settings.defaultRingtonePath
                                 }
                                 Item { Layout.fillWidth: true }
                                 AppButton {
@@ -456,7 +456,7 @@ Item {
                                     size: "sm"
                                     iconPath: Icons.play
                                     text: qsTr("Test")
-                                    onClicked: PhoneController.testRingtone(2000)
+                                    onClicked: PhoneController.settings.testRingtone(2000)
                                 }
                             }
                         }
@@ -517,8 +517,8 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.dndEnabled
-                                    onToggled: PhoneController.dndEnabled = checked
+                                    checked: PhoneController.settings.dndEnabled
+                                    onToggled: PhoneController.settings.dndEnabled = checked
                                 }
                             }
 
@@ -546,13 +546,13 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.autoAnswerEnabled
-                                    onToggled: PhoneController.autoAnswerEnabled = checked
+                                    checked: PhoneController.settings.autoAnswerEnabled
+                                    onToggled: PhoneController.settings.autoAnswerEnabled = checked
                                 }
                             }
 
                             RowLayout {
-                                visible: PhoneController.autoAnswerEnabled
+                                visible: PhoneController.settings.autoAnswerEnabled
                                 Layout.fillWidth: true
                                 spacing: Theme.s10
                                 Text {
@@ -575,13 +575,13 @@ Item {
                                     textRole: "label"
                                     valueRole: "ms"
                                     currentIndex: {
-                                        const cur = PhoneController.autoAnswerDelayMs
+                                        const cur = PhoneController.settings.autoAnswerDelayMs
                                         for (let i = 0; i < model.length; i++) {
                                             if (model[i].ms === cur) return i
                                         }
                                         return 0
                                     }
-                                    onActivated: PhoneController.autoAnswerDelayMs = currentValue
+                                    onActivated: PhoneController.settings.autoAnswerDelayMs = currentValue
                                 }
                             }
 
@@ -609,8 +609,8 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.autoRecordEnabled
-                                    onToggled: PhoneController.autoRecordEnabled = checked
+                                    checked: PhoneController.settings.autoRecordEnabled
+                                    onToggled: PhoneController.settings.autoRecordEnabled = checked
                                 }
                             }
                         }
@@ -662,12 +662,12 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.cfwdAlwaysEnabled
-                                    onToggled: PhoneController.cfwdAlwaysEnabled = checked
+                                    checked: PhoneController.settings.cfwdAlwaysEnabled
+                                    onToggled: PhoneController.settings.cfwdAlwaysEnabled = checked
                                 }
                             }
                             Rectangle {
-                                visible: PhoneController.cfwdAlwaysEnabled
+                                visible: PhoneController.settings.cfwdAlwaysEnabled
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 32
                                 radius: Theme.r8
@@ -678,7 +678,7 @@ Item {
                                     anchors.fill: parent
                                     anchors.leftMargin: Theme.s12
                                     anchors.rightMargin: Theme.s12
-                                    text: PhoneController.cfwdAlwaysTarget
+                                    text: PhoneController.settings.cfwdAlwaysTarget
                                     placeholderText: qsTr("sip:user@host or extension")
                                     placeholderTextColor: Theme.textTertiary
                                     color: Theme.textPrimary
@@ -686,7 +686,7 @@ Item {
                                     font.pixelSize: Theme.fsm
                                     background: null
                                     selectByMouse: true
-                                    onEditingFinished: PhoneController.cfwdAlwaysTarget = text
+                                    onEditingFinished: PhoneController.settings.cfwdAlwaysTarget = text
                                 }
                             }
 
@@ -714,12 +714,12 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.cfwdBusyEnabled
-                                    onToggled: PhoneController.cfwdBusyEnabled = checked
+                                    checked: PhoneController.settings.cfwdBusyEnabled
+                                    onToggled: PhoneController.settings.cfwdBusyEnabled = checked
                                 }
                             }
                             Rectangle {
-                                visible: PhoneController.cfwdBusyEnabled
+                                visible: PhoneController.settings.cfwdBusyEnabled
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 32
                                 radius: Theme.r8
@@ -730,7 +730,7 @@ Item {
                                     anchors.fill: parent
                                     anchors.leftMargin: Theme.s12
                                     anchors.rightMargin: Theme.s12
-                                    text: PhoneController.cfwdBusyTarget
+                                    text: PhoneController.settings.cfwdBusyTarget
                                     placeholderText: qsTr("sip:user@host or extension")
                                     placeholderTextColor: Theme.textTertiary
                                     color: Theme.textPrimary
@@ -738,7 +738,7 @@ Item {
                                     font.pixelSize: Theme.fsm
                                     background: null
                                     selectByMouse: true
-                                    onEditingFinished: PhoneController.cfwdBusyTarget = text
+                                    onEditingFinished: PhoneController.settings.cfwdBusyTarget = text
                                 }
                             }
 
@@ -766,12 +766,12 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.cfwdNoAnswerEnabled
-                                    onToggled: PhoneController.cfwdNoAnswerEnabled = checked
+                                    checked: PhoneController.settings.cfwdNoAnswerEnabled
+                                    onToggled: PhoneController.settings.cfwdNoAnswerEnabled = checked
                                 }
                             }
                             ColumnLayout {
-                                visible: PhoneController.cfwdNoAnswerEnabled
+                                visible: PhoneController.settings.cfwdNoAnswerEnabled
                                 Layout.fillWidth: true
                                 spacing: Theme.s6
                                 Rectangle {
@@ -785,7 +785,7 @@ Item {
                                         anchors.fill: parent
                                         anchors.leftMargin: Theme.s12
                                         anchors.rightMargin: Theme.s12
-                                        text: PhoneController.cfwdNoAnswerTarget
+                                        text: PhoneController.settings.cfwdNoAnswerTarget
                                         placeholderText: qsTr("sip:user@host or extension")
                                         placeholderTextColor: Theme.textTertiary
                                         color: Theme.textPrimary
@@ -793,7 +793,7 @@ Item {
                                         font.pixelSize: Theme.fsm
                                         background: null
                                         selectByMouse: true
-                                        onEditingFinished: PhoneController.cfwdNoAnswerTarget = text
+                                        onEditingFinished: PhoneController.settings.cfwdNoAnswerTarget = text
                                     }
                                 }
                                 RowLayout {
@@ -819,13 +819,13 @@ Item {
                                         textRole: "label"
                                         valueRole: "ms"
                                         currentIndex: {
-                                            const cur = PhoneController.cfwdNoAnswerTimeoutMs
+                                            const cur = PhoneController.settings.cfwdNoAnswerTimeoutMs
                                             for (let i = 0; i < model.length; i++) {
                                                 if (model[i].ms === cur) return i
                                             }
                                             return 2
                                         }
-                                        onActivated: PhoneController.cfwdNoAnswerTimeoutMs = currentValue
+                                        onActivated: PhoneController.settings.cfwdNoAnswerTimeoutMs = currentValue
                                     }
                                 }
                             }
@@ -889,8 +889,8 @@ Item {
                                 }
                                 Item { Layout.fillWidth: true; implicitHeight: 1 }
                                 AppSwitch {
-                                    checked: PhoneController.enterpriseFeaturesEnabled
-                                    onToggled: PhoneController.enterpriseFeaturesEnabled = checked
+                                    checked: PhoneController.settings.enterpriseFeaturesEnabled
+                                    onToggled: PhoneController.settings.enterpriseFeaturesEnabled = checked
                                 }
                             }
 
@@ -956,9 +956,9 @@ Item {
                                 AppSwitch {
                                     enabled: PhoneController.crashReportingAvailable
                                     checked: PhoneController.crashReportingAvailable
-                                        && PhoneController.crashReportingEnabled
+                                        && PhoneController.settings.crashReportingEnabled
                                     onToggled: if (PhoneController.crashReportingAvailable)
-                                        PhoneController.crashReportingEnabled = checked
+                                        PhoneController.settings.crashReportingEnabled = checked
                                 }
                             }
                         }

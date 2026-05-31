@@ -16,6 +16,31 @@ namespace compactphone {
 
 class SettingsController : public QObject {
     Q_OBJECT
+    // Exposed to QML as PhoneController.settings (see PhoneController). Not
+    // creatable from QML — owned by PhoneController.
+    Q_PROPERTY(QString logLevel READ logLevel WRITE setLogLevel NOTIFY logLevelChanged)
+    Q_PROPERTY(bool ringtoneEnabled READ ringtoneEnabled WRITE setRingtoneEnabled NOTIFY ringtoneEnabledChanged)
+    Q_PROPERTY(QString themeId READ themeId WRITE setThemeId NOTIFY themeIdChanged)
+    Q_PROPERTY(QVariantList audioInputs READ audioInputs NOTIFY audioDevicesChanged)
+    Q_PROPERTY(QVariantList audioOutputs READ audioOutputs NOTIFY audioDevicesChanged)
+    Q_PROPERTY(int captureDeviceId READ captureDeviceId WRITE setCaptureDeviceId NOTIFY captureDeviceIdChanged)
+    Q_PROPERTY(int playbackDeviceId READ playbackDeviceId WRITE setPlaybackDeviceId NOTIFY playbackDeviceIdChanged)
+    Q_PROPERTY(QString ringtonePath READ ringtonePath WRITE setRingtonePath NOTIFY ringtonePathChanged)
+    Q_PROPERTY(QString defaultRingtonePath READ defaultRingtonePath CONSTANT)
+    Q_PROPERTY(bool dndEnabled READ dndEnabled WRITE setDndEnabled NOTIFY dndEnabledChanged)
+    Q_PROPERTY(bool autoAnswerEnabled READ autoAnswerEnabled WRITE setAutoAnswerEnabled NOTIFY autoAnswerEnabledChanged)
+    Q_PROPERTY(int autoAnswerDelayMs READ autoAnswerDelayMs WRITE setAutoAnswerDelayMs NOTIFY autoAnswerDelayMsChanged)
+    Q_PROPERTY(bool cfwdAlwaysEnabled READ cfwdAlwaysEnabled WRITE setCfwdAlwaysEnabled NOTIFY cfwdAlwaysEnabledChanged)
+    Q_PROPERTY(QString cfwdAlwaysTarget READ cfwdAlwaysTarget WRITE setCfwdAlwaysTarget NOTIFY cfwdAlwaysTargetChanged)
+    Q_PROPERTY(bool cfwdBusyEnabled READ cfwdBusyEnabled WRITE setCfwdBusyEnabled NOTIFY cfwdBusyEnabledChanged)
+    Q_PROPERTY(QString cfwdBusyTarget READ cfwdBusyTarget WRITE setCfwdBusyTarget NOTIFY cfwdBusyTargetChanged)
+    Q_PROPERTY(bool cfwdNoAnswerEnabled READ cfwdNoAnswerEnabled WRITE setCfwdNoAnswerEnabled NOTIFY cfwdNoAnswerEnabledChanged)
+    Q_PROPERTY(QString cfwdNoAnswerTarget READ cfwdNoAnswerTarget WRITE setCfwdNoAnswerTarget NOTIFY cfwdNoAnswerTargetChanged)
+    Q_PROPERTY(int cfwdNoAnswerTimeoutMs READ cfwdNoAnswerTimeoutMs WRITE setCfwdNoAnswerTimeoutMs NOTIFY cfwdNoAnswerTimeoutMsChanged)
+    Q_PROPERTY(bool autoRecordEnabled READ autoRecordEnabled WRITE setAutoRecordEnabled NOTIFY autoRecordEnabledChanged)
+    Q_PROPERTY(bool enterpriseFeaturesEnabled READ enterpriseFeaturesEnabled WRITE setEnterpriseFeaturesEnabled NOTIFY enterpriseFeaturesEnabledChanged)
+    Q_PROPERTY(bool crashReportingEnabled READ crashReportingEnabled WRITE setCrashReportingEnabled NOTIFY crashReportingEnabledChanged)
+    Q_PROPERTY(bool alwaysOnTop READ alwaysOnTop WRITE setAlwaysOnTop NOTIFY alwaysOnTopChanged)
 public:
     explicit SettingsController(sip::SipEngine *engine,
                                 sip::SettingsManager *settings,
@@ -36,8 +61,8 @@ public:
     int playbackDeviceId() const;
     void setCaptureDeviceId(int id);
     void setPlaybackDeviceId(int id);
-    void refreshAudioDevices();
-    void testRingtone(int durationMs = 2000);
+    Q_INVOKABLE void refreshAudioDevices();
+    Q_INVOKABLE void testRingtone(int durationMs = 2000);
 
     QString ringtonePath() const;
     void setRingtonePath(const QString &p);

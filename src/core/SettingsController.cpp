@@ -1,5 +1,6 @@
 #include "SettingsController.h"
 
+#include "CrashReporting.h"
 #include "RingtonePlayer.h"
 #include "SettingsManager.h"
 #include "SipEngine.h"
@@ -237,6 +238,9 @@ void SettingsController::setCrashReportingEnabled(bool enabled)
     m_crashReportingEnabled = enabled;
     if (m_settings) m_settings->set("crash_reporting_enabled",
                                     enabled ? "1" : "0");
+    // Bring Sentry up immediately when the user opts in at runtime (no-op if
+    // the build wasn't configured with a DSN).
+    if (enabled) crash::initConfiguredSentry(true);
     emit crashReportingEnabledChanged();
 }
 
