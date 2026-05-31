@@ -6,11 +6,36 @@
 #include <spdlog/spdlog.h>
 
 #include <QCoreApplication>
+#include <QFileInfo>
 
 #include <cctype>
+#include <cstdlib>
 #include <vector>
 
 namespace compactphone::sip {
+
+namespace {
+
+// Locate a PEM bundle of trusted CA certificates: an explicit override via the
+// COMPACTPHONE_CA_FILE env var first, then common system locations. Empty if
+// none found (caller must then accept that verifying TLS has no trust anchors).
+std::string detectCaCertFile()
+{
+    if (const char *env = std::getenv("COMPACTPHONE_CA_FILE"); env && *env) {
+        return env;
+    }
+    static const char *const kCandidates[] = {
+        "/etc/ssl/certs/ca-certificates.crt", // Debian/Ubuntu/Alpine
+        "/etc/pki/tls/certs/ca-bundle.crt",   // RHEL/Fedora
+        "/etc/ssl/cert.pem",                  // macOS, Alpine, *BSD
+    };
+    for (const char *path : kCandidates) {
+        if (QFileInfo::exists(QString::fromLatin1(path))) return path;
+    }
+    return {};
+}
+
+} // namespace
 
 SipEngine::SipEngine() = default;
 
@@ -24,6 +49,17 @@ bool SipEngine::start(int sipPort)
     if (m_running) return true;
 
     m_endpoint = std::make_unique<pj::Endpoint>();
+
+    // Resolve the CA trust bundle once (unless a caller set one explicitly).
+    // Verifying TLS transports need trust anchors or they reject every cert.
+    if (m_caCertFile.empty()) m_caCertFile = detectCaCertFile();
+    if (m_caCertFile.empty()) {
+        spdlog::warn("SipEngine: no CA trust bundle found; default (verify-on) "
+                     "TLS accounts will reject all server certs. Set "
+                     "COMPACTPHONE_CA_FILE.");
+    } else {
+        spdlog::info("SipEngine: TLS CA bundle: {}", m_caCertFile);
+    }
 
     try {
         m_endpoint->libCreate();
@@ -68,6 +104,7 @@ bool SipEngine::start(int sipPort)
         tlsCfg.tlsConfig.method = PJSIP_TLSV1_2_METHOD;
         tlsCfg.tlsConfig.verifyServer = true;
         tlsCfg.tlsConfig.verifyClient = false;
+        if (!m_caCertFile.empty()) tlsCfg.tlsConfig.CaListFile = m_caCertFile;
         try {
             m_endpoint->transportCreate(PJSIP_TRANSPORT_TLS, tlsCfg);
         } catch (const pj::Error &e) {

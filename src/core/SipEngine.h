@@ -34,6 +34,17 @@ public:
     // not mentioned keep their default priority.
     void applyCodecPriority(const std::vector<std::string> &priorityOrder);
 
+    // --- TLS CA trust ---
+    // PEM file of trusted CA certificates used to verify SIP-over-TLS server
+    // certificates. Must be set BEFORE start() to take effect (transports are
+    // created there). If left unset, start() auto-detects it from the
+    // COMPACTPHONE_CA_FILE env var, then common system bundle locations. When
+    // empty, a verifying TLS transport has no trust anchors and rejects every
+    // certificate, so configuring this is required for default (verify-on)
+    // TLS accounts to reach a legitimately-signed server.
+    void setCaCertFile(const std::string &path) { m_caCertFile = path; }
+    const std::string &caCertFile() const { return m_caCertFile; }
+
     // --- Audio device management ---
     // Owns all pjsua2 AudDevManager access so higher layers (e.g.
     // SettingsController) don't reach into the endpoint directly. All methods
@@ -54,6 +65,7 @@ public:
 private:
     bool m_running = false;
     std::unique_ptr<pj::Endpoint> m_endpoint;
+    std::string m_caCertFile;
 };
 
 } // namespace compactphone::sip
