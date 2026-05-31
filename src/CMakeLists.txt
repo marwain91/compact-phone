@@ -5,6 +5,8 @@ add_library(compactphone_core STATIC
     core/AccountsController.cpp
     core/ContactsController.h
     core/ContactsController.cpp
+    core/MessagesController.h
+    core/MessagesController.cpp
     core/TrayController.h
     core/TrayController.cpp
     core/NetworkMonitor.h

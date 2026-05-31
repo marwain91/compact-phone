@@ -9,6 +9,7 @@
 #include <QtQmlIntegration>
 
 #include "ContactsController.h"
+#include "MessagesController.h"
 #include "SettingsController.h"
 
 #include <memory>
@@ -68,9 +69,7 @@ class PhoneController : public QObject {
     Q_PROPERTY(QString latestUpdateUrl READ latestUpdateUrl NOTIFY latestUpdateChanged)
     Q_PROPERTY(compactphone::ContactsController *contacts READ contactsController CONSTANT)
     Q_PROPERTY(QAbstractListModel *history READ historyModel CONSTANT)
-    Q_PROPERTY(QAbstractListModel *conversations READ conversationsModel CONSTANT)
-    Q_PROPERTY(QAbstractListModel *messages READ messagesModel CONSTANT)
-    Q_PROPERTY(int unreadMessageCount READ unreadMessageCount NOTIFY unreadMessageCountChanged)
+    Q_PROPERTY(compactphone::MessagesController *messaging READ messagesController CONSTANT)
     Q_PROPERTY(QAbstractListModel *lines READ linesModel CONSTANT)
     Q_PROPERTY(QString dialerUri READ dialerUri WRITE setDialerUri NOTIFY dialerUriChanged)
     Q_PROPERTY(int registeredAccountCount READ registeredAccountCount NOTIFY registeredAccountCountChanged)
@@ -130,20 +129,13 @@ public:
     Q_INVOKABLE void dismissNotice();
 
     ContactsController *contactsController() const;
+    MessagesController *messagesController() const;
     QAbstractListModel *historyModel() const;
-    QAbstractListModel *conversationsModel() const;
-    QAbstractListModel *messagesModel() const;
     QAbstractListModel *linesModel() const;
-    int unreadMessageCount() const;
 
     Q_INVOKABLE int addWatchedLine(const QString &uri, const QString &label);
     Q_INVOKABLE bool removeWatchedLine(int lineId);
     Q_INVOKABLE void dialLine(int lineId);
-
-    Q_INVOKABLE bool sendMessage(const QString &peerUri,
-                                 const QString &body);
-    Q_INVOKABLE void selectConversation(const QString &peerUri);
-    Q_INVOKABLE void markConversationRead(const QString &peerUri);
     QString dialerUri() const { return m_dialerUri; }
     void setDialerUri(const QString &u);
 
@@ -199,7 +191,6 @@ signals:
     void registeredAccountCountChanged();
     void activeAccountIdChanged();
     void voicemailStateChanged();
-    void unreadMessageCountChanged();
 
     // Tray-initiated requests bubbled up to QML.
     void trayShowRequested();
@@ -234,6 +225,7 @@ private:
     std::unique_ptr<sip::MessagesManager>       m_messagesMgr;
     std::unique_ptr<models::MessagesModel>      m_messagesModel;
     std::unique_ptr<models::ConversationsModel> m_conversationsModel;
+    std::unique_ptr<MessagesController>         m_messagesController;
     std::unique_ptr<sip::LinesManager>          m_linesMgr;
     std::unique_ptr<models::LinesModel>         m_linesModel;
     std::unique_ptr<sip::SettingsManager>       m_settings;

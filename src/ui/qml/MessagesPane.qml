@@ -81,7 +81,7 @@ ColumnLayout {
                 Layout.fillHeight: true
                 clip: true
                 spacing: Theme.s6
-                model: PhoneController.conversations
+                model: PhoneController.messaging.conversations
                 delegate: Rectangle {
                     width: convList.width
                     height: 56
@@ -131,7 +131,7 @@ ColumnLayout {
                         hoverEnabled: true
                         onClicked: {
                             root.selectedPeer = peer
-                            PhoneController.selectConversation(peer)
+                            PhoneController.messaging.selectConversation(peer)
                         }
                     }
                 }
@@ -170,7 +170,7 @@ ColumnLayout {
                 Layout.fillHeight: true
                 clip: true
                 spacing: Theme.s6
-                model: PhoneController.messages
+                model: PhoneController.messaging.messages
                 verticalLayoutDirection: ListView.TopToBottom
                 onCountChanged: positionViewAtEnd()
                 delegate: Item {
@@ -237,7 +237,7 @@ ColumnLayout {
                         onClicked: {
                             const t = composeField.text.trim()
                             if (t.length === 0) return
-                            PhoneController.sendMessage(root.selectedPeer, t)
+                            PhoneController.messaging.send(root.selectedPeer, t)
                             composeField.text = ""
                         }
                     }
@@ -292,7 +292,7 @@ ColumnLayout {
             const t = peerTf.text.trim()
             if (t.length > 0) {
                 root.selectedPeer = t
-                PhoneController.selectConversation(t)
+                PhoneController.messaging.selectConversation(t)
             }
             peerTf.text = ""
         }

@@ -100,8 +100,6 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
     m_linesMgr = std::make_unique<sip::LinesManager>(m_db.get(), m_accounts.get(), this);
     m_linesModel = std::make_unique<models::LinesModel>(m_linesMgr.get(), this);
-    connect(m_messagesMgr.get(), &sip::MessagesManager::messagesChanged,
-            this, &PhoneController::unreadMessageCountChanged);
 
     m_settings = std::make_unique<sip::SettingsManager>(m_db.get());
 
@@ -119,6 +117,14 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
         [this](const QString &text, int autoDismissMs) {
             postNotice(text, autoDismissMs);
         },
+        this);
+    m_messagesController = std::make_unique<MessagesController>(
+        m_accounts.get(), m_messagesMgr.get(),
+        m_messagesModel.get(), m_conversationsModel.get(),
+        [this] {
+            return m_accountsController ? m_accountsController->activeAccountId() : -1;
+        },
+        [this](const QString &text) { postNotice(text); },
         this);
 
     connect(m_accountsController.get(), &AccountsController::registeredAccountCountChanged,
@@ -351,6 +357,7 @@ PhoneController::~PhoneController()
     m_settingsController.reset();
     m_accountsController.reset();
     m_contactsController.reset();
+    m_messagesController.reset();
     m_linesModel.reset();
     m_linesMgr.reset();
     m_conversationsModel.reset();
@@ -528,14 +535,9 @@ bool PhoneController::crashReportingAvailable() const
     return crash::configuredSentryAvailable();
 }
 
-QAbstractListModel *PhoneController::conversationsModel() const
+MessagesController *PhoneController::messagesController() const
 {
-    return m_conversationsModel.get();
-}
-
-QAbstractListModel *PhoneController::messagesModel() const
-{
-    return m_messagesModel.get();
+    return m_messagesController.get();
 }
 
 QAbstractListModel *PhoneController::linesModel() const
@@ -565,45 +567,6 @@ void PhoneController::dialLine(int lineId)
     }
 }
 
-int PhoneController::unreadMessageCount() const
-{
-    return m_messagesMgr ? m_messagesMgr->unreadCount() : 0;
-}
-
-bool PhoneController::sendMessage(const QString &peerUri, const QString &body)
-{
-    if (!m_accounts || !m_messagesMgr || !m_accountsController) return false;
-    if (peerUri.isEmpty() || body.isEmpty()) return false;
-    const auto aid = m_accountsController->activeAccountId();
-    if (aid <= 0) return false;
-
-    // Persist first so the user sees their outgoing bubble even if the
-    // network is flaky; PJSIP retransmits MESSAGE for us.
-    sip::Message m;
-    m.accountId = aid;
-    m.peerUri = peerUri.toStdString();
-    m.direction = sip::MessageDirection::Outgoing;
-    m.body = body.toStdString();
-    m.createdAtMs = QDateTime::currentMSecsSinceEpoch();
-    m.read = true;
-    m_messagesMgr->append(m);
-
-    const bool ok = m_accounts->sendInstantMessage(
-        aid, peerUri.toStdString(), body.toStdString());
-    if (!ok) postNotice(tr("Message failed to send"));
-    return ok;
-}
-
-void PhoneController::selectConversation(const QString &peerUri)
-{
-    if (m_messagesModel) m_messagesModel->setPeer(peerUri);
-    markConversationRead(peerUri);
-}
-
-void PhoneController::markConversationRead(const QString &peerUri)
-{
-    if (m_messagesMgr) m_messagesMgr->markPeerRead(peerUri.toStdString());
-}
 
 int PhoneController::firstHeldCallId(int excludeCallId) const
 {
