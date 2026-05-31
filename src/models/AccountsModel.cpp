@@ -93,4 +93,15 @@ void AccountsModel::refresh()
     endResetModel();
 }
 
+void AccountsModel::notifyRegistrationChanged(int accountId)
+{
+    for (int i = 0; i < static_cast<int>(m_snapshot.size()); ++i) {
+        if (m_snapshot[i].id == accountId) {
+            const auto idx = index(i);
+            emit dataChanged(idx, idx, {RegistrationStateRole, RegistrationErrorRole});
+            return;
+        }
+    }
+}
+
 } // namespace compactphone::models

@@ -20,6 +20,8 @@
 
 #include <sqlite3.h>
 
+#include <QSignalSpy>
+
 namespace {
 
 void seedHistoryAccount(compactphone::persistence::Database &db)
@@ -91,6 +93,39 @@ TEST(AccountsModel, ExposesAccountRowsRolesAndFallbackLabel)
               QStringLiteral("Work Line"));
     EXPECT_FALSE(model.data(model.index(5, 0), compactphone::models::AccountsModel::IdRole).isValid());
     EXPECT_EQ(model.rowCount(model.index(0, 0)), 0);
+}
+
+TEST(AccountsModel, RegistrationChangeEmitsDataChangedNotReset)
+{
+    compactphone::persistence::Database db;
+    ASSERT_TRUE(db.openInMemory());
+    compactphone::platform::MemoryKeychain kc;
+    compactphone::sip::AccountsManager manager(nullptr, &db, &kc);
+    compactphone::sip::Account account;
+    account.displayName = "Work";
+    account.username = "1001";
+    account.domain = "example.com";
+    account.enabled = false;
+    const auto id = manager.add(account, "secret");
+    ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
+
+    compactphone::models::AccountsModel model(&manager);
+    QSignalSpy dataChanged(&model, &QAbstractItemModel::dataChanged);
+    QSignalSpy aboutToReset(&model, &QAbstractItemModel::modelAboutToBeReset);
+
+    // A registration-state change must update the row in place, not reset the
+    // whole model (which would tear down every account delegate).
+    model.notifyRegistrationChanged(id);
+
+    ASSERT_EQ(dataChanged.count(), 1);
+    EXPECT_EQ(aboutToReset.count(), 0);
+    const auto roles = dataChanged.first().at(2).value<QList<int>>();
+    EXPECT_TRUE(roles.contains(compactphone::models::AccountsModel::RegistrationStateRole));
+    EXPECT_TRUE(roles.contains(compactphone::models::AccountsModel::RegistrationErrorRole));
+
+    // An unknown id is a no-op (no signal).
+    model.notifyRegistrationChanged(999999);
+    EXPECT_EQ(dataChanged.count(), 1);
 }
 
 TEST(ContactsModel, RefreshesRowsAndExposesContactRoles)
@@ -306,4 +341,31 @@ TEST(LinesModel, RefreshesRowsAndExposesLineRoles)
               QStringLiteral("unknown"));
     EXPECT_FALSE(model.data(model.index(5, 0),
                             compactphone::models::LinesModel::UriRole).isValid());
+}
+
+TEST(LinesModel, IncrementalRefreshInsertsAndRemovesWithoutReset)
+{
+    compactphone::persistence::Database db;
+    ASSERT_TRUE(db.openInMemory());
+    compactphone::sip::LinesManager manager(&db, nullptr);
+    const auto first = manager.add(42, "sip:1001@example.com", "Support");
+    compactphone::models::LinesModel model(&manager);
+    ASSERT_EQ(model.rowCount(), 1);
+
+    // linesChanged fires on every BLF NOTIFY; the model must diff incrementally
+    // (insert/remove rows) rather than reset and tear down every delegate.
+    QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
+    QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
+    QSignalSpy aboutToReset(&model, &QAbstractItemModel::modelAboutToBeReset);
+
+    const auto second = manager.add(42, "sip:1002@example.com", "Sales");
+    ASSERT_NE(second, compactphone::sip::kInvalidWatchedLineId);
+    EXPECT_EQ(model.rowCount(), 2);
+    EXPECT_EQ(inserted.count(), 1);
+    EXPECT_EQ(aboutToReset.count(), 0);
+
+    EXPECT_TRUE(manager.remove(first));
+    EXPECT_EQ(model.rowCount(), 1);
+    EXPECT_EQ(removed.count(), 1);
+    EXPECT_EQ(aboutToReset.count(), 0);
 }
