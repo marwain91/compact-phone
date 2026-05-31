@@ -141,7 +141,7 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     connect(m_accountsController.get(), &AccountsController::activeAccountIdChanged,
             this, &PhoneController::voicemailStateChanged);
     connect(m_accountsController.get(), &AccountsController::registrationFailed,
-            this, [this](const QString &msg) { postNotice(msg, 6000); });
+            this, [this](const QString &msg) { postNotice(msg, notice::kWarning); });
 
     // MWI notifications from PJSIP arrive on a worker thread — bounce to
     // the main thread before touching Qt state.
@@ -243,7 +243,7 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     });
     connect(m_networkMonitor.get(), &NetworkMonitor::networkLost,
             this, [this] {
-        postNotice(tr("Network connection lost — calls may drop"), 6000);
+        postNotice(tr("Network connection lost — calls may drop"), notice::kWarning);
     });
 
     // System wake. On platforms where the OS reports a wake event, kick
@@ -271,7 +271,7 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
         if (changed) {
             emit latestUpdateChanged();
         }
-        postNotice(tr("Update available: %1").arg(v), 8000);
+        postNotice(tr("Update available: %1").arg(v), notice::kImportant);
     });
     connect(m_updateChecker.get(), &UpdateChecker::upToDate,
             this, [this] {
@@ -280,11 +280,11 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
             m_latestUpdateUrl = QUrl();
             emit latestUpdateChanged();
         }
-        postNotice(tr("Compact Phone is up to date"), 4000);
+        postNotice(tr("Compact Phone is up to date"), notice::kDefault);
     });
     connect(m_updateChecker.get(), &UpdateChecker::checkFailed,
             this, [this](const QString &reason) {
-        postNotice(tr("Update check failed: %1").arg(reason), 5000);
+        postNotice(tr("Update check failed: %1").arg(reason), notice::kError);
     });
 
     // Auto-provisioning. The Registry owns every backend Provider; we wire
@@ -575,7 +575,7 @@ void PhoneController::setDialerUri(const QString &u)
 void PhoneController::checkForUpdates()
 {
     if (!m_updateChecker) return;
-    postNotice(tr("Checking for updates…"), 2500);
+    postNotice(tr("Checking for updates…"), notice::kBrief);
     m_updateChecker->check();
 }
 
@@ -599,11 +599,11 @@ void PhoneController::openLatestUpdateUrl()
         && (scheme == QLatin1String("https")
             || scheme == QLatin1String("http"));
     if (!canOpen) {
-        postNotice(tr("No update download available"), 3000);
+        postNotice(tr("No update download available"), notice::kShort);
         return;
     }
     if (!QDesktopServices::openUrl(m_latestUpdateUrl)) {
-        postNotice(tr("Could not open the update download"), 5000);
+        postNotice(tr("Could not open the update download"), notice::kError);
     }
 }
 

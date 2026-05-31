@@ -29,6 +29,7 @@ add_library(compactphone_core STATIC
     core/CallsController.cpp
     core/SettingsController.h
     core/SettingsController.cpp
+    core/NoticeDuration.h
     core/SipLog.h
     core/SipLog.cpp
     core/SipEngine.h
