@@ -60,7 +60,7 @@ ColumnLayout {
             // FileDialog gives back a file:// URL; PhoneController wants a path.
             const url = String(selectedFile)
             const path = url.replace(/^file:\/\//, "")
-            const n = PhoneController.importContactsFromFile(path)
+            const n = PhoneController.contacts.importFromFile(path)
             // No snackbar API in scope here, log via console.
             console.log("Imported", n, "contacts from", path)
         }
@@ -74,7 +74,7 @@ ColumnLayout {
         id: list
         anchors.fill: parent
         visible: count > 0
-        model: PhoneController.contacts
+        model: PhoneController.contacts.model
         spacing: Theme.s6
         clip: true
 
@@ -130,7 +130,7 @@ ColumnLayout {
                     iconSize: 14
                     tint: favorite ? "#F59E0B" : Theme.textTertiary
                     hoverTint: "#F59E0B"
-                    onClicked: PhoneController.setContactFavorite(contactId, !favorite)
+                    onClicked: PhoneController.contacts.setFavorite(contactId, !favorite)
                 }
                 IconButton {
                     iconPath: Icons.phone
@@ -140,7 +140,7 @@ ColumnLayout {
                     bgHover: "#10B981"
                     tint: "#10B981"
                     hoverTint: "#FFFFFF"
-                    onClicked: PhoneController.dialContact(contactId)
+                    onClicked: PhoneController.contacts.dial(contactId)
                 }
                 IconButton {
                     iconPath: Icons.edit
@@ -158,7 +158,7 @@ ColumnLayout {
                     diameter: 30
                     iconSize: 14
                     hoverTint: Theme.danger
-                    onClicked: PhoneController.removeContact(contactId)
+                    onClicked: PhoneController.contacts.remove(contactId)
                 }
             }
         }
@@ -196,10 +196,10 @@ ColumnLayout {
     ContactEditDialog {
         id: editDialog
         onContactSaved: (displayName, sipUri, phone) => {
-            PhoneController.addContact(displayName, sipUri, phone)
+            PhoneController.contacts.add(displayName, sipUri, phone)
         }
         onContactEdited: (contactId, displayName, sipUri, phone) => {
-            PhoneController.updateContact(contactId, displayName, sipUri, phone)
+            PhoneController.contacts.update(contactId, displayName, sipUri, phone)
         }
     }
 }

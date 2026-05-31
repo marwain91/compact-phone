@@ -8,6 +8,10 @@
 #include <QUrl>
 #include <QtQmlIntegration>
 
+#include "ContactsController.h"
+#include "LinesController.h"
+#include "MessagesController.h"
+#include "ProvisioningController.h"
 #include "SettingsController.h"
 
 #include <memory>
@@ -65,12 +69,11 @@ class PhoneController : public QObject {
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     Q_PROPERTY(QString latestUpdateVersion READ latestUpdateVersion NOTIFY latestUpdateChanged)
     Q_PROPERTY(QString latestUpdateUrl READ latestUpdateUrl NOTIFY latestUpdateChanged)
-    Q_PROPERTY(QAbstractListModel *contacts READ contactsModel CONSTANT)
+    Q_PROPERTY(compactphone::ContactsController *contacts READ contactsController CONSTANT)
     Q_PROPERTY(QAbstractListModel *history READ historyModel CONSTANT)
-    Q_PROPERTY(QAbstractListModel *conversations READ conversationsModel CONSTANT)
-    Q_PROPERTY(QAbstractListModel *messages READ messagesModel CONSTANT)
-    Q_PROPERTY(int unreadMessageCount READ unreadMessageCount NOTIFY unreadMessageCountChanged)
-    Q_PROPERTY(QAbstractListModel *lines READ linesModel CONSTANT)
+    Q_PROPERTY(compactphone::MessagesController *messaging READ messagesController CONSTANT)
+    Q_PROPERTY(compactphone::LinesController *lines READ linesController CONSTANT)
+    Q_PROPERTY(compactphone::ProvisioningController *provisioning READ provisioningController CONSTANT)
     Q_PROPERTY(QString dialerUri READ dialerUri WRITE setDialerUri NOTIFY dialerUriChanged)
     Q_PROPERTY(int registeredAccountCount READ registeredAccountCount NOTIFY registeredAccountCountChanged)
     Q_PROPERTY(int activeAccountId READ activeAccountId WRITE setActiveAccountId NOTIFY activeAccountIdChanged)
@@ -128,67 +131,24 @@ public:
     Q_INVOKABLE int firstHeldCallId(int excludeCallId) const;
     Q_INVOKABLE void dismissNotice();
 
-    QAbstractListModel *contactsModel() const;
+    ContactsController *contactsController() const;
+    MessagesController *messagesController() const;
+    LinesController *linesController() const;
+    ProvisioningController *provisioningController() const;
     QAbstractListModel *historyModel() const;
-    QAbstractListModel *conversationsModel() const;
-    QAbstractListModel *messagesModel() const;
-    QAbstractListModel *linesModel() const;
-    int unreadMessageCount() const;
 
-    Q_INVOKABLE int addWatchedLine(const QString &uri, const QString &label);
-    Q_INVOKABLE bool removeWatchedLine(int lineId);
-    Q_INVOKABLE void dialLine(int lineId);
-
-    Q_INVOKABLE bool sendMessage(const QString &peerUri,
-                                 const QString &body);
-    Q_INVOKABLE void selectConversation(const QString &peerUri);
-    Q_INVOKABLE void markConversationRead(const QString &peerUri);
     QString dialerUri() const { return m_dialerUri; }
     void setDialerUri(const QString &u);
-
-    Q_INVOKABLE int addContact(const QString &displayName,
-                               const QString &sipUri,
-                               const QString &phone);
-    Q_INVOKABLE int importContactsFromFile(const QString &path);
 
     Q_INVOKABLE QStringList recentLogLines() const;
     Q_INVOKABLE bool exportDiagnostics(const QString &path) const;
     Q_INVOKABLE void checkForUpdates();
     Q_INVOKABLE void openLatestUpdateUrl();
 
-    // Generic auto-provisioning. providerId selects a backend (e.g. "daktela").
-    // On success a new SIP account is added via addAccount() and its id is
-    // delivered via accountProvisioned.
-    Q_INVOKABLE void provisionWithProvider(const QString &providerId,
-                                           const QString &host,
-                                           const QString &username,
-                                           const QString &password);
-
-    // Skip the password step and provision directly from an SSO access token.
-    Q_INVOKABLE void provisionWithProviderToken(const QString &providerId,
-                                                const QString &host,
-                                                const QString &accessToken);
-
-    // Probe the host to learn which auth methods are enabled. Emits
-    // authMethodsDiscovered or authMethodsFailed.
-    Q_INVOKABLE void discoverAuthMethods(const QString &providerId,
-                                         const QString &host);
-
-    // Descriptors for every built-in provider; each entry is
-    // {"id", "displayName", "hostPlaceholder"}.
-    Q_INVOKABLE QVariantList provisioningProviders() const;
-
     // Live RTCP-derived media stats for the in-call quality indicator.
     // Returns a QVariantMap with keys: mos (double), lossPct (double),
     // rttMs (int), jitterMs (int). Missing/unavailable fields are -1.
     Q_INVOKABLE QVariantMap streamStats(int callId) const;
-    Q_INVOKABLE bool updateContact(int contactId,
-                                   const QString &displayName,
-                                   const QString &sipUri,
-                                   const QString &phone);
-    Q_INVOKABLE bool removeContact(int contactId);
-    Q_INVOKABLE bool setContactFavorite(int contactId, bool favorite);
-    Q_INVOKABLE void dialContact(int contactId);
     Q_INVOKABLE void redialFromHistory(int historyId);
 
     int registeredAccountCount() const;
@@ -210,19 +170,10 @@ signals:
     void registeredAccountCountChanged();
     void activeAccountIdChanged();
     void voicemailStateChanged();
-    void unreadMessageCountChanged();
 
     // Tray-initiated requests bubbled up to QML.
     void trayShowRequested();
     void trayHideRequested();
-
-    // Generic provisioning lifecycle. providerId tracks which backend the
-    // event came from so a wizard can ignore stale signals.
-    void provisioningProgress(QString providerId, QString stage);
-    void provisioningFailed(QString providerId, QString error);
-    void accountProvisioned(QString providerId, int accountId);
-    void authMethodsDiscovered(QString providerId, QString host, QVariantList methods);
-    void authMethodsFailed(QString providerId, QString host, QString error);
 
 private:
     QString m_notice;
@@ -239,13 +190,16 @@ private:
     std::unique_ptr<models::CallsModel>         m_callsModel;
     std::unique_ptr<sip::ContactsManager>       m_contacts;
     std::unique_ptr<models::ContactsModel>      m_contactsModel;
+    std::unique_ptr<ContactsController>         m_contactsController;
     std::unique_ptr<sip::HistoryManager>        m_historyMgr;
     std::unique_ptr<models::HistoryModel>       m_historyModel;
     std::unique_ptr<sip::MessagesManager>       m_messagesMgr;
     std::unique_ptr<models::MessagesModel>      m_messagesModel;
     std::unique_ptr<models::ConversationsModel> m_conversationsModel;
+    std::unique_ptr<MessagesController>         m_messagesController;
     std::unique_ptr<sip::LinesManager>          m_linesMgr;
     std::unique_ptr<models::LinesModel>         m_linesModel;
+    std::unique_ptr<LinesController>            m_linesController;
     std::unique_ptr<sip::SettingsManager>       m_settings;
     std::unique_ptr<AccountsController>         m_accountsController;
     std::unique_ptr<CallsController>            m_callsController;
@@ -254,7 +208,7 @@ private:
     std::unique_ptr<NetworkMonitor>             m_networkMonitor;
     std::unique_ptr<PowerMonitor>               m_powerMonitor;
     std::unique_ptr<UpdateChecker>              m_updateChecker;
-    std::unique_ptr<provisioning::Registry>     m_provisioningRegistry;
+    std::unique_ptr<ProvisioningController>     m_provisioningController;
 
     QString m_dialerUri;
 

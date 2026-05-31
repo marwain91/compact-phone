@@ -45,7 +45,7 @@ ColumnLayout {
             visible: count > 0
             clip: true
             spacing: Theme.s6
-            model: PhoneController.lines
+            model: PhoneController.lines.model
             delegate: Rectangle {
                 width: list.width
                 height: 48
@@ -97,14 +97,14 @@ ColumnLayout {
                         bgHover: "#10B981"
                         tint: "#10B981"
                         hoverTint: "#FFFFFF"
-                        onClicked: PhoneController.dialLine(lineId)
+                        onClicked: PhoneController.lines.dial(lineId)
                     }
                     IconButton {
                         iconPath: Icons.trash
                         diameter: 28
                         iconSize: 13
                         hoverTint: Theme.danger
-                        onClicked: PhoneController.removeWatchedLine(lineId)
+                        onClicked: PhoneController.lines.remove(lineId)
                     }
                 }
             }
@@ -208,7 +208,7 @@ ColumnLayout {
         onAccepted: {
             const uri = uriTf.text.trim()
             if (uri.length === 0) return
-            PhoneController.addWatchedLine(uri, labelTf.text.trim())
+            PhoneController.lines.add(uri, labelTf.text.trim())
             uriTf.text = ""
             labelTf.text = ""
         }

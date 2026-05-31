@@ -251,7 +251,7 @@ ColumnLayout {
     // tile shows the provider's wordmark (qrc:/branding/<provider>-mark.svg)
     // and opens the wizard preselected for that provider.
     Item {
-        readonly property var providers: PhoneController.provisioningProviders()
+        readonly property var providers: PhoneController.provisioning.providers()
         visible: providers.length > 0
         Layout.fillWidth: true
         Layout.preferredHeight: providers.length > 0 ? footerCol.implicitHeight : 0
@@ -277,7 +277,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Theme.s8
                 Repeater {
-                    model: PhoneController.provisioningProviders()
+                    model: PhoneController.provisioning.providers()
                     delegate: Rectangle {
                         required property var modelData
                         width: 132; height: 40

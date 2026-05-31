@@ -4,8 +4,6 @@
 #include "NetworkMonitor.h"
 #include "PowerMonitor.h"
 #include "UpdateChecker.h"
-#include "provisioning/Provider.h"
-#include "provisioning/Registry.h"
 #include "TrayController.h"
 #include "UrlDispatcher.h"
 #include "AccountsManager.h"
@@ -14,7 +12,6 @@
 #include "CallEntry.h"
 #include "CallManager.h"
 #include "ContactsManager.h"
-#include "ContactImporter.h"
 #include "CrashReporting.h"
 #include "LogBuffer.h"
 #include "HistoryManager.h"
@@ -87,6 +84,11 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
     m_contacts = std::make_unique<sip::ContactsManager>(m_db.get());
     m_contactsModel = std::make_unique<models::ContactsModel>(m_contacts.get(), this);
+    m_contactsController = std::make_unique<ContactsController>(
+        m_contacts.get(), m_contactsModel.get(), this);
+    // dialContact pre-fills the dialer; the controller stays dialer-agnostic.
+    connect(m_contactsController.get(), &ContactsController::dialRequested,
+            this, &PhoneController::setDialerUri);
     m_historyMgr = std::make_unique<sip::HistoryManager>(m_db.get());
     m_historyModel = std::make_unique<models::HistoryModel>(m_historyMgr.get(), this);
 
@@ -96,8 +98,6 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
     m_linesMgr = std::make_unique<sip::LinesManager>(m_db.get(), m_accounts.get(), this);
     m_linesModel = std::make_unique<models::LinesModel>(m_linesMgr.get(), this);
-    connect(m_messagesMgr.get(), &sip::MessagesManager::messagesChanged,
-            this, &PhoneController::unreadMessageCountChanged);
 
     m_settings = std::make_unique<sip::SettingsManager>(m_db.get());
 
@@ -116,6 +116,23 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
             postNotice(text, autoDismissMs);
         },
         this);
+    m_messagesController = std::make_unique<MessagesController>(
+        m_accounts.get(), m_messagesMgr.get(),
+        m_messagesModel.get(), m_conversationsModel.get(),
+        [this] {
+            return m_accountsController ? m_accountsController->activeAccountId() : -1;
+        },
+        [this](const QString &text) { postNotice(text); },
+        this);
+    m_linesController = std::make_unique<LinesController>(
+        m_linesMgr.get(), m_linesModel.get(),
+        [this] {
+            return m_accountsController ? m_accountsController->activeAccountId() : -1;
+        },
+        this);
+    // dialLine places a real call (trusted in-app action).
+    connect(m_linesController.get(), &LinesController::callRequested,
+            this, &PhoneController::dial);
 
     connect(m_accountsController.get(), &AccountsController::registeredAccountCountChanged,
             this, &PhoneController::registeredAccountCountChanged);
@@ -272,40 +289,14 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
     // Auto-provisioning. The Registry owns every backend Provider; we wire
     // their signals here once so the QML side only sees PhoneController.
-    m_provisioningRegistry = std::make_unique<provisioning::Registry>();
-    for (const auto &id : m_provisioningRegistry->ids()) {
-        auto *p = m_provisioningRegistry->find(id);
-        if (!p) continue;
-        connect(p, &provisioning::Provider::progress,
-                this, [this, id](const QString &stage) {
-            emit provisioningProgress(id, stage);
-        });
-        connect(p, &provisioning::Provider::provisioningFailed,
-                this, [this, id](const QString &error) {
-            postNotice(tr("Sign-in failed: %1").arg(error), 5000);
-            emit provisioningFailed(id, error);
-        });
-        connect(p, &provisioning::Provider::provisioningSucceeded,
-                this, [this, id](const QVariantMap &params) {
-            const int newId = addAccount(params);
-            if (newId < 0) {
-                const QString reason = tr("Could not save the new account.");
-                postNotice(tr("Sign-in failed: %1").arg(reason), 5000);
-                emit provisioningFailed(id, reason);
-                return;
-            }
-            postNotice(tr("Account added"), 4000);
-            emit accountProvisioned(id, newId);
-        });
-        connect(p, &provisioning::Provider::authMethodsDiscovered,
-                this, [this, id](const QString &host, const QVariantList &methods) {
-            emit authMethodsDiscovered(id, host, methods);
-        });
-        connect(p, &provisioning::Provider::authMethodsFailed,
-                this, [this, id](const QString &host, const QString &error) {
-            emit authMethodsFailed(id, host, error);
-        });
-    }
+    m_provisioningController = std::make_unique<ProvisioningController>(
+        [this](const QVariantMap &params) {
+            return m_accountsController ? m_accountsController->addAccount(params) : -1;
+        },
+        [this](const QString &text, int autoDismissMs) {
+            postNotice(text, autoDismissMs);
+        },
+        this);
 
     // External sip:/sips:/tel:/callto: URIs reach the app from an untrusted
     // source (web pages, documents; macOS delivers them via QFileOpenEvent ->
@@ -341,11 +332,14 @@ PhoneController::~PhoneController()
     m_networkMonitor.reset();
     m_powerMonitor.reset();
     m_updateChecker.reset();
-    m_provisioningRegistry.reset();
+    m_provisioningController.reset();
     m_trayController.reset();
     m_callsController.reset();
     m_settingsController.reset();
     m_accountsController.reset();
+    m_contactsController.reset();
+    m_messagesController.reset();
+    m_linesController.reset();
     m_linesModel.reset();
     m_linesMgr.reset();
     m_conversationsModel.reset();
@@ -523,82 +517,16 @@ bool PhoneController::crashReportingAvailable() const
     return crash::configuredSentryAvailable();
 }
 
-QAbstractListModel *PhoneController::conversationsModel() const
+MessagesController *PhoneController::messagesController() const
 {
-    return m_conversationsModel.get();
+    return m_messagesController.get();
 }
 
-QAbstractListModel *PhoneController::messagesModel() const
+LinesController *PhoneController::linesController() const
 {
-    return m_messagesModel.get();
+    return m_linesController.get();
 }
 
-QAbstractListModel *PhoneController::linesModel() const
-{
-    return m_linesModel.get();
-}
-
-int PhoneController::addWatchedLine(const QString &uri, const QString &label)
-{
-    if (!m_linesMgr || !m_accountsController) return -1;
-    const auto aid = m_accountsController->activeAccountId();
-    if (aid <= 0) return -1;
-    return m_linesMgr->add(aid, uri.toStdString(), label.toStdString());
-}
-
-bool PhoneController::removeWatchedLine(int lineId)
-{
-    return m_linesMgr
-        && m_linesMgr->remove(static_cast<sip::WatchedLineId>(lineId));
-}
-
-void PhoneController::dialLine(int lineId)
-{
-    if (!m_linesMgr) return;
-    if (auto l = m_linesMgr->find(static_cast<sip::WatchedLineId>(lineId))) {
-        dial(QString::fromStdString(l->uri));
-    }
-}
-
-int PhoneController::unreadMessageCount() const
-{
-    return m_messagesMgr ? m_messagesMgr->unreadCount() : 0;
-}
-
-bool PhoneController::sendMessage(const QString &peerUri, const QString &body)
-{
-    if (!m_accounts || !m_messagesMgr || !m_accountsController) return false;
-    if (peerUri.isEmpty() || body.isEmpty()) return false;
-    const auto aid = m_accountsController->activeAccountId();
-    if (aid <= 0) return false;
-
-    // Persist first so the user sees their outgoing bubble even if the
-    // network is flaky; PJSIP retransmits MESSAGE for us.
-    sip::Message m;
-    m.accountId = aid;
-    m.peerUri = peerUri.toStdString();
-    m.direction = sip::MessageDirection::Outgoing;
-    m.body = body.toStdString();
-    m.createdAtMs = QDateTime::currentMSecsSinceEpoch();
-    m.read = true;
-    m_messagesMgr->append(m);
-
-    const bool ok = m_accounts->sendInstantMessage(
-        aid, peerUri.toStdString(), body.toStdString());
-    if (!ok) postNotice(tr("Message failed to send"));
-    return ok;
-}
-
-void PhoneController::selectConversation(const QString &peerUri)
-{
-    if (m_messagesModel) m_messagesModel->setPeer(peerUri);
-    markConversationRead(peerUri);
-}
-
-void PhoneController::markConversationRead(const QString &peerUri)
-{
-    if (m_messagesMgr) m_messagesMgr->markPeerRead(peerUri.toStdString());
-}
 
 int PhoneController::firstHeldCallId(int excludeCallId) const
 {
@@ -627,9 +555,9 @@ void PhoneController::postNotice(const QString &text, int autoDismissMs)
     if (autoDismissMs > 0) m_noticeTimer.start(autoDismissMs);
 }
 
-QAbstractListModel *PhoneController::contactsModel() const
+ContactsController *PhoneController::contactsController() const
 {
-    return m_contactsModel.get();
+    return m_contactsController.get();
 }
 
 QAbstractListModel *PhoneController::historyModel() const
@@ -642,19 +570,6 @@ void PhoneController::setDialerUri(const QString &u)
     if (m_dialerUri == u) return;
     m_dialerUri = u;
     emit dialerUriChanged();
-}
-
-int PhoneController::addContact(const QString &displayName,
-                                const QString &sipUri,
-                                const QString &phone)
-{
-    sip::Contact c;
-    c.displayName = displayName.toStdString();
-    c.sipUri = sipUri.toStdString();
-    c.phone = phone.toStdString();
-    const auto id = m_contacts->add(c);
-    m_contactsModel->refresh();
-    return id;
 }
 
 void PhoneController::checkForUpdates()
@@ -692,54 +607,9 @@ void PhoneController::openLatestUpdateUrl()
     }
 }
 
-void PhoneController::provisionWithProvider(const QString &providerId,
-                                            const QString &host,
-                                            const QString &username,
-                                            const QString &password)
+ProvisioningController *PhoneController::provisioningController() const
 {
-    if (!m_provisioningRegistry) return;
-    auto *p = m_provisioningRegistry->find(providerId);
-    if (!p) {
-        const QString msg = tr("Unknown provisioning provider: %1").arg(providerId);
-        postNotice(msg, 5000);
-        emit provisioningFailed(providerId, msg);
-        return;
-    }
-    p->provision(host, username, password);
-}
-
-QVariantList PhoneController::provisioningProviders() const
-{
-    if (!m_provisioningRegistry) return {};
-    return m_provisioningRegistry->descriptors();
-}
-
-void PhoneController::provisionWithProviderToken(const QString &providerId,
-                                                 const QString &host,
-                                                 const QString &accessToken)
-{
-    if (!m_provisioningRegistry) return;
-    auto *p = m_provisioningRegistry->find(providerId);
-    if (!p) {
-        const QString msg = tr("Unknown provisioning provider: %1").arg(providerId);
-        postNotice(msg, 5000);
-        emit provisioningFailed(providerId, msg);
-        return;
-    }
-    p->provisionWithToken(host, accessToken);
-}
-
-void PhoneController::discoverAuthMethods(const QString &providerId,
-                                          const QString &host)
-{
-    if (!m_provisioningRegistry) return;
-    auto *p = m_provisioningRegistry->find(providerId);
-    if (!p) {
-        emit authMethodsFailed(providerId, host,
-                               tr("Unknown provisioning provider: %1").arg(providerId));
-        return;
-    }
-    p->discoverAuthMethods(host);
+    return m_provisioningController.get();
 }
 
 QVariantMap PhoneController::streamStats(int callId) const
@@ -800,80 +670,6 @@ bool PhoneController::exportDiagnostics(const QString &path) const
     w << "\n--- Recent log ---\n";
     w << LogBuffer::instance().asText() << "\n";
     return true;
-}
-
-int PhoneController::importContactsFromFile(const QString &path)
-{
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        spdlog::warn("importContactsFromFile: cannot open {}: {}",
-                     path.toStdString(),
-                     f.errorString().toStdString());
-        return 0;
-    }
-    const QString text = QString::fromUtf8(f.readAll());
-    ImportResult result;
-    const QString lower = path.toLower();
-    if (lower.endsWith(".csv")) {
-        result = contact_import::parseCsv(text);
-    } else {
-        // Default to vCard for .vcf and anything else.
-        result = contact_import::parseVCard(text);
-    }
-
-    int imported = 0;
-    for (const auto &c : result.contacts) {
-        sip::Contact sc;
-        sc.displayName = c.displayName.toStdString();
-        sc.sipUri = c.sipUri.toStdString();
-        sc.phone = c.phone.toStdString();
-        if (m_contacts->add(sc) != sip::kInvalidContactId) imported++;
-    }
-    if (imported > 0) m_contactsModel->refresh();
-    spdlog::info("importContactsFromFile: imported {} contacts from {} "
-                 "({} dropped)",
-                 imported, path.toStdString(), result.errors);
-    return imported;
-}
-
-bool PhoneController::updateContact(int contactId,
-                                    const QString &displayName,
-                                    const QString &sipUri,
-                                    const QString &phone)
-{
-    auto cur = m_contacts->findById(static_cast<sip::ContactId>(contactId));
-    if (!cur) return false;
-    cur->displayName = displayName.toStdString();
-    cur->sipUri = sipUri.toStdString();
-    cur->phone = phone.toStdString();
-    const bool ok = m_contacts->update(*cur);
-    if (ok) m_contactsModel->refresh();
-    return ok;
-}
-
-bool PhoneController::removeContact(int contactId)
-{
-    const bool ok = m_contacts->remove(static_cast<sip::ContactId>(contactId));
-    if (ok) m_contactsModel->refresh();
-    return ok;
-}
-
-bool PhoneController::setContactFavorite(int contactId, bool favorite)
-{
-    auto cur = m_contacts->findById(static_cast<sip::ContactId>(contactId));
-    if (!cur) return false;
-    if (cur->favorite == favorite) return true;
-    cur->favorite = favorite;
-    const bool ok = m_contacts->update(*cur);
-    if (ok) m_contactsModel->refresh();
-    return ok;
-}
-
-void PhoneController::dialContact(int contactId)
-{
-    auto c = m_contacts->findById(static_cast<sip::ContactId>(contactId));
-    if (!c) return;
-    setDialerUri(QString::fromStdString(c->sipUri));
 }
 
 void PhoneController::redialFromHistory(int historyId)
