@@ -30,7 +30,10 @@ add_library(compactphone_core STATIC
     core/AccountsManager.h
     core/AccountsManager.cpp
     core/BootConfig.h
-    core/BootConfig.cpp
+    core/BootConfig_internal.h
+    core/BootConfig_parser.cpp
+    core/BootConfig_file.cpp
+    core/BootConfig_secrets.cpp
     core/provisioning/Provider.h
     core/provisioning/Registry.h
     core/provisioning/Registry.cpp
