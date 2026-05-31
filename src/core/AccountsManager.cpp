@@ -613,10 +613,9 @@ bool AccountsManager::registerAccount(AccountId id)
             tlsCfg.tlsConfig.verifyClient = false;
             // Trust anchors so a verifying account can actually accept a
             // legitimately-signed cert (without these, verifyServer rejects
-            // every cert). Shared with the engine's resolved CA bundle.
-            if (m_engine && !m_engine->caCertFile().empty()) {
-                tlsCfg.tlsConfig.CaListFile = m_engine->caCertFile();
-            }
+            // every cert). Shared with the engine's resolved CA trust (PEM
+            // file on Linux/macOS, OS ROOT store buffer on Windows).
+            if (m_engine) m_engine->applyCaTrust(tlsCfg.tlsConfig);
             const auto tpId = pj::Endpoint::instance()
                 .transportCreate(PJSIP_TRANSPORT_TLS, tlsCfg);
             acfg.sipConfig.transportId = tpId;

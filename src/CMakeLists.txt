@@ -141,6 +141,10 @@ if(APPLE)
         "-framework Foundation"
     )
 endif()
+if(WIN32)
+    # SipEngine reads the OS ROOT cert store (CryptoAPI) for TLS trust anchors.
+    target_link_libraries(compactphone_core PUBLIC crypt32)
+endif()
 target_compile_definitions(compactphone_core
     PUBLIC COMPACTPHONE_WITH_TRAY=$<BOOL:${COMPACTPHONE_WITH_TRAY}>
 )
