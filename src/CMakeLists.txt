@@ -29,6 +29,7 @@ add_library(compactphone_core STATIC
     core/CallsController.cpp
     core/SettingsController.h
     core/SettingsController.cpp
+    core/NoticeDuration.h
     core/SipLog.h
     core/SipLog.cpp
     core/SipEngine.h
@@ -59,6 +60,8 @@ add_library(compactphone_core STATIC
     core/CallManager.cpp
     core/CallRecorder.h
     core/CallRecorder.cpp
+    core/CoreSipGraph.h
+    core/CoreSipGraph.cpp
     core/TransferTracker.h
     core/RingtonePlayer.h
     core/RingtonePlayer.cpp
@@ -137,6 +140,10 @@ if(APPLE)
         "-framework LocalAuthentication"
         "-framework Foundation"
     )
+endif()
+if(WIN32)
+    # SipEngine reads the OS ROOT cert store (CryptoAPI) for TLS trust anchors.
+    target_link_libraries(compactphone_core PUBLIC crypt32)
 endif()
 target_compile_definitions(compactphone_core
     PUBLIC COMPACTPHONE_WITH_TRAY=$<BOOL:${COMPACTPHONE_WITH_TRAY}>

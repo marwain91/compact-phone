@@ -2,6 +2,7 @@
 
 #include "CallEntry.h"
 #include "CallSessionTracker.h"
+#include "NoticeDuration.h"
 
 #include <QAbstractListModel>
 #include <QObject>
@@ -88,7 +89,7 @@ private:
     void refreshCallsModel();
     void publishRingingState();
     void publishRingingState(bool ringing);
-    void postNotice(const QString &text, int autoDismissMs = 4000);
+    void postNotice(const QString &text, int autoDismissMs = notice::kDefault);
 };
 
 } // namespace compactphone

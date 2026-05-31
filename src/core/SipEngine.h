@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace pj { class Endpoint; }
+namespace pj { class Endpoint; struct TlsConfig; }
 
 namespace compactphone::sip {
 
@@ -45,6 +45,15 @@ public:
     void setCaCertFile(const std::string &path) { m_caCertFile = path; }
     const std::string &caCertFile() const { return m_caCertFile; }
 
+    // Apply the resolved CA trust anchors to a TLS transport config. Sets the
+    // CA bundle file path when one was found, otherwise an in-memory PEM
+    // buffer (Windows has no on-disk bundle, so start() loads the OS ROOT
+    // store into one). At most one of the two is set — PJSIP ignores CaBuf
+    // when CaListFile is also present. No-op if neither anchor is available.
+    // Used by both the engine's fallback transport and AccountsManager's
+    // per-account transports so they share one trust source.
+    void applyCaTrust(pj::TlsConfig &cfg) const;
+
     // --- Audio device management ---
     // Owns all pjsua2 AudDevManager access so higher layers (e.g.
     // SettingsController) don't reach into the endpoint directly. All methods
@@ -66,6 +75,8 @@ private:
     bool m_running = false;
     std::unique_ptr<pj::Endpoint> m_endpoint;
     std::string m_caCertFile;
+    // In-memory PEM bundle used when no CA file exists (Windows ROOT store).
+    std::string m_caCertBuf;
 };
 
 } // namespace compactphone::sip

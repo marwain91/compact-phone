@@ -11,6 +11,7 @@
 #include "ContactsController.h"
 #include "LinesController.h"
 #include "MessagesController.h"
+#include "NoticeDuration.h"
 #include "ProvisioningController.h"
 #include "SettingsController.h"
 
@@ -212,7 +213,7 @@ private:
 
     QString m_dialerUri;
 
-    void postNotice(const QString &text, int autoDismissMs = 4000);
+    void postNotice(const QString &text, int autoDismissMs = notice::kDefault);
 };
 
 } // namespace compactphone

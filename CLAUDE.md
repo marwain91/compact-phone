@@ -241,6 +241,31 @@ Knock-on: bump the PJSIP cache key (e.g. `-v3-md`) whenever you
 change build flags that affect symbol/CRT linkage — otherwise the
 old cache shadows the fix.
 
+### TLS CA trust is resolved differently per platform
+
+`SipEngine::start()` resolves the trust anchors for verify-on TLS SIP
+transports (both the shared fallback transport and the per-account
+transports in `AccountsManager`). Linux/macOS have an on-disk PEM
+bundle, so it sets `pj::TlsConfig::CaListFile` to a path
+(`COMPACTPHONE_CA_FILE` override → common system locations).
+
+Windows ships **no on-disk CA bundle** — trust lives in the system cert
+store. So the Windows branch (`#ifdef _WIN32` in `SipEngine.cpp`)
+enumerates the `ROOT` store via CryptoAPI (`CertOpenSystemStoreA` /
+`CertEnumCertificatesInStore` / `CryptBinaryToStringA` with
+`CRYPT_STRING_BASE64HEADER`), concatenates the certs into an in-memory
+PEM, and sets `pj::TlsConfig::CaBuf` instead. Without this, every
+default verify-on TLS account on Windows rejected all server certs for
+lack of any anchor (was issue #68).
+
+Gotchas:
+- `CaListFile` takes precedence over `CaBuf` in PJSIP — set exactly
+  one. `SipEngine::applyCaTrust()` is the single place that does this;
+  both transport-creation sites call it so they share one trust source.
+- The Windows path needs `crypt32` linked (`if(WIN32)` in
+  `src/CMakeLists.txt`) and is **untestable in the Linux dev
+  container** — it only compiles/runs on the Windows runner.
+
 ### `actions/cache` does NOT save on job failure by default
 
 For expensive caches (Windows Qt cold build is ~2h), use

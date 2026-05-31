@@ -12,6 +12,11 @@
 #include <cstdlib>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <wincrypt.h>
+#endif
+
 namespace compactphone::sip {
 
 namespace {
@@ -35,6 +40,50 @@ std::string detectCaCertFile()
     return {};
 }
 
+#ifdef _WIN32
+// Windows ships no on-disk PEM CA bundle the way Linux/macOS do — trust lives
+// in the system certificate store. Enumerate the machine ROOT store (the
+// trusted-root CA store, kept current by Windows Update) and serialise each
+// cert to a concatenated PEM buffer that OpenSSL (PJSIP's TLS backend) can
+// parse via CaBuf. Without this, every default verify-on TLS account on
+// Windows rejects all server certs for lack of any trust anchor.
+std::string loadWindowsRootStorePem()
+{
+    HCERTSTORE store = CertOpenSystemStoreA(0, "ROOT");
+    if (!store) {
+        spdlog::warn("SipEngine: cannot open Windows ROOT cert store (err {})",
+                     GetLastError());
+        return {};
+    }
+
+    std::string pem;
+    int count = 0;
+    PCCERT_CONTEXT ctx = nullptr;
+    while ((ctx = CertEnumCertificatesInStore(store, ctx)) != nullptr) {
+        DWORD len = 0;
+        if (!CryptBinaryToStringA(ctx->pbCertEncoded, ctx->cbCertEncoded,
+                                  CRYPT_STRING_BASE64HEADER, nullptr, &len)
+            || len == 0) {
+            continue; // skip a cert we can't encode rather than abort the lot
+        }
+        std::string block(len, '\0');
+        if (!CryptBinaryToStringA(ctx->pbCertEncoded, ctx->cbCertEncoded,
+                                  CRYPT_STRING_BASE64HEADER, block.data(),
+                                  &len)) {
+            continue;
+        }
+        block.resize(len); // drop the trailing NUL the API counts on the way in
+        pem += block;      // BASE64HEADER blocks already carry BEGIN/END lines
+        ++count;
+    }
+    CertCloseStore(store, 0);
+
+    spdlog::info("SipEngine: loaded {} CA certs from the Windows ROOT store",
+                 count);
+    return pem;
+}
+#endif // _WIN32
+
 } // namespace
 
 SipEngine::SipEngine() = default;
@@ -44,21 +93,43 @@ SipEngine::~SipEngine()
     if (m_running) stop();
 }
 
+void SipEngine::applyCaTrust(pj::TlsConfig &cfg) const
+{
+    // CaListFile wins over CaBuf in PJSIP, so set exactly one: the file when
+    // we have it, otherwise the in-memory bundle.
+    if (!m_caCertFile.empty()) {
+        cfg.CaListFile = m_caCertFile;
+    } else if (!m_caCertBuf.empty()) {
+        cfg.CaBuf = m_caCertBuf;
+    }
+}
+
 bool SipEngine::start(int sipPort)
 {
     if (m_running) return true;
 
     m_endpoint = std::make_unique<pj::Endpoint>();
 
-    // Resolve the CA trust bundle once (unless a caller set one explicitly).
-    // Verifying TLS transports need trust anchors or they reject every cert.
+    // Resolve the CA trust anchors once (unless a caller set a file
+    // explicitly). Verifying TLS transports need anchors or they reject every
+    // cert. Prefer an on-disk PEM bundle (env override / system bundle); on
+    // Windows, which has no such file, fall back to the OS ROOT cert store
+    // loaded into an in-memory PEM buffer.
     if (m_caCertFile.empty()) m_caCertFile = detectCaCertFile();
-    if (m_caCertFile.empty()) {
-        spdlog::warn("SipEngine: no CA trust bundle found; default (verify-on) "
+#ifdef _WIN32
+    if (m_caCertFile.empty() && m_caCertBuf.empty()) {
+        m_caCertBuf = loadWindowsRootStorePem();
+    }
+#endif
+    if (!m_caCertFile.empty()) {
+        spdlog::info("SipEngine: TLS CA bundle: {}", m_caCertFile);
+    } else if (!m_caCertBuf.empty()) {
+        spdlog::info("SipEngine: TLS CA trust from in-memory bundle "
+                     "({} bytes)", m_caCertBuf.size());
+    } else {
+        spdlog::warn("SipEngine: no CA trust anchors found; default (verify-on) "
                      "TLS accounts will reject all server certs. Set "
                      "COMPACTPHONE_CA_FILE.");
-    } else {
-        spdlog::info("SipEngine: TLS CA bundle: {}", m_caCertFile);
     }
 
     try {
@@ -104,7 +175,7 @@ bool SipEngine::start(int sipPort)
         tlsCfg.tlsConfig.method = PJSIP_TLSV1_2_METHOD;
         tlsCfg.tlsConfig.verifyServer = true;
         tlsCfg.tlsConfig.verifyClient = false;
-        if (!m_caCertFile.empty()) tlsCfg.tlsConfig.CaListFile = m_caCertFile;
+        applyCaTrust(tlsCfg.tlsConfig);
         try {
             m_endpoint->transportCreate(PJSIP_TRANSPORT_TLS, tlsCfg);
         } catch (const pj::Error &e) {

@@ -1,5 +1,6 @@
 #include "ProvisioningController.h"
 
+#include "NoticeDuration.h"
 #include "provisioning/Provider.h"
 #include "provisioning/Registry.h"
 
@@ -24,7 +25,7 @@ ProvisioningController::ProvisioningController(AddAccountFn addAccount,
         });
         connect(p, &provisioning::Provider::provisioningFailed,
                 this, [this, id](const QString &error) {
-            if (m_noticeSink) m_noticeSink(tr("Sign-in failed: %1").arg(error), 5000);
+            if (m_noticeSink) m_noticeSink(tr("Sign-in failed: %1").arg(error), notice::kError);
             emit provisioningFailed(id, error);
         });
         connect(p, &provisioning::Provider::provisioningSucceeded,
@@ -32,11 +33,11 @@ ProvisioningController::ProvisioningController(AddAccountFn addAccount,
             const int newId = m_addAccount ? m_addAccount(params) : -1;
             if (newId < 0) {
                 const QString reason = tr("Could not save the new account.");
-                if (m_noticeSink) m_noticeSink(tr("Sign-in failed: %1").arg(reason), 5000);
+                if (m_noticeSink) m_noticeSink(tr("Sign-in failed: %1").arg(reason), notice::kError);
                 emit provisioningFailed(id, reason);
                 return;
             }
-            if (m_noticeSink) m_noticeSink(tr("Account added"), 4000);
+            if (m_noticeSink) m_noticeSink(tr("Account added"), notice::kDefault);
             emit accountProvisioned(id, newId);
         });
         connect(p, &provisioning::Provider::authMethodsDiscovered,
@@ -66,7 +67,7 @@ void ProvisioningController::provision(const QString &providerId,
     auto *p = m_registry->find(providerId);
     if (!p) {
         const QString msg = tr("Unknown provisioning provider: %1").arg(providerId);
-        if (m_noticeSink) m_noticeSink(msg, 5000);
+        if (m_noticeSink) m_noticeSink(msg, notice::kError);
         emit provisioningFailed(providerId, msg);
         return;
     }
@@ -81,7 +82,7 @@ void ProvisioningController::provisionWithToken(const QString &providerId,
     auto *p = m_registry->find(providerId);
     if (!p) {
         const QString msg = tr("Unknown provisioning provider: %1").arg(providerId);
-        if (m_noticeSink) m_noticeSink(msg, 5000);
+        if (m_noticeSink) m_noticeSink(msg, notice::kError);
         emit provisioningFailed(providerId, msg);
         return;
     }
