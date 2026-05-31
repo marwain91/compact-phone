@@ -51,22 +51,25 @@ TEST(DaktelaProviderTest, LoginUrlAppendsV6Path)
     EXPECT_EQ(url.toString(), "https://acme.daktela.com/api/v6/login.json");
 }
 
-TEST(DaktelaProviderTest, WhoamiUrlEncodesTokenAsQueryParam)
+TEST(DaktelaProviderTest, WhoamiUrlKeepsTokenOutOfQueryString)
 {
     const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
-    const auto url = DaktelaProvider::whoamiUrl(host, "abc123");
+    const auto url = DaktelaProvider::whoamiUrl(host);
     EXPECT_EQ(url.path(), "/api/v6/whoim.json");
+    // The token travels in the X-AUTH-TOKEN header, never the URL.
+    EXPECT_FALSE(url.hasQuery());
     QUrlQuery q(url);
-    EXPECT_EQ(q.queryItemValue("accessToken"), "abc123");
+    EXPECT_FALSE(q.hasQueryItem("accessToken"));
 }
 
-TEST(DaktelaProviderTest, SipDeviceUrlEmbedsExtensionInPath)
+TEST(DaktelaProviderTest, SipDeviceUrlEmbedsExtensionInPathWithoutToken)
 {
     const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
-    const auto url = DaktelaProvider::sipDeviceUrl(host, "1001", "tok");
+    const auto url = DaktelaProvider::sipDeviceUrl(host, "1001");
     EXPECT_EQ(url.path(), "/api/v6/extensions/sipdevices/1001.json");
+    EXPECT_FALSE(url.hasQuery());
     QUrlQuery q(url);
-    EXPECT_EQ(q.queryItemValue("accessToken"), "tok");
+    EXPECT_FALSE(q.hasQueryItem("accessToken"));
 }
 
 TEST(DaktelaProviderTest, UnwrapResultReturnsResultOnSuccess)

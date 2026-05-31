@@ -34,6 +34,23 @@ public:
     // not mentioned keep their default priority.
     void applyCodecPriority(const std::vector<std::string> &priorityOrder);
 
+    // --- Audio device management ---
+    // Owns all pjsua2 AudDevManager access so higher layers (e.g.
+    // SettingsController) don't reach into the endpoint directly. All methods
+    // are safe to call when the engine is stopped (return empty / -1 / false).
+    struct AudioDevice {
+        int id = -1;
+        std::string name;
+        int inputCount = 0;
+        int outputCount = 0;
+    };
+    std::vector<AudioDevice> audioDevices() const;
+    int captureDevice() const;
+    int playbackDevice() const;
+    bool setCaptureDevice(int id);
+    bool setPlaybackDevice(int id);
+    void refreshAudioDevices();
+
 private:
     bool m_running = false;
     std::unique_ptr<pj::Endpoint> m_endpoint;

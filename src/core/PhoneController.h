@@ -8,6 +8,8 @@
 #include <QUrl>
 #include <QtQmlIntegration>
 
+#include "SettingsController.h"
+
 #include <memory>
 
 namespace compactphone::persistence { class Database; }
@@ -55,6 +57,7 @@ namespace compactphone {
 class PhoneController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString callState READ callState NOTIFY callStateChanged)
+    Q_PROPERTY(compactphone::SettingsController *settings READ settingsController CONSTANT)
     Q_PROPERTY(QAbstractListModel *accounts READ accountsModel CONSTANT)
     Q_PROPERTY(QAbstractListModel *calls READ callsModel CONSTANT)
     Q_PROPERTY(int incomingCallId READ incomingCallId NOTIFY incomingCallChanged)
@@ -69,34 +72,13 @@ class PhoneController : public QObject {
     Q_PROPERTY(int unreadMessageCount READ unreadMessageCount NOTIFY unreadMessageCountChanged)
     Q_PROPERTY(QAbstractListModel *lines READ linesModel CONSTANT)
     Q_PROPERTY(QString dialerUri READ dialerUri WRITE setDialerUri NOTIFY dialerUriChanged)
-    Q_PROPERTY(QString logLevel READ logLevel WRITE setLogLevel NOTIFY logLevelChanged)
-    Q_PROPERTY(bool ringtoneEnabled READ ringtoneEnabled WRITE setRingtoneEnabled NOTIFY ringtoneEnabledChanged)
-    Q_PROPERTY(QString themeId READ themeId WRITE setThemeId NOTIFY themeIdChanged)
     Q_PROPERTY(int registeredAccountCount READ registeredAccountCount NOTIFY registeredAccountCountChanged)
     Q_PROPERTY(int activeAccountId READ activeAccountId WRITE setActiveAccountId NOTIFY activeAccountIdChanged)
     Q_PROPERTY(int newVoicemailCount READ newVoicemailCount NOTIFY voicemailStateChanged)
     Q_PROPERTY(QString activeVoicemailNumber READ activeVoicemailNumber NOTIFY voicemailStateChanged)
-    Q_PROPERTY(QVariantList audioInputs READ audioInputs NOTIFY audioDevicesChanged)
-    Q_PROPERTY(QVariantList audioOutputs READ audioOutputs NOTIFY audioDevicesChanged)
-    Q_PROPERTY(int captureDeviceId READ captureDeviceId WRITE setCaptureDeviceId NOTIFY captureDeviceIdChanged)
-    Q_PROPERTY(int playbackDeviceId READ playbackDeviceId WRITE setPlaybackDeviceId NOTIFY playbackDeviceIdChanged)
-    Q_PROPERTY(QString ringtonePath READ ringtonePath WRITE setRingtonePath NOTIFY ringtonePathChanged)
-    Q_PROPERTY(QString defaultRingtonePath READ defaultRingtonePath CONSTANT)
-    Q_PROPERTY(bool dndEnabled READ dndEnabled WRITE setDndEnabled NOTIFY dndEnabledChanged)
-    Q_PROPERTY(bool autoAnswerEnabled READ autoAnswerEnabled WRITE setAutoAnswerEnabled NOTIFY autoAnswerEnabledChanged)
-    Q_PROPERTY(int autoAnswerDelayMs READ autoAnswerDelayMs WRITE setAutoAnswerDelayMs NOTIFY autoAnswerDelayMsChanged)
-    Q_PROPERTY(bool cfwdAlwaysEnabled READ cfwdAlwaysEnabled WRITE setCfwdAlwaysEnabled NOTIFY cfwdAlwaysEnabledChanged)
-    Q_PROPERTY(QString cfwdAlwaysTarget READ cfwdAlwaysTarget WRITE setCfwdAlwaysTarget NOTIFY cfwdAlwaysTargetChanged)
-    Q_PROPERTY(bool cfwdBusyEnabled READ cfwdBusyEnabled WRITE setCfwdBusyEnabled NOTIFY cfwdBusyEnabledChanged)
-    Q_PROPERTY(QString cfwdBusyTarget READ cfwdBusyTarget WRITE setCfwdBusyTarget NOTIFY cfwdBusyTargetChanged)
-    Q_PROPERTY(bool cfwdNoAnswerEnabled READ cfwdNoAnswerEnabled WRITE setCfwdNoAnswerEnabled NOTIFY cfwdNoAnswerEnabledChanged)
-    Q_PROPERTY(QString cfwdNoAnswerTarget READ cfwdNoAnswerTarget WRITE setCfwdNoAnswerTarget NOTIFY cfwdNoAnswerTargetChanged)
-    Q_PROPERTY(int cfwdNoAnswerTimeoutMs READ cfwdNoAnswerTimeoutMs WRITE setCfwdNoAnswerTimeoutMs NOTIFY cfwdNoAnswerTimeoutMsChanged)
-    Q_PROPERTY(bool autoRecordEnabled READ autoRecordEnabled WRITE setAutoRecordEnabled NOTIFY autoRecordEnabledChanged)
-    Q_PROPERTY(bool enterpriseFeaturesEnabled READ enterpriseFeaturesEnabled WRITE setEnterpriseFeaturesEnabled NOTIFY enterpriseFeaturesEnabledChanged)
-    Q_PROPERTY(bool crashReportingEnabled READ crashReportingEnabled WRITE setCrashReportingEnabled NOTIFY crashReportingEnabledChanged)
+    // Settings live on the SettingsController, reachable from QML as
+    // PhoneController.settings.<x> — PhoneController no longer re-exports them.
     Q_PROPERTY(bool crashReportingAvailable READ crashReportingAvailable CONSTANT)
-    Q_PROPERTY(bool alwaysOnTop READ alwaysOnTop WRITE setAlwaysOnTop NOTIFY alwaysOnTopChanged)
     QML_ELEMENT
     QML_SINGLETON
 public:
@@ -104,6 +86,7 @@ public:
     ~PhoneController() override;
 
     QString callState() const;
+    SettingsController *settingsController() const;
     QAbstractListModel *accountsModel() const;
     QAbstractListModel *callsModel() const;
 
@@ -138,15 +121,7 @@ public:
     Q_INVOKABLE bool stopRecording(int callId);
     Q_INVOKABLE bool isRecording(int callId) const;
 
-    bool autoRecordEnabled() const;
-    void setAutoRecordEnabled(bool enabled);
-    bool enterpriseFeaturesEnabled() const;
-    void setEnterpriseFeaturesEnabled(bool enabled);
-    bool crashReportingEnabled() const;
-    void setCrashReportingEnabled(bool enabled);
     bool crashReportingAvailable() const;
-    bool alwaysOnTop() const;
-    void setAlwaysOnTop(bool enabled);
 
     // Returns the first held confirmed call other than excludeCallId, or
     // -1 if none — used by the UI to enable the Merge button.
@@ -216,12 +191,6 @@ public:
     Q_INVOKABLE void dialContact(int contactId);
     Q_INVOKABLE void redialFromHistory(int historyId);
 
-    QString logLevel() const;
-    void setLogLevel(const QString &lvl);
-    bool ringtoneEnabled() const;
-    void setRingtoneEnabled(bool enabled);
-    QString themeId() const;
-    void setThemeId(const QString &id);
     int registeredAccountCount() const;
     int activeAccountId() const;
     void setActiveAccountId(int id);
@@ -230,41 +199,7 @@ public:
     QString activeVoicemailNumber() const;
     Q_INVOKABLE void dialVoicemail();
 
-    QVariantList audioInputs() const;
-    QVariantList audioOutputs() const;
-    int captureDeviceId() const;
-    int playbackDeviceId() const;
-    void setCaptureDeviceId(int id);
-    void setPlaybackDeviceId(int id);
-    Q_INVOKABLE void refreshAudioDevices();
-    Q_INVOKABLE void testRingtone(int durationMs = 2000);
     Q_INVOKABLE void requestQuit();
-
-    QString ringtonePath() const;
-    void setRingtonePath(const QString &p);
-    QString defaultRingtonePath() const;
-
-    bool dndEnabled() const;
-    void setDndEnabled(bool enabled);
-    bool autoAnswerEnabled() const;
-    void setAutoAnswerEnabled(bool enabled);
-    int autoAnswerDelayMs() const;
-    void setAutoAnswerDelayMs(int ms);
-
-    bool cfwdAlwaysEnabled() const;
-    void setCfwdAlwaysEnabled(bool enabled);
-    QString cfwdAlwaysTarget() const;
-    void setCfwdAlwaysTarget(const QString &uri);
-    bool cfwdBusyEnabled() const;
-    void setCfwdBusyEnabled(bool enabled);
-    QString cfwdBusyTarget() const;
-    void setCfwdBusyTarget(const QString &uri);
-    bool cfwdNoAnswerEnabled() const;
-    void setCfwdNoAnswerEnabled(bool enabled);
-    QString cfwdNoAnswerTarget() const;
-    void setCfwdNoAnswerTarget(const QString &uri);
-    int cfwdNoAnswerTimeoutMs() const;
-    void setCfwdNoAnswerTimeoutMs(int ms);
 
 signals:
     void callStateChanged();
@@ -272,30 +207,9 @@ signals:
     void noticeChanged();
     void latestUpdateChanged();
     void dialerUriChanged();
-    void logLevelChanged();
-    void ringtoneEnabledChanged();
-    void themeIdChanged();
     void registeredAccountCountChanged();
     void activeAccountIdChanged();
     void voicemailStateChanged();
-    void audioDevicesChanged();
-    void captureDeviceIdChanged();
-    void playbackDeviceIdChanged();
-    void ringtonePathChanged();
-    void dndEnabledChanged();
-    void autoAnswerEnabledChanged();
-    void autoAnswerDelayMsChanged();
-    void cfwdAlwaysEnabledChanged();
-    void cfwdAlwaysTargetChanged();
-    void cfwdBusyEnabledChanged();
-    void cfwdBusyTargetChanged();
-    void cfwdNoAnswerEnabledChanged();
-    void cfwdNoAnswerTargetChanged();
-    void cfwdNoAnswerTimeoutMsChanged();
-    void autoRecordEnabledChanged();
-    void enterpriseFeaturesEnabledChanged();
-    void crashReportingEnabledChanged();
-    void alwaysOnTopChanged();
     void unreadMessageCountChanged();
 
     // Tray-initiated requests bubbled up to QML.

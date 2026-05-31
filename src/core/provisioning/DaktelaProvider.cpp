@@ -94,26 +94,22 @@ QUrl DaktelaProvider::loginUrl(const QUrl &host)
     return u;
 }
 
-QUrl DaktelaProvider::whoamiUrl(const QUrl &host, const QString &accessToken)
+// The access token is sent via the X-AUTH-TOKEN request header, never in the
+// URL query string — query-string secrets leak into server access logs and
+// proxies. See onTokenIssued / fetchSipDevice where the header is set.
+QUrl DaktelaProvider::whoamiUrl(const QUrl &host)
 {
     QUrl u = host;
     u.setPath(host.path() + QStringLiteral("/api/v6/whoim.json"));
-    QUrlQuery q;
-    q.addQueryItem(QStringLiteral("accessToken"), accessToken);
-    u.setQuery(q);
     return u;
 }
 
 QUrl DaktelaProvider::sipDeviceUrl(const QUrl &host,
-                                   const QString &extensionName,
-                                   const QString &accessToken)
+                                   const QString &extensionName)
 {
     QUrl u = host;
     u.setPath(host.path() + QStringLiteral("/api/v6/extensions/sipdevices/")
               + extensionName + QStringLiteral(".json"));
-    QUrlQuery q;
-    q.addQueryItem(QStringLiteral("accessToken"), accessToken);
-    u.setQuery(q);
     return u;
 }
 
@@ -203,6 +199,7 @@ QVariantMap DaktelaProvider::buildAccountParams(const QUrl &host,
     const auto title = obj.value(QStringLiteral("title")).toString();
 
     QVariantMap p;
+    p[QStringLiteral("provider")] = QStringLiteral("daktela");
     p[QStringLiteral("label")] = QObject::tr("Daktela — %1").arg(host.host());
     p[QStringLiteral("displayName")] = title.isEmpty() ? displayName : title;
     p[QStringLiteral("username")] = name;
@@ -383,7 +380,7 @@ void DaktelaProvider::onLoginReply(QNetworkReply *r)
 void DaktelaProvider::startWhoamiFetch()
 {
     emit progress(QStringLiteral("fetching-user"));
-    QNetworkRequest req(whoamiUrl(m_host, m_accessToken));
+    QNetworkRequest req(whoamiUrl(m_host));
     req.setRawHeader("X-AUTH-TOKEN", m_accessToken.toUtf8());
     req.setTransferTimeout(kHttpTimeoutMs);
     auto *next = m_nam->get(req);
@@ -423,7 +420,7 @@ void DaktelaProvider::onWhoamiReply(QNetworkReply *r)
 
     emit progress(QStringLiteral("fetching-extension"));
 
-    QNetworkRequest req(sipDeviceUrl(m_host, m_extensionName, m_accessToken));
+    QNetworkRequest req(sipDeviceUrl(m_host, m_extensionName));
     req.setRawHeader("X-AUTH-TOKEN", m_accessToken.toUtf8());
     req.setTransferTimeout(kHttpTimeoutMs);
     auto *next = m_nam->get(req);

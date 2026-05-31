@@ -25,6 +25,7 @@ public:
         RegistrationStateRole,
         RegistrationErrorRole,
         LabelRole,
+        ProviderRole,
     };
 
     explicit AccountsModel(sip::AccountsManager *mgr, QObject *parent = nullptr);

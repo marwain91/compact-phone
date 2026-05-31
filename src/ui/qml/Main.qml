@@ -18,10 +18,10 @@ ApplicationWindow {
     property bool ringingLift: PhoneController.incomingCallId >= 0
     flags: (Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint
             | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
-           | ((PhoneController.alwaysOnTop || ringingLift)
+           | ((PhoneController.settings.alwaysOnTop || ringingLift)
               ? Qt.WindowStaysOnTopHint : 0)
     Component.onCompleted: {
-        Theme.setTheme(PhoneController.themeId)
+        Theme.setTheme(PhoneController.settings.themeId)
         window.width = 380
         window.height = 500
     }
@@ -57,9 +57,6 @@ ApplicationWindow {
 
     Connections {
         target: PhoneController
-        function onThemeIdChanged() {
-            Theme.setTheme(PhoneController.themeId)
-        }
         function onTrayShowRequested() {
             window.show()
             window.raise()
@@ -68,11 +65,18 @@ ApplicationWindow {
         function onTrayHideRequested() {
             window.hide()
         }
+    }
+
+    Connections {
+        target: PhoneController.settings
+        function onThemeIdChanged() {
+            Theme.setTheme(PhoneController.settings.themeId)
+        }
         function onEnterpriseFeaturesEnabledChanged() {
             // Messages (idx 2) and Lines (idx 4) live behind the toggle.
             // If the user turns it off while viewing either, snap back to
             // the dialer so they don't end up stuck on a hidden tab.
-            if (!PhoneController.enterpriseFeaturesEnabled
+            if (!PhoneController.settings.enterpriseFeaturesEnabled
                 && (stack.currentIndex === 2 || stack.currentIndex === 4)) {
                 stack.currentIndex = 0
             }
@@ -173,7 +177,7 @@ ApplicationWindow {
                     }
                     NavItem {
                         Layout.alignment: Qt.AlignHCenter
-                        visible: PhoneController.enterpriseFeaturesEnabled
+                        visible: PhoneController.settings.enterpriseFeaturesEnabled
                         iconPath: Icons.chat
                         label: qsTr("Messages")
                         active: stack.currentIndex === 2
@@ -188,7 +192,7 @@ ApplicationWindow {
                     }
                     NavItem {
                         Layout.alignment: Qt.AlignHCenter
-                        visible: PhoneController.enterpriseFeaturesEnabled
+                        visible: PhoneController.settings.enterpriseFeaturesEnabled
                         iconPath: Icons.idCard
                         label: qsTr("Lines")
                         active: stack.currentIndex === 4
@@ -327,7 +331,7 @@ ApplicationWindow {
     }
     Shortcut {
         sequence: "Ctrl+Shift+D"
-        onActivated: PhoneController.dndEnabled = !PhoneController.dndEnabled
+        onActivated: PhoneController.settings.dndEnabled = !PhoneController.settings.dndEnabled
     }
     Shortcut {
         sequence: "Ctrl+Shift+R"

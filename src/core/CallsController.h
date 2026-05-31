@@ -87,6 +87,7 @@ private:
 
     void refreshCallsModel();
     void publishRingingState();
+    void publishRingingState(bool ringing);
     void postNotice(const QString &text, int autoDismissMs = 4000);
 };
 

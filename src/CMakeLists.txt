@@ -30,7 +30,10 @@ add_library(compactphone_core STATIC
     core/AccountsManager.h
     core/AccountsManager.cpp
     core/BootConfig.h
-    core/BootConfig.cpp
+    core/BootConfig_internal.h
+    core/BootConfig_parser.cpp
+    core/BootConfig_file.cpp
+    core/BootConfig_secrets.cpp
     core/provisioning/Provider.h
     core/provisioning/Registry.h
     core/provisioning/Registry.cpp
@@ -46,6 +49,9 @@ add_library(compactphone_core STATIC
     core/ContactImporter.cpp
     core/CallManager.h
     core/CallManager.cpp
+    core/CallRecorder.h
+    core/CallRecorder.cpp
+    core/TransferTracker.h
     core/RingtonePlayer.h
     core/RingtonePlayer.cpp
     core/platform/Keychain.h
@@ -244,6 +250,10 @@ qt_add_qml_module(compactphone
         ui/qml/MessagesPane.qml
         ui/qml/LinesPane.qml
         ui/qml/SettingsPane.qml
+        ui/qml/GeneralSettings.qml
+        ui/qml/AudioSettings.qml
+        ui/qml/CallsSettings.qml
+        ui/qml/AdvancedSettings.qml
         ui/qml/LogViewerDialog.qml
         ui/qml/components/AppIcon.qml
         ui/qml/components/AppButton.qml

@@ -25,14 +25,26 @@ constexpr const char *kDefaultFeed =
     "https://github.com/marwain91/compact-phone/releases/latest/download/appcast-linux.xml";
 #endif
 
-bool isUsableHttpUrl(const QUrl &url)
+// HTTPS only — never accept a cleartext http:// feed or download. The
+// appcast is not signature-verified, so transport security is the only thing
+// standing between the user and an attacker-supplied installer.
+bool isHttpsUrl(const QUrl &url)
 {
-    const QString scheme = url.scheme().toLower();
     return url.isValid()
         && !url.isEmpty()
         && !url.host().isEmpty()
-        && (scheme == QLatin1String("https")
-            || scheme == QLatin1String("http"));
+        && url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) == 0;
+}
+
+// Pin the download (enclosure) host to GitHub's release infrastructure. Even
+// if a feed is somehow tampered with or overridden, the download URL it
+// advertises cannot point the user at an arbitrary host.
+bool isTrustedDownloadHost(const QUrl &url)
+{
+    const QString host = url.host().toLower();
+    return host == QLatin1String("github.com")
+        || host.endsWith(QLatin1String(".github.com"))
+        || host.endsWith(QLatin1String(".githubusercontent.com"));
 }
 }
 
@@ -64,8 +76,8 @@ void UpdateChecker::check()
         return;
     }
     QUrl url(m_feedUrl, QUrl::StrictMode);
-    if (!isUsableHttpUrl(url)) {
-        spdlog::warn("UpdateChecker: invalid feed URL: {}",
+    if (!isHttpsUrl(url)) {
+        spdlog::warn("UpdateChecker: invalid feed URL (https required): {}",
                      m_feedUrl.toStdString());
         emit checkFailed(QStringLiteral("invalid update feed URL"));
         return;
@@ -112,7 +124,9 @@ UpdateChecker::ParsedFeed UpdateChecker::parseAppcast(const QByteArray &xml)
             : attrs.value("sparkle:version").toString();
         const QString url = attrs.value("url").toString();
         const QUrl downloadUrl(url, QUrl::StrictMode);
-        if (version.isEmpty() || !isUsableHttpUrl(downloadUrl)) continue;
+        if (version.isEmpty()
+            || !isHttpsUrl(downloadUrl)
+            || !isTrustedDownloadHost(downloadUrl)) continue;
 
         if (best.version.isEmpty()
             || compareVersions(best.version, version) < 0) {

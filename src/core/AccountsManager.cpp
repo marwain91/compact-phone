@@ -172,7 +172,7 @@ void AccountsManager::loadFromDatabase()
         "public_address, codecs, voicemail_number, "
         "register_interval_sec, keepalive_interval_sec, "
         "session_timers_enabled, publish_presence_enabled, "
-        "ice_enabled, hide_caller_id, zrtp_enabled "
+        "ice_enabled, hide_caller_id, zrtp_enabled, provider "
         "FROM accounts ORDER BY sort_order, id";
     if (sqlite3_prepare_v2(m_db->handle(), sql, -1, &stmt, nullptr) != SQLITE_OK) {
         spdlog::error("loadFromDatabase prepare failed: {}",
@@ -215,6 +215,7 @@ void AccountsManager::loadFromDatabase()
         a.iceEnabled            = sqlite3_column_int(stmt, 25) != 0;
         a.hideCallerId          = sqlite3_column_int(stmt, 26) != 0;
         a.zrtpEnabled           = sqlite3_column_int(stmt, 27) != 0;
+        a.provider              = readText(stmt, 28);
         m_entries.push_back(std::move(entry));
     }
     sqlite3_finalize(stmt);
@@ -250,8 +251,8 @@ bool AccountsManager::insertRow(Account &acc)
         "voicemail_number, register_on_startup, register_interval_sec, "
         "keepalive_interval_sec, session_timers_enabled, publish_presence_enabled, "
         "ice_enabled, hide_caller_id, zrtp_enabled, srtp_mode, allow_untrusted_cert, "
-        "dtmf_method, is_default, enabled, sort_order) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        "dtmf_method, is_default, enabled, sort_order, provider) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(), sql, -1, &stmt, nullptr) != SQLITE_OK) {
         spdlog::error("insertRow prepare: {}", sqlite3_errmsg(m_db->handle()));
@@ -284,6 +285,7 @@ bool AccountsManager::insertRow(Account &acc)
     sqlite3_bind_int(stmt, 25, acc.isDefault ? 1 : 0);
     sqlite3_bind_int(stmt, 26, acc.enabled ? 1 : 0);
     sqlite3_bind_int(stmt, 27, acc.sortOrder);
+    bindText(stmt, 28, acc.provider);
     const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
     if (!ok) {
         spdlog::error("insertRow step: {}", sqlite3_errmsg(m_db->handle()));
@@ -339,7 +341,7 @@ bool AccountsManager::update(const Account &acc)
         "session_timers_enabled = ?, publish_presence_enabled = ?, "
         "ice_enabled = ?, hide_caller_id = ?, zrtp_enabled = ?, "
         "srtp_mode = ?, allow_untrusted_cert = ?, dtmf_method = ?, "
-        "enabled = ?, sort_order = ? WHERE id = ?";
+        "enabled = ?, sort_order = ?, provider = ? WHERE id = ?";
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(), sql, -1, &stmt, nullptr) != SQLITE_OK) {
         spdlog::error("update prepare: {}", sqlite3_errmsg(m_db->handle()));
@@ -370,7 +372,8 @@ bool AccountsManager::update(const Account &acc)
     sqlite3_bind_text(stmt, 23, dtmfMethodToString(acc.dtmfMethod), -1, SQLITE_STATIC);
     sqlite3_bind_int(stmt, 24, acc.enabled ? 1 : 0);
     sqlite3_bind_int(stmt, 25, acc.sortOrder);
-    sqlite3_bind_int(stmt, 26, acc.id);
+    bindText(stmt, 26, acc.provider);
+    sqlite3_bind_int(stmt, 27, acc.id);
 
     const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
     sqlite3_finalize(stmt);

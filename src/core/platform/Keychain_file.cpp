@@ -26,7 +26,6 @@ constexpr int kIvSize = 12;       // GCM standard nonce size
 constexpr int kTagSize = 16;      // GCM auth tag size
 constexpr int kKeySize = 32;      // 256 bits
 constexpr const char *kKdfInfo = "CompactPhone:v0.2:keychain";
-constexpr const char *kMasterSecret = "compactphone-v0.2-master";
 
 // Uses OpenSSL 3.x's EVP_KDF HKDF interface rather than the legacy
 // EVP_PKEY_HKDF / EVP_PKEY_derive path. The legacy path crashes inside
@@ -35,8 +34,11 @@ constexpr const char *kMasterSecret = "compactphone-v0.2-master";
 // fully initialised). EVP_KDF was added specifically for KDFs in 3.x
 // and doesn't traverse that code path. Same crypto output — HKDF-SHA256
 // with the same salt / IKM / info — only the API differs.
-bool deriveKey(const std::string &salt, std::array<uint8_t, kKeySize> &outKey)
+bool deriveKey(const std::string &salt,
+               const std::string &ikm,
+               std::array<uint8_t, kKeySize> &outKey)
 {
+    if (ikm.empty()) return false;
     EVP_KDF *kdf = EVP_KDF_fetch(nullptr, "HKDF", nullptr);
     if (!kdf) return false;
     EVP_KDF_CTX *kctx = EVP_KDF_CTX_new(kdf);
@@ -50,7 +52,7 @@ bool deriveKey(const std::string &salt, std::array<uint8_t, kKeySize> &outKey)
     *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT,
             const_cast<char *>(salt.data()), salt.size());
     *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_KEY,
-            const_cast<char *>(kMasterSecret), std::strlen(kMasterSecret));
+            const_cast<char *>(ikm.data()), ikm.size());
     *p++ = OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_INFO,
             const_cast<char *>(kKdfInfo), std::strlen(kKdfInfo));
     *p = OSSL_PARAM_construct_end();
@@ -136,11 +138,47 @@ bool decrypt(const std::array<uint8_t, kKeySize> &key,
 
 FileKeychain::FileKeychain(const std::string &path) : m_path(path) {}
 
+bool FileKeychain::loadOrCreateMasterKey()
+{
+    const QString keyPath = QString::fromStdString(m_path) + QStringLiteral(".key");
+    QFile kf(keyPath);
+    if (kf.exists()) {
+        if (!kf.open(QIODevice::ReadOnly)) {
+            spdlog::error("FileKeychain: master key read failed");
+            return false;
+        }
+        const auto raw = kf.readAll();
+        if (raw.size() != kKeySize) {
+            spdlog::error("FileKeychain: master key file has wrong size");
+            return false;
+        }
+        m_masterKey.assign(raw.constData(), raw.size());
+        return true;
+    }
+
+    // First run: mint a random per-install key and store it owner-only.
+    std::array<uint8_t, kKeySize> key{};
+    if (RAND_bytes(key.data(), kKeySize) != 1) return false;
+    if (!kf.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        spdlog::error("FileKeychain: master key write failed");
+        return false;
+    }
+    // Restrict to owner-only BEFORE writing the secret, so the key bytes are
+    // never momentarily readable under the process umask.
+    kf.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    kf.write(reinterpret_cast<const char *>(key.data()), kKeySize);
+    kf.close();
+    m_masterKey.assign(reinterpret_cast<const char *>(key.data()), kKeySize);
+    return true;
+}
+
 bool FileKeychain::open()
 {
     const QString qpath = QString::fromStdString(m_path);
     QFileInfo info(qpath);
     QDir().mkpath(info.absolutePath());
+
+    if (!loadOrCreateMasterKey()) return false;
 
     QFile f(qpath);
     if (!f.exists()) {
@@ -159,7 +197,7 @@ bool FileKeychain::open()
     const QByteArray ct = blob.mid(kSaltSize + kIvSize);
 
     std::array<uint8_t, kKeySize> key{};
-    if (!deriveKey(m_salt, key)) return false;
+    if (!deriveKey(m_salt, m_masterKey, key)) return false;
 
     QByteArray plain;
     if (!decrypt(key, ct, iv, plain)) return false;
@@ -205,13 +243,15 @@ bool FileKeychain::persist()
     RAND_bytes(reinterpret_cast<uint8_t *>(iv.data()), kIvSize);
 
     std::array<uint8_t, kKeySize> key{};
-    if (!deriveKey(m_salt, key)) return false;
+    if (!deriveKey(m_salt, m_masterKey, key)) return false;
 
     const auto ct = encrypt(key, plain, iv);
     if (ct.isEmpty()) return false;
 
     QFile f(QString::fromStdString(m_path));
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    // Restrict to owner-only on the empty file, before writing ciphertext.
+    f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     f.write(m_salt.data(), static_cast<int>(m_salt.size()));
     f.write(iv);
     f.write(ct);

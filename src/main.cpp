@@ -39,7 +39,7 @@ void applyBootConfig(const compactphone::BootConfig &cfg,
 {
     using compactphone::models::AccountsModel;
 
-    if (cfg.logLevel) controller.setLogLevel(*cfg.logLevel);
+    if (cfg.logLevel) controller.settingsController()->setLogLevel(*cfg.logLevel);
 
     for (const auto &a : cfg.accounts) {
         int existingId = -1;
@@ -77,9 +77,9 @@ void applyBootConfig(const compactphone::BootConfig &cfg,
         }
     }
 
-    if (cfg.autoAnswer) controller.setAutoAnswerEnabled(*cfg.autoAnswer);
-    if (cfg.dnd)        controller.setDndEnabled(*cfg.dnd);
-    if (cfg.theme)      controller.setThemeId(*cfg.theme);
+    if (cfg.autoAnswer) controller.settingsController()->setAutoAnswerEnabled(*cfg.autoAnswer);
+    if (cfg.dnd)        controller.settingsController()->setDndEnabled(*cfg.dnd);
+    if (cfg.theme)      controller.settingsController()->setThemeId(*cfg.theme);
 }
 
 bool addLogFileSink(const QString &path)
@@ -188,7 +188,8 @@ int main(int argc, char *argv[])
     // Crash reporting is only available when the release build embeds a
     // usable DSN, and it remains gated by the user's Settings opt-in.
     if (pc) {
-        compactphone::crash::initConfiguredSentry(pc->crashReportingEnabled());
+        compactphone::crash::initConfiguredSentry(
+            pc->settingsController()->crashReportingEnabled());
     }
 
     const int rc = app.exec();

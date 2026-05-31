@@ -1,5 +1,6 @@
 #include "SettingsController.h"
 
+#include "CrashReporting.h"
 #include "RingtonePlayer.h"
 #include "SettingsManager.h"
 #include "SipEngine.h"
@@ -9,7 +10,6 @@
 #include <QUrl>
 #include <QVariantMap>
 
-#include <pjsua2.hpp>
 #include <spdlog/spdlog.h>
 
 #include <string>
@@ -75,14 +75,18 @@ SettingsController::SettingsController(sip::SipEngine *engine,
     }
     m_ringtone = std::make_unique<sip::RingtonePlayer>(storedRing);
 
-    try {
-        if (!m_engine || !m_engine->endpoint() || !m_settings) return;
-        auto &mgr = m_engine->endpoint()->audDevManager();
+    if (m_engine && m_settings) {
         const auto capStr = m_settings->getOr("capture_device_id", "");
-        if (!capStr.empty()) mgr.setCaptureDev(std::stoi(capStr));
+        if (!capStr.empty()) {
+            try { m_engine->setCaptureDevice(std::stoi(capStr)); }
+            catch (...) { spdlog::warn("SettingsController: bad stored capture_device_id"); }
+        }
         const auto pbStr = m_settings->getOr("playback_device_id", "");
-        if (!pbStr.empty()) mgr.setPlaybackDev(std::stoi(pbStr));
-    } catch (...) {}
+        if (!pbStr.empty()) {
+            try { m_engine->setPlaybackDevice(std::stoi(pbStr)); }
+            catch (...) { spdlog::warn("SettingsController: bad stored playback_device_id"); }
+        }
+    }
 }
 
 SettingsController::~SettingsController() = default;
@@ -234,6 +238,9 @@ void SettingsController::setCrashReportingEnabled(bool enabled)
     m_crashReportingEnabled = enabled;
     if (m_settings) m_settings->set("crash_reporting_enabled",
                                     enabled ? "1" : "0");
+    // Bring Sentry up immediately when the user opts in at runtime (no-op if
+    // the build wasn't configured with a DSN).
+    if (enabled) crash::initConfiguredSentry(true);
     emit crashReportingEnabledChanged();
 }
 
@@ -248,82 +255,58 @@ void SettingsController::setAlwaysOnTop(bool enabled)
 QVariantList SettingsController::audioInputs() const
 {
     QVariantList out;
-    if (!m_engine || !m_engine->endpoint()) return out;
-    try {
-        auto &mgr = m_engine->endpoint()->audDevManager();
-        const auto devs = mgr.enumDev2();
-        for (size_t i = 0; i < devs.size(); ++i) {
-            if (devs[i].inputCount <= 0) continue;
-            QVariantMap m;
-            m["id"] = static_cast<int>(i);
-            m["name"] = QString::fromStdString(devs[i].name);
-            out.append(m);
-        }
-    } catch (...) {}
+    if (!m_engine) return out;
+    for (const auto &d : m_engine->audioDevices()) {
+        if (d.inputCount <= 0) continue;
+        QVariantMap m;
+        m["id"] = d.id;
+        m["name"] = QString::fromStdString(d.name);
+        out.append(m);
+    }
     return out;
 }
 
 QVariantList SettingsController::audioOutputs() const
 {
     QVariantList out;
-    if (!m_engine || !m_engine->endpoint()) return out;
-    try {
-        auto &mgr = m_engine->endpoint()->audDevManager();
-        const auto devs = mgr.enumDev2();
-        for (size_t i = 0; i < devs.size(); ++i) {
-            if (devs[i].outputCount <= 0) continue;
-            QVariantMap m;
-            m["id"] = static_cast<int>(i);
-            m["name"] = QString::fromStdString(devs[i].name);
-            out.append(m);
-        }
-    } catch (...) {}
+    if (!m_engine) return out;
+    for (const auto &d : m_engine->audioDevices()) {
+        if (d.outputCount <= 0) continue;
+        QVariantMap m;
+        m["id"] = d.id;
+        m["name"] = QString::fromStdString(d.name);
+        out.append(m);
+    }
     return out;
 }
 
 int SettingsController::captureDeviceId() const
 {
-    if (!m_engine || !m_engine->endpoint()) return -1;
-    try { return m_engine->endpoint()->audDevManager().getCaptureDev(); }
-    catch (...) { return -1; }
+    return m_engine ? m_engine->captureDevice() : -1;
 }
 
 int SettingsController::playbackDeviceId() const
 {
-    if (!m_engine || !m_engine->endpoint()) return -1;
-    try { return m_engine->endpoint()->audDevManager().getPlaybackDev(); }
-    catch (...) { return -1; }
+    return m_engine ? m_engine->playbackDevice() : -1;
 }
 
 void SettingsController::setCaptureDeviceId(int id)
 {
-    if (!m_engine || !m_engine->endpoint()) return;
-    try {
-        m_engine->endpoint()->audDevManager().setCaptureDev(id);
-        if (m_settings) m_settings->set("capture_device_id", std::to_string(id));
-        emit captureDeviceIdChanged();
-    } catch (const pj::Error &e) {
-        spdlog::error("setCaptureDeviceId: {}", e.info());
-    }
+    if (!m_engine || !m_engine->setCaptureDevice(id)) return;
+    if (m_settings) m_settings->set("capture_device_id", std::to_string(id));
+    emit captureDeviceIdChanged();
 }
 
 void SettingsController::setPlaybackDeviceId(int id)
 {
-    if (!m_engine || !m_engine->endpoint()) return;
-    try {
-        m_engine->endpoint()->audDevManager().setPlaybackDev(id);
-        if (m_settings) m_settings->set("playback_device_id", std::to_string(id));
-        emit playbackDeviceIdChanged();
-    } catch (const pj::Error &e) {
-        spdlog::error("setPlaybackDeviceId: {}", e.info());
-    }
+    if (!m_engine || !m_engine->setPlaybackDevice(id)) return;
+    if (m_settings) m_settings->set("playback_device_id", std::to_string(id));
+    emit playbackDeviceIdChanged();
 }
 
 void SettingsController::refreshAudioDevices()
 {
-    if (!m_engine || !m_engine->endpoint()) return;
-    try { m_engine->endpoint()->audDevManager().refreshDevs(); }
-    catch (...) {}
+    if (m_engine) m_engine->refreshAudioDevices();
     emit audioDevicesChanged();
     emit captureDeviceIdChanged();
     emit playbackDeviceIdChanged();

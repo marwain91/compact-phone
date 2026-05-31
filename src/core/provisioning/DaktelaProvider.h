@@ -49,10 +49,8 @@ public:
 
     static QUrl normalizeHost(const QString &raw);
     static QUrl loginUrl(const QUrl &host);
-    static QUrl whoamiUrl(const QUrl &host, const QString &accessToken);
-    static QUrl sipDeviceUrl(const QUrl &host,
-                             const QString &extensionName,
-                             const QString &accessToken);
+    static QUrl whoamiUrl(const QUrl &host);
+    static QUrl sipDeviceUrl(const QUrl &host, const QString &extensionName);
     static QUrl globalSettingsUrl(const QUrl &host);
 
     static QJsonValue unwrapResult(const QByteArray &body, QString *err);

@@ -165,49 +165,8 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
             this, &PhoneController::incomingCallChanged);
     connect(m_callsController.get(), &CallsController::ringingChanged,
             m_settingsController.get(), &SettingsController::setRinging);
-
-    connect(m_settingsController.get(), &SettingsController::logLevelChanged,
-            this, &PhoneController::logLevelChanged);
-    connect(m_settingsController.get(), &SettingsController::ringtoneEnabledChanged,
-            this, &PhoneController::ringtoneEnabledChanged);
-    connect(m_settingsController.get(), &SettingsController::themeIdChanged,
-            this, &PhoneController::themeIdChanged);
-    connect(m_settingsController.get(), &SettingsController::audioDevicesChanged,
-            this, &PhoneController::audioDevicesChanged);
-    connect(m_settingsController.get(), &SettingsController::captureDeviceIdChanged,
-            this, &PhoneController::captureDeviceIdChanged);
-    connect(m_settingsController.get(), &SettingsController::playbackDeviceIdChanged,
-            this, &PhoneController::playbackDeviceIdChanged);
-    connect(m_settingsController.get(), &SettingsController::ringtonePathChanged,
-            this, &PhoneController::ringtonePathChanged);
-    connect(m_settingsController.get(), &SettingsController::dndEnabledChanged,
-            this, &PhoneController::dndEnabledChanged);
-    connect(m_settingsController.get(), &SettingsController::autoAnswerEnabledChanged,
-            this, &PhoneController::autoAnswerEnabledChanged);
-    connect(m_settingsController.get(), &SettingsController::autoAnswerDelayMsChanged,
-            this, &PhoneController::autoAnswerDelayMsChanged);
-    connect(m_settingsController.get(), &SettingsController::cfwdAlwaysEnabledChanged,
-            this, &PhoneController::cfwdAlwaysEnabledChanged);
-    connect(m_settingsController.get(), &SettingsController::cfwdAlwaysTargetChanged,
-            this, &PhoneController::cfwdAlwaysTargetChanged);
-    connect(m_settingsController.get(), &SettingsController::cfwdBusyEnabledChanged,
-            this, &PhoneController::cfwdBusyEnabledChanged);
-    connect(m_settingsController.get(), &SettingsController::cfwdBusyTargetChanged,
-            this, &PhoneController::cfwdBusyTargetChanged);
-    connect(m_settingsController.get(), &SettingsController::cfwdNoAnswerEnabledChanged,
-            this, &PhoneController::cfwdNoAnswerEnabledChanged);
-    connect(m_settingsController.get(), &SettingsController::cfwdNoAnswerTargetChanged,
-            this, &PhoneController::cfwdNoAnswerTargetChanged);
-    connect(m_settingsController.get(), &SettingsController::cfwdNoAnswerTimeoutMsChanged,
-            this, &PhoneController::cfwdNoAnswerTimeoutMsChanged);
-    connect(m_settingsController.get(), &SettingsController::autoRecordEnabledChanged,
-            this, &PhoneController::autoRecordEnabledChanged);
-    connect(m_settingsController.get(), &SettingsController::enterpriseFeaturesEnabledChanged,
-            this, &PhoneController::enterpriseFeaturesEnabledChanged);
-    connect(m_settingsController.get(), &SettingsController::crashReportingEnabledChanged,
-            this, &PhoneController::crashReportingEnabledChanged);
-    connect(m_settingsController.get(), &SettingsController::alwaysOnTopChanged,
-            this, &PhoneController::alwaysOnTopChanged);
+    // Settings change-notifications reach QML directly via
+    // PhoneController.settings.<x> bindings — no re-emit through PhoneController.
 
     connect(&m_noticeTimer, &QTimer::timeout, this, &PhoneController::dismissNotice);
     m_noticeTimer.setSingleShot(true);
@@ -413,6 +372,11 @@ QString PhoneController::callState() const
         : QStringLiteral("idle");
 }
 
+SettingsController *PhoneController::settingsController() const
+{
+    return m_settingsController.get();
+}
+
 QAbstractListModel *PhoneController::accountsModel() const
 {
     return m_accountsController ? m_accountsController->model() : nullptr;
@@ -553,55 +517,9 @@ bool PhoneController::isRecording(int callId) const
     return m_callsController && m_callsController->isRecording(callId);
 }
 
-bool PhoneController::autoRecordEnabled() const
-{
-    return m_settingsController && m_settingsController->autoRecordEnabled();
-}
-
-void PhoneController::setAutoRecordEnabled(bool enabled)
-{
-    if (m_settingsController) m_settingsController->setAutoRecordEnabled(enabled);
-}
-
-bool PhoneController::enterpriseFeaturesEnabled() const
-{
-    return m_settingsController
-        && m_settingsController->enterpriseFeaturesEnabled();
-}
-
-void PhoneController::setEnterpriseFeaturesEnabled(bool enabled)
-{
-    if (m_settingsController)
-        m_settingsController->setEnterpriseFeaturesEnabled(enabled);
-}
-
-bool PhoneController::crashReportingEnabled() const
-{
-    return m_settingsController
-        && m_settingsController->crashReportingEnabled();
-}
-
-void PhoneController::setCrashReportingEnabled(bool enabled)
-{
-    if (m_settingsController)
-        m_settingsController->setCrashReportingEnabled(enabled);
-    if (enabled)
-        crash::initConfiguredSentry(true);
-}
-
 bool PhoneController::crashReportingAvailable() const
 {
     return crash::configuredSentryAvailable();
-}
-
-bool PhoneController::alwaysOnTop() const
-{
-    return m_settingsController && m_settingsController->alwaysOnTop();
-}
-
-void PhoneController::setAlwaysOnTop(bool enabled)
-{
-    if (m_settingsController) m_settingsController->setAlwaysOnTop(enabled);
 }
 
 QAbstractListModel *PhoneController::conversationsModel() const
@@ -966,135 +884,14 @@ void PhoneController::redialFromHistory(int historyId)
     dial(uri);
 }
 
-QString PhoneController::logLevel() const
-{
-    return m_settingsController
-        ? m_settingsController->logLevel()
-        : QStringLiteral("info");
-}
-
-void PhoneController::setLogLevel(const QString &lvl)
-{
-    if (m_settingsController) m_settingsController->setLogLevel(lvl);
-}
-
-bool PhoneController::ringtoneEnabled() const
-{
-    return m_settingsController && m_settingsController->ringtoneEnabled();
-}
-
-void PhoneController::setRingtoneEnabled(bool enabled)
-{
-    if (m_settingsController) m_settingsController->setRingtoneEnabled(enabled);
-}
-
-QString PhoneController::themeId() const
-{
-    return m_settingsController
-        ? m_settingsController->themeId()
-        : QStringLiteral("light");
-}
-
-void PhoneController::setThemeId(const QString &id)
-{
-    if (m_settingsController) m_settingsController->setThemeId(id);
-}
-
 int PhoneController::registeredAccountCount() const
 {
     return m_accountsController ? m_accountsController->registeredAccountCount() : 0;
 }
 
-QVariantList PhoneController::audioInputs() const
-{
-    return m_settingsController ? m_settingsController->audioInputs() : QVariantList{};
-}
-
-QVariantList PhoneController::audioOutputs() const
-{
-    return m_settingsController ? m_settingsController->audioOutputs() : QVariantList{};
-}
-
-int PhoneController::captureDeviceId() const
-{
-    return m_settingsController ? m_settingsController->captureDeviceId() : -1;
-}
-
-int PhoneController::playbackDeviceId() const
-{
-    return m_settingsController ? m_settingsController->playbackDeviceId() : -1;
-}
-
-void PhoneController::setCaptureDeviceId(int id)
-{
-    if (m_settingsController) m_settingsController->setCaptureDeviceId(id);
-}
-
-void PhoneController::setPlaybackDeviceId(int id)
-{
-    if (m_settingsController) m_settingsController->setPlaybackDeviceId(id);
-}
-
-void PhoneController::refreshAudioDevices()
-{
-    if (m_settingsController) m_settingsController->refreshAudioDevices();
-}
-
-void PhoneController::testRingtone(int durationMs)
-{
-    if (m_settingsController) m_settingsController->testRingtone(durationMs);
-}
-
 void PhoneController::requestQuit()
 {
     QCoreApplication::quit();
-}
-
-QString PhoneController::ringtonePath() const
-{
-    return m_settingsController ? m_settingsController->ringtonePath() : QString{};
-}
-
-void PhoneController::setRingtonePath(const QString &p)
-{
-    if (m_settingsController) m_settingsController->setRingtonePath(p);
-}
-
-QString PhoneController::defaultRingtonePath() const
-{
-    return m_settingsController
-        ? m_settingsController->defaultRingtonePath()
-        : appDataPath() + QStringLiteral("/ringtone.wav");
-}
-
-bool PhoneController::dndEnabled() const
-{
-    return m_settingsController && m_settingsController->dndEnabled();
-}
-
-void PhoneController::setDndEnabled(bool enabled)
-{
-    if (m_settingsController) m_settingsController->setDndEnabled(enabled);
-}
-
-bool PhoneController::autoAnswerEnabled() const
-{
-    return m_settingsController && m_settingsController->autoAnswerEnabled();
-}
-
-void PhoneController::setAutoAnswerEnabled(bool enabled)
-{
-    if (m_settingsController) m_settingsController->setAutoAnswerEnabled(enabled);
-}
-
-int PhoneController::autoAnswerDelayMs() const
-{
-    return m_settingsController ? m_settingsController->autoAnswerDelayMs() : 0;
-}
-
-void PhoneController::setAutoAnswerDelayMs(int ms)
-{
-    if (m_settingsController) m_settingsController->setAutoAnswerDelayMs(ms);
 }
 
 int PhoneController::newVoicemailCount() const
@@ -1120,65 +917,6 @@ void PhoneController::dialVoicemail()
 {
     const QString num = activeVoicemailNumber();
     if (!num.isEmpty()) dial(num);
-}
-
-bool PhoneController::cfwdAlwaysEnabled() const
-{
-    return m_settingsController && m_settingsController->cfwdAlwaysEnabled();
-}
-void PhoneController::setCfwdAlwaysEnabled(bool e)
-{
-    if (m_settingsController) m_settingsController->setCfwdAlwaysEnabled(e);
-}
-QString PhoneController::cfwdAlwaysTarget() const
-{
-    return m_settingsController ? m_settingsController->cfwdAlwaysTarget() : QString{};
-}
-void PhoneController::setCfwdAlwaysTarget(const QString &uri)
-{
-    if (m_settingsController) m_settingsController->setCfwdAlwaysTarget(uri);
-}
-
-bool PhoneController::cfwdBusyEnabled() const
-{
-    return m_settingsController && m_settingsController->cfwdBusyEnabled();
-}
-void PhoneController::setCfwdBusyEnabled(bool e)
-{
-    if (m_settingsController) m_settingsController->setCfwdBusyEnabled(e);
-}
-QString PhoneController::cfwdBusyTarget() const
-{
-    return m_settingsController ? m_settingsController->cfwdBusyTarget() : QString{};
-}
-void PhoneController::setCfwdBusyTarget(const QString &uri)
-{
-    if (m_settingsController) m_settingsController->setCfwdBusyTarget(uri);
-}
-
-bool PhoneController::cfwdNoAnswerEnabled() const
-{
-    return m_settingsController && m_settingsController->cfwdNoAnswerEnabled();
-}
-void PhoneController::setCfwdNoAnswerEnabled(bool e)
-{
-    if (m_settingsController) m_settingsController->setCfwdNoAnswerEnabled(e);
-}
-QString PhoneController::cfwdNoAnswerTarget() const
-{
-    return m_settingsController ? m_settingsController->cfwdNoAnswerTarget() : QString{};
-}
-void PhoneController::setCfwdNoAnswerTarget(const QString &uri)
-{
-    if (m_settingsController) m_settingsController->setCfwdNoAnswerTarget(uri);
-}
-int PhoneController::cfwdNoAnswerTimeoutMs() const
-{
-    return m_settingsController ? m_settingsController->cfwdNoAnswerTimeoutMs() : 20000;
-}
-void PhoneController::setCfwdNoAnswerTimeoutMs(int ms)
-{
-    if (m_settingsController) m_settingsController->setCfwdNoAnswerTimeoutMs(ms);
 }
 
 } // namespace compactphone

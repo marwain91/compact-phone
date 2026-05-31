@@ -96,11 +96,10 @@ ColumnLayout {
 
     // Pull the currently active account's display info so the status pill
     // can read "Registered · ext 204" the way the design calls for.
-    function _isDaktelaAccount(label, domain) {
-        const accountLabel = (label || "").toLowerCase()
-        const accountDomain = (domain || "").toLowerCase()
-        return accountLabel.indexOf("daktela") >= 0
-            || accountDomain.indexOf("daktela") >= 0
+    // Provider identity comes from the account's provider role (set by the
+    // provisioning layer), not a label/domain substring guess.
+    function _isDaktelaAccount(provider) {
+        return (provider || "").toLowerCase() === "daktela"
     }
 
     function _activeAccountInfo() {
@@ -113,6 +112,7 @@ ColumnLayout {
         const domainRole   = Qt.UserRole + 4       // DomainRole
         const regStateRole = Qt.UserRole + 8       // RegistrationStateRole
         const labelRole    = Qt.UserRole + 10      // LabelRole
+        const providerRole = Qt.UserRole + 11      // ProviderRole
         const idRole       = Qt.UserRole + 1       // IdRole
         let row = -1
         for (let i = 0; i < m.rowCount(); i++) {
@@ -128,7 +128,7 @@ ColumnLayout {
             ext: m.data(idx, usernameRole) || "",
             label: label,
             domain: domain,
-            isDaktela: root._isDaktelaAccount(label, domain)
+            isDaktela: root._isDaktelaAccount(m.data(idx, providerRole) || "")
         }
     }
 

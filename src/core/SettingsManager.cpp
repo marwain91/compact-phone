@@ -8,21 +8,30 @@ namespace compactphone::sip {
 
 SettingsManager::SettingsManager(persistence::Database *db) : m_db(db) {}
 
-std::optional<std::string> SettingsManager::get(const std::string &key) const
+void SettingsManager::ensureLoaded() const
 {
+    if (m_loaded) return;
+    m_loaded = true;
+    if (!m_db || !m_db->handle()) return;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
-            "SELECT value FROM app_settings WHERE key = ?",
-            -1, &stmt, nullptr) != SQLITE_OK) return std::nullopt;
-    sqlite3_bind_text(stmt, 1, key.data(), static_cast<int>(key.size()),
-                      SQLITE_TRANSIENT);
-    std::optional<std::string> result;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-        const auto *t = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
-        if (t) result = std::string(t);
+            "SELECT key, value FROM app_settings", -1, &stmt, nullptr) != SQLITE_OK) {
+        return;
+    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const auto *k = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
+        const auto *v = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+        if (k && v) m_cache[k] = v;
     }
     sqlite3_finalize(stmt);
-    return result;
+}
+
+std::optional<std::string> SettingsManager::get(const std::string &key) const
+{
+    ensureLoaded();
+    auto it = m_cache.find(key);
+    if (it == m_cache.end()) return std::nullopt;
+    return it->second;
 }
 
 std::string SettingsManager::getOr(const std::string &key,
@@ -33,6 +42,7 @@ std::string SettingsManager::getOr(const std::string &key,
 
 bool SettingsManager::set(const std::string &key, const std::string &value)
 {
+    ensureLoaded();
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "INSERT INTO app_settings (key, value) VALUES (?, ?) "
@@ -44,6 +54,7 @@ bool SettingsManager::set(const std::string &key, const std::string &value)
                       SQLITE_TRANSIENT);
     const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
     sqlite3_finalize(stmt);
+    if (ok) m_cache[key] = value; // write-through
     return ok;
 }
 

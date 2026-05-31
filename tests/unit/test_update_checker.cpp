@@ -55,12 +55,12 @@ TEST(UpdateCheckerParse, WellFormedFeedReturnsHighestEnclosure)
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <item>
-      <enclosure url="https://example.com/cp-0.3.0.dmg"
+      <enclosure url="https://github.com/cp-0.3.0.dmg"
                  sparkle:shortVersionString="0.3.0"
                  length="123" type="application/octet-stream" />
     </item>
     <item>
-      <enclosure url="https://example.com/cp-0.4.0.dmg"
+      <enclosure url="https://github.com/cp-0.4.0.dmg"
                  sparkle:shortVersionString="0.4.0"
                  length="456" type="application/octet-stream" />
     </item>
@@ -69,7 +69,7 @@ TEST(UpdateCheckerParse, WellFormedFeedReturnsHighestEnclosure)
 
     const auto feed = UpdateChecker::parseAppcast(xml);
     EXPECT_EQ(feed.version, "0.4.0");
-    EXPECT_EQ(feed.url, QUrl("https://example.com/cp-0.4.0.dmg"));
+    EXPECT_EQ(feed.url, QUrl("https://github.com/cp-0.4.0.dmg"));
 }
 
 TEST(UpdateCheckerParse, FallsBackFromShortVersionToVersion)
@@ -78,7 +78,7 @@ TEST(UpdateCheckerParse, FallsBackFromShortVersionToVersion)
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <item>
-      <enclosure url="https://example.com/cp-0.5.0.dmg"
+      <enclosure url="https://github.com/cp-0.5.0.dmg"
                  sparkle:version="0.5.0"
                  length="0" type="application/octet-stream" />
     </item>
@@ -112,9 +112,9 @@ TEST(UpdateCheckerParse, EnclosureMissingUrlOrVersionIsSkipped)
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <item><enclosure sparkle:shortVersionString="0.4.0" length="0" /></item>
-    <item><enclosure url="https://example.com/x.dmg" length="0" /></item>
+    <item><enclosure url="https://github.com/x.dmg" length="0" /></item>
     <item>
-      <enclosure url="https://example.com/cp-0.3.1.dmg"
+      <enclosure url="https://github.com/cp-0.3.1.dmg"
                  sparkle:shortVersionString="0.3.1"
                  length="0" type="application/octet-stream" />
     </item>
@@ -140,7 +140,7 @@ TEST(UpdateCheckerParse, SkipsUnsafeDownloadUrls)
                  length="0" type="application/octet-stream" />
     </item>
     <item>
-      <enclosure url="https://example.com/cp-0.6.0.dmg"
+      <enclosure url="https://github.com/cp-0.6.0.dmg"
                  sparkle:shortVersionString="0.6.0"
                  length="0" type="application/octet-stream" />
     </item>
@@ -148,7 +148,7 @@ TEST(UpdateCheckerParse, SkipsUnsafeDownloadUrls)
 </rss>)APPCAST";
     const auto feed = UpdateChecker::parseAppcast(xml);
     EXPECT_EQ(feed.version, "0.6.0");
-    EXPECT_EQ(feed.url, QUrl("https://example.com/cp-0.6.0.dmg"));
+    EXPECT_EQ(feed.url, QUrl("https://github.com/cp-0.6.0.dmg"));
 }
 
 TEST(UpdateCheckerParse, ReturnsEmptyWhenOnlyUnsafeDownloadUrlsExist)
@@ -159,6 +159,25 @@ TEST(UpdateCheckerParse, ReturnsEmptyWhenOnlyUnsafeDownloadUrlsExist)
     <item>
       <enclosure url="file:///tmp/Compact-Phone.dmg"
                  sparkle:shortVersionString="9.0.0"
+                 length="0" type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>)";
+    const auto feed = UpdateChecker::parseAppcast(xml);
+    EXPECT_TRUE(feed.version.isEmpty());
+    EXPECT_FALSE(feed.url.isValid() && !feed.url.isEmpty());
+}
+
+TEST(UpdateCheckerParse, RejectsDownloadFromUntrustedHost)
+{
+    // A well-formed https enclosure pointing off GitHub must be rejected by
+    // the host pin, even though the scheme is fine.
+    const QByteArray xml = R"(<?xml version="1.0"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <item>
+      <enclosure url="https://evil.example/cp-9.9.9.dmg"
+                 sparkle:shortVersionString="9.9.9"
                  length="0" type="application/octet-stream" />
     </item>
   </channel>

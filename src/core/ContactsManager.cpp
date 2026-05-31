@@ -1,5 +1,6 @@
 #include "ContactsManager.h"
 #include "persistence/Database.h"
+#include "persistence/SqliteUtil.h"
 
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
@@ -8,17 +9,8 @@ namespace compactphone::sip {
 
 namespace {
 
-void bindText(sqlite3_stmt *stmt, int idx, const std::string &s)
-{
-    sqlite3_bind_text(stmt, idx, s.data(), static_cast<int>(s.size()),
-                      SQLITE_TRANSIENT);
-}
-
-std::string readText(sqlite3_stmt *s, int col)
-{
-    const auto *t = reinterpret_cast<const char *>(sqlite3_column_text(s, col));
-    return t ? std::string(t) : std::string{};
-}
+using persistence::bindText;
+using persistence::readText;
 
 Contact rowToContact(sqlite3_stmt *stmt)
 {
@@ -38,6 +30,7 @@ ContactsManager::ContactsManager(persistence::Database *db) : m_db(db) {}
 
 ContactId ContactsManager::add(const Contact &c)
 {
+    if (!m_db || !m_db->handle()) return kInvalidContactId;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "INSERT INTO contacts (display_name, sip_uri, phone, notes, favorite) "
@@ -61,6 +54,7 @@ ContactId ContactsManager::add(const Contact &c)
 
 bool ContactsManager::update(const Contact &c)
 {
+    if (!m_db || !m_db->handle()) return false;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "UPDATE contacts SET display_name=?, sip_uri=?, phone=?, "
@@ -80,6 +74,7 @@ bool ContactsManager::update(const Contact &c)
 
 bool ContactsManager::remove(ContactId id)
 {
+    if (!m_db || !m_db->handle()) return false;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "DELETE FROM contacts WHERE id=?",
@@ -94,6 +89,7 @@ bool ContactsManager::remove(ContactId id)
 std::vector<Contact> ContactsManager::list() const
 {
     std::vector<Contact> out;
+    if (!m_db || !m_db->handle()) return out;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "SELECT id, display_name, sip_uri, phone, notes, favorite "
@@ -108,6 +104,7 @@ std::vector<Contact> ContactsManager::list() const
 
 std::optional<Contact> ContactsManager::findById(ContactId id) const
 {
+    if (!m_db || !m_db->handle()) return std::nullopt;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "SELECT id, display_name, sip_uri, phone, notes, favorite "
@@ -124,6 +121,7 @@ std::optional<Contact> ContactsManager::findById(ContactId id) const
 
 std::optional<Contact> ContactsManager::findByUri(const std::string &sipUri) const
 {
+    if (!m_db || !m_db->handle()) return std::nullopt;
     sqlite3_stmt *stmt = nullptr;
     if (sqlite3_prepare_v2(m_db->handle(),
             "SELECT id, display_name, sip_uri, phone, notes, favorite "

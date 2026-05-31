@@ -6,6 +6,8 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include <QTemporaryDir>
+
 class AccountsManagerUpdateTest : public ::testing::Test {
 protected:
     compactphone::sip::SipEngine engine;
@@ -19,6 +21,45 @@ protected:
     }
     void TearDown() override { engine.stop(); }
 };
+
+// Every other test reopens an in-memory DB on the *same live connection*, which
+// never exercises a cold reopen of an on-disk database — the path that broke
+// when loadFromDatabase's SELECT referenced a column missing from the persisted
+// schema (the migration-collapse bug only the running app surfaced). Open a
+// real file, write an account, then reopen the file with a fresh connection +
+// manager and confirm loadFromDatabase round-trips it (including provider).
+TEST_F(AccountsManagerUpdateTest, AccountSurvivesColdFileReopen)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const std::string path = tmp.filePath("accounts.db").toStdString();
+
+    compactphone::sip::AccountId id = compactphone::sip::kInvalidAccountId;
+    {
+        compactphone::persistence::Database fileDb;
+        ASSERT_TRUE(fileDb.open(path));
+        compactphone::sip::AccountsManager mgr(&engine, &fileDb, &kc);
+        compactphone::sip::Account a;
+        a.displayName = "Persisted";
+        a.username = "1001";
+        a.domain = "pbx.example.com";
+        a.provider = "daktela";
+        a.enabled = false; // avoid a registration attempt
+        id = mgr.add(a, "secret");
+        ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
+    }
+
+    // Cold reopen: new connection to the same file, new manager → loadFromDatabase.
+    {
+        compactphone::persistence::Database fileDb;
+        ASSERT_TRUE(fileDb.open(path));
+        compactphone::sip::AccountsManager mgr(&engine, &fileDb, &kc);
+        const auto loaded = mgr.find(id);
+        ASSERT_TRUE(loaded.has_value());
+        EXPECT_EQ(loaded->displayName, "Persisted");
+        EXPECT_EQ(loaded->provider, "daktela");
+    }
+}
 
 TEST_F(AccountsManagerUpdateTest, UpdatePersistsChangedFields)
 {
@@ -194,6 +235,7 @@ TEST_F(AccountsManagerUpdateTest, AddRoundTripsZrtpCodecsAndAuthRealm)
         a.zrtpEnabled = true;
         a.codecs = "opus,alaw";
         a.authRealm = "realm.example";
+        a.provider = "daktela";
         id = mgr.add(a, "secret");
         ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
     }
@@ -204,6 +246,7 @@ TEST_F(AccountsManagerUpdateTest, AddRoundTripsZrtpCodecsAndAuthRealm)
     EXPECT_TRUE(loaded->zrtpEnabled);
     EXPECT_EQ(loaded->codecs, "opus,alaw");
     EXPECT_EQ(loaded->authRealm, "realm.example");
+    EXPECT_EQ(loaded->provider, "daktela");
 }
 
 // UpdatePersistsChangedFields proves only displayName/dtmfMethod/proxy survive
@@ -226,6 +269,7 @@ TEST_F(AccountsManagerUpdateTest, UpdateRoundTripsSecurityAndTransportFields)
         a.zrtpEnabled = false;
         a.codecs = "ulaw";
         a.authRealm = "old.realm";
+        a.provider = "";
         id = mgr.add(a, "secret");
         ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
 
@@ -236,6 +280,7 @@ TEST_F(AccountsManagerUpdateTest, UpdateRoundTripsSecurityAndTransportFields)
         edited.zrtpEnabled = true;
         edited.codecs = "opus,alaw";
         edited.authRealm = "new.realm";
+        edited.provider = "daktela";
         ASSERT_TRUE(mgr.update(edited));
     }
 
@@ -248,6 +293,7 @@ TEST_F(AccountsManagerUpdateTest, UpdateRoundTripsSecurityAndTransportFields)
     EXPECT_TRUE(loaded->zrtpEnabled);
     EXPECT_EQ(loaded->codecs, "opus,alaw");
     EXPECT_EQ(loaded->authRealm, "new.realm");
+    EXPECT_EQ(loaded->provider, "daktela");
 }
 
 // setEnabled has its own UPDATE ... SET enabled bind site, distinct from add()
