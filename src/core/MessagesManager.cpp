@@ -1,11 +1,15 @@
 #include "MessagesManager.h"
 
 #include "persistence/Database.h"
+#include "persistence/SqliteUtil.h"
 
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
 
 namespace compactphone::sip {
+
+using persistence::bindText;
+using persistence::readText;
 
 namespace {
 
@@ -38,9 +42,9 @@ bool MessagesManager::append(Message &msg)
         return false;
     }
     sqlite3_bind_int64(stmt, 1, msg.accountId);
-    sqlite3_bind_text(stmt, 2, msg.peerUri.c_str(), -1, SQLITE_TRANSIENT);
+    bindText(stmt, 2, msg.peerUri);
     sqlite3_bind_text(stmt, 3, toStr(msg.direction), -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 4, msg.body.c_str(), -1, SQLITE_TRANSIENT);
+    bindText(stmt, 4, msg.body);
     sqlite3_bind_int64(stmt, 5, msg.createdAtMs);
     sqlite3_bind_int(stmt, 6, msg.read ? 1 : 0);
     const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
@@ -66,9 +70,9 @@ std::vector<Message> MessagesManager::list(int limit) const
         Message m;
         m.id = sqlite3_column_int64(stmt, 0);
         m.accountId = sqlite3_column_int(stmt, 1);
-        m.peerUri = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
+        m.peerUri = readText(stmt, 2);
         m.direction = fromStr(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3)));
-        m.body = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 4));
+        m.body = readText(stmt, 4);
         m.createdAtMs = sqlite3_column_int64(stmt, 5);
         m.read = sqlite3_column_int(stmt, 6) != 0;
         out.push_back(std::move(m));
@@ -91,7 +95,7 @@ std::vector<std::string> MessagesManager::peers() const
         return out;
     }
     while (sqlite3_step(stmt) == SQLITE_ROW) {
-        out.emplace_back(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0)));
+        out.emplace_back(readText(stmt, 0));
     }
     sqlite3_finalize(stmt);
     return out;
@@ -109,15 +113,15 @@ std::vector<Message> MessagesManager::listByPeer(const std::string &peer,
     if (sqlite3_prepare_v2(m_db->handle(), sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return out;
     }
-    sqlite3_bind_text(stmt, 1, peer.c_str(), -1, SQLITE_TRANSIENT);
+    bindText(stmt, 1, peer);
     sqlite3_bind_int(stmt, 2, limit);
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         Message m;
         m.id = sqlite3_column_int64(stmt, 0);
         m.accountId = sqlite3_column_int(stmt, 1);
-        m.peerUri = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
+        m.peerUri = readText(stmt, 2);
         m.direction = fromStr(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3)));
-        m.body = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 4));
+        m.body = readText(stmt, 4);
         m.createdAtMs = sqlite3_column_int64(stmt, 5);
         m.read = sqlite3_column_int(stmt, 6) != 0;
         out.push_back(std::move(m));
@@ -149,8 +153,8 @@ std::vector<ConversationSummary> MessagesManager::conversationSummaries() const
     }
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         ConversationSummary s;
-        s.peer = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
-        s.lastBody = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+        s.peer = readText(stmt, 0);
+        s.lastBody = readText(stmt, 1);
         s.lastDirection =
             fromStr(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2)));
         s.lastCreatedAtMs = sqlite3_column_int64(stmt, 3);
@@ -171,7 +175,7 @@ bool MessagesManager::markPeerRead(const std::string &peer)
     if (sqlite3_prepare_v2(m_db->handle(), sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return false;
     }
-    sqlite3_bind_text(stmt, 1, peer.c_str(), -1, SQLITE_TRANSIENT);
+    bindText(stmt, 1, peer);
     const bool ok = sqlite3_step(stmt) == SQLITE_DONE;
     const int changed = sqlite3_changes(m_db->handle());
     sqlite3_finalize(stmt);

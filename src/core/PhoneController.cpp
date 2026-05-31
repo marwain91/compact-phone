@@ -31,7 +31,6 @@
 #include "models/ConversationsModel.h"
 #include "models/LinesModel.h"
 #include "persistence/Database.h"
-#include "platform/Keychain_file.h"
 #include "platform/Keychain_factory.h"
 
 #include <QCoreApplication>
