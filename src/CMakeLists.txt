@@ -250,6 +250,10 @@ qt_add_qml_module(compactphone
         ui/qml/MessagesPane.qml
         ui/qml/LinesPane.qml
         ui/qml/SettingsPane.qml
+        ui/qml/GeneralSettings.qml
+        ui/qml/AudioSettings.qml
+        ui/qml/CallsSettings.qml
+        ui/qml/AdvancedSettings.qml
         ui/qml/LogViewerDialog.qml
         ui/qml/components/AppIcon.qml
         ui/qml/components/AppButton.qml
