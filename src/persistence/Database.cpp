@@ -3,14 +3,16 @@
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
 
-#include <cstring>
-
 namespace compactphone::persistence {
 
 namespace {
 
-// Embedded migration scripts. Keep in order — index 0 = version 1.
-constexpr const char *kMigration001 = R"SQL(
+// Single baseline schema. The app has not shipped, so there is no installed
+// database to migrate from — everything lives in version 1. When the app is
+// released and the schema needs to change, add a new entry to kMigrations
+// below; the array length is the latest version, so there is no separate
+// counter to drift out of sync.
+constexpr const char *kBaselineSchema = R"SQL(
 CREATE TABLE accounts (
     id INTEGER PRIMARY KEY,
     label TEXT NOT NULL DEFAULT '',
@@ -42,9 +44,7 @@ CREATE TABLE accounts (
     sort_order INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX idx_accounts_default ON accounts(is_default) WHERE is_default = 1;
-)SQL";
 
-constexpr const char *kMigration002 = R"SQL(
 CREATE TABLE contacts (
     id INTEGER PRIMARY KEY,
     display_name TEXT NOT NULL,
@@ -54,6 +54,7 @@ CREATE TABLE contacts (
     favorite INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_contacts_name ON contacts(display_name);
+CREATE INDEX idx_contacts_uri ON contacts(sip_uri);
 
 CREATE TABLE call_history (
     id INTEGER PRIMARY KEY,
@@ -66,18 +67,14 @@ CREATE TABLE call_history (
     end_reason TEXT
 );
 CREATE INDEX idx_history_started ON call_history(started_at DESC);
-)SQL";
 
-constexpr const char *kMigration003 = R"SQL(
 CREATE TABLE app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 INSERT INTO app_settings (key, value) VALUES ('log_level', 'info');
 INSERT INTO app_settings (key, value) VALUES ('ringtone_enabled', '1');
-)SQL";
 
-constexpr const char *kMigration004 = R"SQL(
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY,
     account_id INTEGER NOT NULL,
@@ -89,9 +86,8 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_peer ON messages(peer_uri, created_at_ms DESC);
 CREATE INDEX idx_messages_created ON messages(created_at_ms DESC);
-)SQL";
+CREATE INDEX idx_messages_unread ON messages(direction, read);
 
-constexpr const char *kMigration005 = R"SQL(
 CREATE TABLE watched_lines (
     id INTEGER PRIMARY KEY,
     account_id INTEGER NOT NULL,
@@ -102,74 +98,26 @@ CREATE TABLE watched_lines (
 CREATE INDEX idx_watched_lines_order ON watched_lines(sort_order, id);
 )SQL";
 
-const char *kMigrations[] = {kMigration001, kMigration002, kMigration003,
-                             kMigration004, kMigration005};
-constexpr int kSqlMigrationCount = sizeof(kMigrations) / sizeof(kMigrations[0]);
-constexpr int kLatestVersion = 7;
-
-bool columnExists(sqlite3 *db, const char *table, const char *column)
+bool execSql(sqlite3 *db, const char *sql)
 {
-    const std::string sql = std::string("PRAGMA table_info(") + table + ")";
-    sqlite3_stmt *stmt = nullptr;
-    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        return false;
-    }
-    bool found = false;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        const auto *name = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
-        if (name && std::strcmp(column, name) == 0) {
-            found = true;
-            break;
-        }
-    }
-    sqlite3_finalize(stmt);
-    return found;
-}
-
-bool addColumnIfMissing(sqlite3 *db,
-                        const char *table,
-                        const char *column,
-                        const char *ddl)
-{
-    if (columnExists(db, table, column)) return true;
     char *err = nullptr;
-    const int rc = sqlite3_exec(db, ddl, nullptr, nullptr, &err);
+    const int rc = sqlite3_exec(db, sql, nullptr, nullptr, &err);
     if (rc != SQLITE_OK) {
-        spdlog::error("sqlite migration add column failed: {} ({})",
-                      err ? err : "?", ddl);
+        spdlog::error("sqlite exec failed: {} ({})", err ? err : "?", sql);
         sqlite3_free(err);
         return false;
     }
     return true;
 }
 
-bool migrate004AccountColumns(sqlite3 *db)
-{
-    return addColumnIfMissing(db, "accounts", "label",
-                              "ALTER TABLE accounts ADD COLUMN label TEXT NOT NULL DEFAULT ''")
-        && addColumnIfMissing(db, "accounts", "auth_realm",
-                              "ALTER TABLE accounts ADD COLUMN auth_realm TEXT")
-        && addColumnIfMissing(db, "accounts", "public_address",
-                              "ALTER TABLE accounts ADD COLUMN public_address TEXT")
-        && addColumnIfMissing(db, "accounts", "codecs",
-                              "ALTER TABLE accounts ADD COLUMN codecs TEXT")
-        && addColumnIfMissing(db, "accounts", "voicemail_number",
-                              "ALTER TABLE accounts ADD COLUMN voicemail_number TEXT")
-        && addColumnIfMissing(db, "accounts", "register_interval_sec",
-                              "ALTER TABLE accounts ADD COLUMN register_interval_sec INTEGER NOT NULL DEFAULT 0")
-        && addColumnIfMissing(db, "accounts", "keepalive_interval_sec",
-                              "ALTER TABLE accounts ADD COLUMN keepalive_interval_sec INTEGER NOT NULL DEFAULT 0")
-        && addColumnIfMissing(db, "accounts", "session_timers_enabled",
-                              "ALTER TABLE accounts ADD COLUMN session_timers_enabled INTEGER NOT NULL DEFAULT 1")
-        && addColumnIfMissing(db, "accounts", "publish_presence_enabled",
-                              "ALTER TABLE accounts ADD COLUMN publish_presence_enabled INTEGER NOT NULL DEFAULT 0")
-        && addColumnIfMissing(db, "accounts", "ice_enabled",
-                              "ALTER TABLE accounts ADD COLUMN ice_enabled INTEGER NOT NULL DEFAULT 0")
-        && addColumnIfMissing(db, "accounts", "hide_caller_id",
-                              "ALTER TABLE accounts ADD COLUMN hide_caller_id INTEGER NOT NULL DEFAULT 0")
-        && addColumnIfMissing(db, "accounts", "zrtp_enabled",
-                              "ALTER TABLE accounts ADD COLUMN zrtp_enabled INTEGER NOT NULL DEFAULT 0");
-}
+// One entry per schema version, applied in order: index i upgrades the
+// database to version i + 1. The array length defines the latest version.
+using MigrationFn = bool (*)(sqlite3 *db);
+const MigrationFn kMigrations[] = {
+    [](sqlite3 *db) { return execSql(db, kBaselineSchema); }, // v1
+};
+constexpr int kLatestVersion =
+    static_cast<int>(sizeof(kMigrations) / sizeof(kMigrations[0]));
 
 } // namespace
 
@@ -207,19 +155,17 @@ bool Database::openWithPath(const std::string &path)
         return false;
     }
     executeStatement("PRAGMA foreign_keys = ON");
+    // WAL lets the UI thread read while a background thread appends history /
+    // messages without blocking; NORMAL is the safe durability pairing for a
+    // single-process desktop app. Both are no-ops for :memory: databases.
+    executeStatement("PRAGMA journal_mode = WAL");
+    executeStatement("PRAGMA synchronous = NORMAL");
     return true;
 }
 
 bool Database::executeStatement(const char *sql)
 {
-    char *err = nullptr;
-    const int rc = sqlite3_exec(m_db, sql, nullptr, nullptr, &err);
-    if (rc != SQLITE_OK) {
-        spdlog::error("sqlite exec failed: {} ({})", err ? err : "?", sql);
-        sqlite3_free(err);
-        return false;
-    }
-    return true;
+    return execSql(m_db, sql);
 }
 
 bool Database::runMigrations()
@@ -232,10 +178,7 @@ bool Database::runMigrations()
     int current = readVersion();
     for (int v = current + 1; v <= kLatestVersion; ++v) {
         if (!executeStatement("BEGIN TRANSACTION")) return false;
-        const bool migrationOk = v <= kSqlMigrationCount
-            ? executeStatement(kMigrations[v - 1])
-            : migrate004AccountColumns(m_db);
-        if (!migrationOk) {
+        if (!kMigrations[v - 1](m_db)) {
             executeStatement("ROLLBACK");
             return false;
         }
