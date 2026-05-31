@@ -11,6 +11,7 @@
 #include "ContactsController.h"
 #include "LinesController.h"
 #include "MessagesController.h"
+#include "ProvisioningController.h"
 #include "SettingsController.h"
 
 #include <memory>
@@ -72,6 +73,7 @@ class PhoneController : public QObject {
     Q_PROPERTY(QAbstractListModel *history READ historyModel CONSTANT)
     Q_PROPERTY(compactphone::MessagesController *messaging READ messagesController CONSTANT)
     Q_PROPERTY(compactphone::LinesController *lines READ linesController CONSTANT)
+    Q_PROPERTY(compactphone::ProvisioningController *provisioning READ provisioningController CONSTANT)
     Q_PROPERTY(QString dialerUri READ dialerUri WRITE setDialerUri NOTIFY dialerUriChanged)
     Q_PROPERTY(int registeredAccountCount READ registeredAccountCount NOTIFY registeredAccountCountChanged)
     Q_PROPERTY(int activeAccountId READ activeAccountId WRITE setActiveAccountId NOTIFY activeAccountIdChanged)
@@ -132,6 +134,7 @@ public:
     ContactsController *contactsController() const;
     MessagesController *messagesController() const;
     LinesController *linesController() const;
+    ProvisioningController *provisioningController() const;
     QAbstractListModel *historyModel() const;
 
     QString dialerUri() const { return m_dialerUri; }
@@ -141,28 +144,6 @@ public:
     Q_INVOKABLE bool exportDiagnostics(const QString &path) const;
     Q_INVOKABLE void checkForUpdates();
     Q_INVOKABLE void openLatestUpdateUrl();
-
-    // Generic auto-provisioning. providerId selects a backend (e.g. "daktela").
-    // On success a new SIP account is added via addAccount() and its id is
-    // delivered via accountProvisioned.
-    Q_INVOKABLE void provisionWithProvider(const QString &providerId,
-                                           const QString &host,
-                                           const QString &username,
-                                           const QString &password);
-
-    // Skip the password step and provision directly from an SSO access token.
-    Q_INVOKABLE void provisionWithProviderToken(const QString &providerId,
-                                                const QString &host,
-                                                const QString &accessToken);
-
-    // Probe the host to learn which auth methods are enabled. Emits
-    // authMethodsDiscovered or authMethodsFailed.
-    Q_INVOKABLE void discoverAuthMethods(const QString &providerId,
-                                         const QString &host);
-
-    // Descriptors for every built-in provider; each entry is
-    // {"id", "displayName", "hostPlaceholder"}.
-    Q_INVOKABLE QVariantList provisioningProviders() const;
 
     // Live RTCP-derived media stats for the in-call quality indicator.
     // Returns a QVariantMap with keys: mos (double), lossPct (double),
@@ -193,14 +174,6 @@ signals:
     // Tray-initiated requests bubbled up to QML.
     void trayShowRequested();
     void trayHideRequested();
-
-    // Generic provisioning lifecycle. providerId tracks which backend the
-    // event came from so a wizard can ignore stale signals.
-    void provisioningProgress(QString providerId, QString stage);
-    void provisioningFailed(QString providerId, QString error);
-    void accountProvisioned(QString providerId, int accountId);
-    void authMethodsDiscovered(QString providerId, QString host, QVariantList methods);
-    void authMethodsFailed(QString providerId, QString host, QString error);
 
 private:
     QString m_notice;
@@ -235,7 +208,7 @@ private:
     std::unique_ptr<NetworkMonitor>             m_networkMonitor;
     std::unique_ptr<PowerMonitor>               m_powerMonitor;
     std::unique_ptr<UpdateChecker>              m_updateChecker;
-    std::unique_ptr<provisioning::Registry>     m_provisioningRegistry;
+    std::unique_ptr<ProvisioningController>     m_provisioningController;
 
     QString m_dialerUri;
 

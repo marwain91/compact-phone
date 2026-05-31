@@ -64,7 +64,7 @@ Window {
     }
 
     function openFor(id) {
-        const list = PhoneController.provisioningProviders()
+        const list = PhoneController.provisioning.providers()
         if (list.length === 0) return
         let pd = list[0]
         if (id) {
@@ -88,7 +88,7 @@ Window {
     }
 
     Connections {
-        target: PhoneController
+        target: PhoneController.provisioning
         function onProvisioningProgress(provId, stage) {
             if (provId !== dialog.providerId) return
             // Once provisioning starts, ignore any further user interactions.
@@ -394,7 +394,7 @@ Window {
                     enabled: userField.text.length > 0 && passField.text.length > 0
                     onClicked: {
                         dialog.errorMessage = ""
-                        PhoneController.provisionWithProvider(
+                        PhoneController.provisioning.provision(
                             dialog.providerId,
                             dialog.normalizedHost,
                             userField.text,
@@ -457,7 +457,7 @@ Window {
                     enabled: tokenField.text.trim().length > 0
                     onClicked: {
                         dialog.errorMessage = ""
-                        PhoneController.provisionWithProviderToken(
+                        PhoneController.provisioning.provisionWithToken(
                             dialog.providerId,
                             dialog.normalizedHost,
                             tokenField.text.trim())

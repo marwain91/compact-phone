@@ -4,8 +4,6 @@
 #include "NetworkMonitor.h"
 #include "PowerMonitor.h"
 #include "UpdateChecker.h"
-#include "provisioning/Provider.h"
-#include "provisioning/Registry.h"
 #include "TrayController.h"
 #include "UrlDispatcher.h"
 #include "AccountsManager.h"
@@ -291,40 +289,14 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
     // Auto-provisioning. The Registry owns every backend Provider; we wire
     // their signals here once so the QML side only sees PhoneController.
-    m_provisioningRegistry = std::make_unique<provisioning::Registry>();
-    for (const auto &id : m_provisioningRegistry->ids()) {
-        auto *p = m_provisioningRegistry->find(id);
-        if (!p) continue;
-        connect(p, &provisioning::Provider::progress,
-                this, [this, id](const QString &stage) {
-            emit provisioningProgress(id, stage);
-        });
-        connect(p, &provisioning::Provider::provisioningFailed,
-                this, [this, id](const QString &error) {
-            postNotice(tr("Sign-in failed: %1").arg(error), 5000);
-            emit provisioningFailed(id, error);
-        });
-        connect(p, &provisioning::Provider::provisioningSucceeded,
-                this, [this, id](const QVariantMap &params) {
-            const int newId = addAccount(params);
-            if (newId < 0) {
-                const QString reason = tr("Could not save the new account.");
-                postNotice(tr("Sign-in failed: %1").arg(reason), 5000);
-                emit provisioningFailed(id, reason);
-                return;
-            }
-            postNotice(tr("Account added"), 4000);
-            emit accountProvisioned(id, newId);
-        });
-        connect(p, &provisioning::Provider::authMethodsDiscovered,
-                this, [this, id](const QString &host, const QVariantList &methods) {
-            emit authMethodsDiscovered(id, host, methods);
-        });
-        connect(p, &provisioning::Provider::authMethodsFailed,
-                this, [this, id](const QString &host, const QString &error) {
-            emit authMethodsFailed(id, host, error);
-        });
-    }
+    m_provisioningController = std::make_unique<ProvisioningController>(
+        [this](const QVariantMap &params) {
+            return m_accountsController ? m_accountsController->addAccount(params) : -1;
+        },
+        [this](const QString &text, int autoDismissMs) {
+            postNotice(text, autoDismissMs);
+        },
+        this);
 
     // External sip:/sips:/tel:/callto: URIs reach the app from an untrusted
     // source (web pages, documents; macOS delivers them via QFileOpenEvent ->
@@ -360,7 +332,7 @@ PhoneController::~PhoneController()
     m_networkMonitor.reset();
     m_powerMonitor.reset();
     m_updateChecker.reset();
-    m_provisioningRegistry.reset();
+    m_provisioningController.reset();
     m_trayController.reset();
     m_callsController.reset();
     m_settingsController.reset();
@@ -635,54 +607,9 @@ void PhoneController::openLatestUpdateUrl()
     }
 }
 
-void PhoneController::provisionWithProvider(const QString &providerId,
-                                            const QString &host,
-                                            const QString &username,
-                                            const QString &password)
+ProvisioningController *PhoneController::provisioningController() const
 {
-    if (!m_provisioningRegistry) return;
-    auto *p = m_provisioningRegistry->find(providerId);
-    if (!p) {
-        const QString msg = tr("Unknown provisioning provider: %1").arg(providerId);
-        postNotice(msg, 5000);
-        emit provisioningFailed(providerId, msg);
-        return;
-    }
-    p->provision(host, username, password);
-}
-
-QVariantList PhoneController::provisioningProviders() const
-{
-    if (!m_provisioningRegistry) return {};
-    return m_provisioningRegistry->descriptors();
-}
-
-void PhoneController::provisionWithProviderToken(const QString &providerId,
-                                                 const QString &host,
-                                                 const QString &accessToken)
-{
-    if (!m_provisioningRegistry) return;
-    auto *p = m_provisioningRegistry->find(providerId);
-    if (!p) {
-        const QString msg = tr("Unknown provisioning provider: %1").arg(providerId);
-        postNotice(msg, 5000);
-        emit provisioningFailed(providerId, msg);
-        return;
-    }
-    p->provisionWithToken(host, accessToken);
-}
-
-void PhoneController::discoverAuthMethods(const QString &providerId,
-                                          const QString &host)
-{
-    if (!m_provisioningRegistry) return;
-    auto *p = m_provisioningRegistry->find(providerId);
-    if (!p) {
-        emit authMethodsFailed(providerId, host,
-                               tr("Unknown provisioning provider: %1").arg(providerId));
-        return;
-    }
-    p->discoverAuthMethods(host);
+    return m_provisioningController.get();
 }
 
 QVariantMap PhoneController::streamStats(int callId) const
