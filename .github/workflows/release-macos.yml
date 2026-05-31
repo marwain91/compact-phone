@@ -21,16 +21,32 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: write   # attach assets to the release
+  # No packages:read (builds its own toolchain, never pulls GHCR) and no
+  # id-token:write (signs locally via an imported keychain identity, not OIDC)
+  # — unlike release-linux (GHCR) and release-windows (Azure OIDC).
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   BUILD_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
 
+# Serialize runs for the same tag (a tag push + a manual dispatch can collide)
+# so two jobs never upload the same release assets at once. cancel-in-progress
+# is false: a signing/notarization/publish in flight must never be interrupted.
+# Uses the raw github/inputs expression because env.* is unavailable here.
+concurrency:
+  group: release-macos-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   build-sign-publish:
+    name: Build, sign, notarize + publish DMG
     runs-on: macos-15
+    # No `environment: release` (unlike release-windows, where it is required
+    # for the Azure OIDC subject to match). The Apple P12 / notary creds are
+    # read from repo-level secrets; gate them behind an environment in repo
+    # settings first if that protection is wanted, or the job loses the secrets.
     env:
       VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite"
     steps:
@@ -201,7 +217,12 @@ jobs:
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
           REF_NAME: ${{ env.RELEASE_TAG }}
         run: |
-          python3 -m pip install --quiet --user cryptography || true
+          # cryptography is only needed to EdDSA-sign the appcast; the
+          # generator is pure-stdlib when unsigned. Install it only when a key
+          # is set, matching release-linux / release-windows.
+          if [[ -n "${SPARKLE_ED25519_PRIVATE_KEY:-}" ]]; then
+            python3 -m pip install --quiet --user cryptography
+          fi
           VERSION="${REF_NAME#v}"
           DMG=$(find dist -maxdepth 1 -type f -name '*.dmg' | head -n 1)
           if [[ -z "$DMG" ]]; then
