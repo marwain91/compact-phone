@@ -76,7 +76,9 @@ AccountsController::AccountsController(sip::AccountsManager *accounts,
                     s == sip::RegistrationState::Failed
                     && (it == m_lastState.end() || it->second != s);
                 m_lastState[static_cast<int>(id)] = s;
-                refreshModel();
+                // Targeted update — a reg-state change is a per-account field
+                // change, not a structural one, so don't reset the whole model.
+                if (m_model) m_model->notifyRegistrationChanged(static_cast<int>(id));
                 refreshRegisteredAccountCount();
                 emit activeAccountIdChanged();
                 if (isNewFailure && m_accounts) {

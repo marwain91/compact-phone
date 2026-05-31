@@ -36,6 +36,13 @@ public:
 
     Q_INVOKABLE void refresh();
 
+    // Emit dataChanged for one account's registration roles without a full
+    // reset. Registration state is read live from the manager (not stored in
+    // the snapshot), and reg-state changes are frequent (every registration
+    // event / network flap), so a reset here would needlessly tear down every
+    // account delegate.
+    void notifyRegistrationChanged(int accountId);
+
 private:
     sip::AccountsManager *m_mgr;
     std::vector<sip::Account> m_snapshot;
