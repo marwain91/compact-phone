@@ -117,6 +117,31 @@ release and verifies its SHA-256 before running `gitleaks detect`.
 Do not switch back to `gitleaks/gitleaks-action@v2`; it still declares
 `node20` and emits GitHub Actions runtime deprecation warnings.
 
+`secret-scan` runs on `pull_request` and on direct pushes to `main`
+(`push.branches: [main]`) — the `push` is scoped so a PR branch push
+doesn't scan twice. It's a cheap check, so it (unlike the release
+workflows) is allowed on PR/push and uses `cancel-in-progress: true`.
+
+### gitleaks `generic-api-key` fires on GitHub Actions cache keys
+
+A workflow line like `key: pjsip-macos-2.17-v1` (the `key:` field of an
+`actions/cache` step) trips gitleaks' built-in `generic-api-key` rule:
+the literal `key:` plus a hyphenated value reads as a high-entropy
+token. It's a cache name, not a secret — but it turns `main`'s
+secret-scan red on merge (this bit us in #76 after the PJSIP cache was
+added to `release-macos.yml`).
+
+The PJSIP cache-key names are allowlisted in `.gitleaks.toml`:
+```toml
+'''pjsip-(?:macos|windows|linux)-\d+\.\d+-v[0-9a-z.-]+''',
+```
+If you add a new high-entropy-looking `key:`/`id:` value to a workflow,
+**run gitleaks against the change before merging** (it's cheap:
+`gitleaks detect --source . --config .gitleaks.toml --redact --no-banner`)
+and extend that allowlist regex rather than renaming the key. Renaming
+is fragile — the same value can trip again after an entropy-changing
+suffix bump.
+
 ### GitHub Actions JavaScript actions are kept on Node 24
 
 Workflow JS actions should use Node 24-capable majors where available:
