@@ -107,6 +107,57 @@ TEST_F(HistoryManagerTest, ListHonorsLimit)
     EXPECT_EQ(entries[1].remoteUri, "sip:limit-3@example.com");
 }
 
+TEST_F(HistoryManagerTest, PrunesToMaxEntries)
+{
+    using compactphone::sip::HistoryManager;
+    HistoryManager mgr(&db);
+    const int overflow = HistoryManager::kMaxEntries + 12;
+    for (int i = 0; i < overflow; ++i) {
+        compactphone::sip::HistoryEntry e;
+        e.accountId = 1;
+        e.direction = compactphone::sip::CallDirection::Outbound;
+        e.remoteUri = "sip:keep-" + std::to_string(i) + "@example.com";
+        e.startedAt = 1700000000000LL + i * 1000;
+        ASSERT_NE(mgr.append(e), compactphone::sip::kInvalidHistoryId);
+    }
+
+    // Ask for far more than the cap; the table itself must be bounded.
+    const auto entries = mgr.list(1000);
+    ASSERT_EQ(entries.size(), static_cast<size_t>(HistoryManager::kMaxEntries));
+    // Newest survives, oldest is pruned.
+    EXPECT_EQ(entries.front().remoteUri,
+              "sip:keep-" + std::to_string(overflow - 1) + "@example.com");
+    EXPECT_EQ(entries.back().remoteUri,
+              "sip:keep-" + std::to_string(overflow - HistoryManager::kMaxEntries)
+                  + "@example.com");
+}
+
+TEST_F(HistoryManagerTest, PrunesEntriesOlderThanMaxAge)
+{
+    using compactphone::sip::HistoryManager;
+    HistoryManager mgr(&db);
+    const std::int64_t base = 2000000000000LL; // well past the age window
+
+    compactphone::sip::HistoryEntry oldEntry;
+    oldEntry.accountId = 1;
+    oldEntry.direction = compactphone::sip::CallDirection::Outbound;
+    oldEntry.remoteUri = "sip:stale@example.com";
+    oldEntry.startedAt = base;
+    ASSERT_NE(mgr.append(oldEntry), compactphone::sip::kInvalidHistoryId);
+
+    // A fresh call far enough ahead pushes the old one outside the window.
+    compactphone::sip::HistoryEntry freshEntry;
+    freshEntry.accountId = 1;
+    freshEntry.direction = compactphone::sip::CallDirection::Outbound;
+    freshEntry.remoteUri = "sip:fresh@example.com";
+    freshEntry.startedAt = base + HistoryManager::kMaxAgeMs + 1000;
+    ASSERT_NE(mgr.append(freshEntry), compactphone::sip::kInvalidHistoryId);
+
+    const auto entries = mgr.list();
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries.front().remoteUri, "sip:fresh@example.com");
+}
+
 TEST(HistoryManagerStandalone, HandlesMissingDatabaseGracefully)
 {
     compactphone::sip::HistoryManager mgr(nullptr);

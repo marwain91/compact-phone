@@ -13,6 +13,10 @@ namespace compactphone::models {
 
 class AccountsModel : public QAbstractListModel {
     Q_OBJECT
+    // Reactive row count for QML. rowCount() alone is a plain method call, so
+    // bindings like `visible: accounts.rowCount() > 1` never re-evaluate when
+    // accounts load after the view is built. Bind to `count` instead.
+    Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
 public:
     enum Roles {
         IdRole = Qt::UserRole + 1,
@@ -42,6 +46,9 @@ public:
     // event / network flap), so a reset here would needlessly tear down every
     // account delegate.
     void notifyRegistrationChanged(int accountId);
+
+signals:
+    void countChanged();
 
 private:
     sip::AccountsManager *m_mgr;

@@ -208,7 +208,7 @@ ColumnLayout {
 
                 AppComboBox {
                     id: accountCombo
-                    visible: PhoneController.accounts.rowCount() > 1
+                    visible: PhoneController.accounts.count > 1
                     implicitWidth: 110
                     implicitHeight: 22
                     flat: true
@@ -223,8 +223,9 @@ ColumnLayout {
                     }
                     currentIndex: {
                         const aid = PhoneController.activeAccountId
+                        const n = PhoneController.accounts.count
                         if (aid <= 0) return 0
-                        for (let i = 0; i < model.rowCount(); i++) {
+                        for (let i = 0; i < n; i++) {
                             if (model.data(model.index(i, 0), Qt.UserRole + 1) === aid) return i
                         }
                         return 0

@@ -56,7 +56,38 @@ HistoryId HistoryManager::append(const HistoryEntry &e)
     HistoryId id = ok ? static_cast<HistoryId>(sqlite3_last_insert_rowid(m_db->handle()))
                       : kInvalidHistoryId;
     sqlite3_finalize(stmt);
+    if (ok) prune(e.startedAt);
     return id;
+}
+
+void HistoryManager::prune(std::int64_t referenceNowMs)
+{
+    if (!m_db || !m_db->handle()) return;
+
+    // Age-based: drop entries older than the retention window. Guard against a
+    // tiny reference timestamp wiping the whole table (e.g. unset clocks).
+    if (referenceNowMs > kMaxAgeMs) {
+        sqlite3_stmt *stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db->handle(),
+                "DELETE FROM call_history WHERE started_at < ?",
+                -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int64(stmt, 1, referenceNowMs - kMaxAgeMs);
+            sqlite3_step(stmt);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // Count-based: keep only the newest kMaxEntries rows. id DESC breaks
+    // started_at ties deterministically.
+    sqlite3_stmt *stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db->handle(),
+            "DELETE FROM call_history WHERE id NOT IN ("
+            "SELECT id FROM call_history ORDER BY started_at DESC, id DESC LIMIT ?)",
+            -1, &stmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int(stmt, 1, kMaxEntries);
+        sqlite3_step(stmt);
+    }
+    sqlite3_finalize(stmt);
 }
 
 std::vector<HistoryEntry> HistoryManager::list(int limit) const

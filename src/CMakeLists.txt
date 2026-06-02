@@ -180,7 +180,7 @@ set(_compactphone_platform_sources)
 if(WIN32)
     list(APPEND _compactphone_platform_sources compactphone.rc)
     # VERSIONINFO needs the version baked in at compile time. PROJECT_VERSION
-    # comes from the top-level project() call (currently 0.1.0); pad to four
+    # comes from the top-level project() call (currently 0.1.1); pad to four
     # parts (Win32 wants major,minor,patch,build).
     set(_cp_v "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0")
     set(_cp_vs "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.0")

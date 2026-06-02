@@ -88,9 +88,11 @@ QHash<int, QByteArray> AccountsModel::roleNames() const
 
 void AccountsModel::refresh()
 {
+    const auto before = m_snapshot.size();
     beginResetModel();
     m_snapshot = m_mgr ? m_mgr->list() : std::vector<sip::Account>{};
     endResetModel();
+    if (m_snapshot.size() != before) emit countChanged();
 }
 
 void AccountsModel::notifyRegistrationChanged(int accountId)
