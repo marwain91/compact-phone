@@ -6,6 +6,23 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-02
+
+### Fixed
+- Dialpad account selector now appears when more than one account is
+  configured. Its visibility was bound to a non-reactive `rowCount()`
+  call that latched `false` before accounts finished loading, so the
+  picker stayed hidden even with multiple accounts. `AccountsModel` now
+  exposes a reactive `count` property and the dialer binds to it.
+- Long Call History entries now truncate with an ellipsis instead of
+  overflowing the row — the `elide` was already set but the text had no
+  width constraint to clip against.
+
+### Changed
+- Call history is now bounded: at most 50 entries and 90 days are kept.
+  Older entries are pruned automatically on each new call so the log no
+  longer grows without limit.
+
 ## [0.1.0] - 2026-05-26
 
 ### Added

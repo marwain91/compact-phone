@@ -83,6 +83,10 @@ ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
                     Text {
+                        // Layout.fillWidth caps the width so elide can engage;
+                        // without it the Text keeps its full implicit width and
+                        // long SIP URIs never truncate.
+                        Layout.fillWidth: true
                         text: remoteUri
                         color: durationMs === 0 && direction === "in" ? Theme.danger : Theme.textPrimary
                         font.family: Theme.fontFamily
@@ -91,11 +95,13 @@ ColumnLayout {
                         elide: Text.ElideRight
                     }
                     Text {
+                        Layout.fillWidth: true
                         text: relTime(startedAt) +
                               (durationMs > 0 ? "  •  " + fmtDur(durationMs) : "")
                         color: Theme.textTertiary
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fxs
+                        elide: Text.ElideRight
                     }
                 }
                 IconButton {
