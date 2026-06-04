@@ -73,7 +73,7 @@ def main() -> int:
     p.add_argument("--os", choices=("macos", "windows", "linux"),
                    required=True)
     p.add_argument("--min-system-version", default=None,
-                   help="Override the default min OS version (12.0 mac / "
+                   help="Override the default min OS version (13.0 mac / "
                         "10.0 win / glibc 2.39 linux)")
     p.add_argument("--output", required=True)
     args = p.parse_args()
@@ -86,7 +86,7 @@ def main() -> int:
 
     if args.os == "macos":
         mime = "application/x-apple-diskimage"
-        default_min = "12.0"
+        default_min = "13.0"
     elif args.os == "windows":
         mime = "application/x-msi"
         default_min = "10.0"

@@ -136,17 +136,21 @@ if(APPLE)
         core/platform/Keychain_macos.mm
         core/platform/TouchIdGate.h
         core/platform/TouchIdGate.mm
+        core/platform/Autostart_macos.h
+        core/platform/Autostart_macos.mm
         core/PowerMonitor_macos.mm
     )
     set_source_files_properties(
         core/platform/Keychain_macos.mm
         core/platform/TouchIdGate.mm
+        core/platform/Autostart_macos.mm
         core/PowerMonitor_macos.mm
         PROPERTIES COMPILE_FLAGS "-fobjc-arc")
     target_link_libraries(compactphone_core PUBLIC
         "-framework AppKit"
         "-framework Security"
         "-framework LocalAuthentication"
+        "-framework ServiceManagement"
         "-framework Foundation"
     )
 endif()
