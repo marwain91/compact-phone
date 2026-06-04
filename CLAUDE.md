@@ -68,7 +68,10 @@ file × 19 sublibraries). With it, peak is ~10 GB.
 The Linux CMake preset wires the overlay via `VCPKG_OVERLAY_TRIPLETS`.
 macOS release/manual validation uses `tools/release/triplets/arm64-osx.cmake`
 through `vcpkg-configuration.json` so vcpkg cannot silently ignore it during
-manifest install. That triplet also sets `VCPKG_OSX_DEPLOYMENT_TARGET=12.0`.
+manifest install. That triplet also sets `VCPKG_OSX_DEPLOYMENT_TARGET=13.0`
+(the macOS floor is 13 because the "Launch on startup" setting uses
+`SMAppService`, which is macOS 13+; the 12.0 → 13.0 bump forced a one-time
+cold vcpkg/Qt rebuild and dropped macOS 12 / Monterey).
 Windows release/manual validation uses `tools/release/triplets/x64-windows.cmake`
 for the same reason: default `x64-windows` builds both Debug and Release
 variants of Qt, which can leave `qtdeclarative` building for hours on cold CI.

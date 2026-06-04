@@ -104,6 +104,12 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
     m_settingsController = std::make_unique<SettingsController>(
         m_engine.get(), m_settings.get(), dataPath, this);
+    connect(m_settingsController.get(),
+            &SettingsController::launchOnStartupFailed,
+            this,
+            [this](const QString &message) {
+                postNotice(message, notice::kError);
+            });
     m_callsController = std::make_unique<CallsController>(
         m_accounts.get(), m_calls.get(), m_callsModel.get(),
         m_historyMgr.get(), m_historyModel.get(),

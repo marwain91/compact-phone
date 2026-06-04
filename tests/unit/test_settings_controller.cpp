@@ -2,9 +2,12 @@
 
 #include "core/SettingsController.h"
 #include "core/SettingsManager.h"
+#include "core/platform/Autostart_memory.h"
 #include "persistence/Database.h"
 
 #include <QTemporaryDir>
+
+#include <memory>
 
 class SettingsControllerTest : public ::testing::Test {
 protected:
@@ -215,4 +218,85 @@ TEST_F(SettingsControllerTest, SettingsSurviveControllerRestart)
     EXPECT_EQ(controller2.logLevel(), "warn");
     EXPECT_TRUE(controller2.crashReportingEnabled());
     EXPECT_TRUE(controller2.enterpriseFeaturesEnabled());
+}
+
+TEST_F(SettingsControllerTest, LaunchOnStartupReflectsBackendAndPersistsThroughIt)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    compactphone::sip::SettingsManager settings(&db);
+    auto fake = std::make_unique<compactphone::platform::MemoryAutostart>();
+    auto *fakePtr = fake.get();
+    compactphone::SettingsController controller(
+        nullptr, &settings, tmp.path(), std::move(fake));
+
+    EXPECT_FALSE(controller.launchOnStartup());
+    EXPECT_TRUE(controller.autostartSupported());
+
+    int changes = 0;
+    QObject::connect(&controller,
+                     &compactphone::SettingsController::launchOnStartupChanged,
+                     [&] { ++changes; });
+
+    controller.setLaunchOnStartup(true);
+    EXPECT_TRUE(controller.launchOnStartup());
+    EXPECT_TRUE(fakePtr->isEnabled());      // went through the backend
+    EXPECT_EQ(changes, 1);
+}
+
+TEST_F(SettingsControllerTest, LaunchOnStartupRevertsWhenBackendFails)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    compactphone::sip::SettingsManager settings(&db);
+    auto fake = std::make_unique<compactphone::platform::MemoryAutostart>();
+    auto *fakePtr = fake.get();
+    fakePtr->failNextSetEnabled();
+    compactphone::SettingsController controller(
+        nullptr, &settings, tmp.path(), std::move(fake));
+
+    int failures = 0;
+    QObject::connect(&controller,
+                     &compactphone::SettingsController::launchOnStartupFailed,
+                     [&] { ++failures; });
+
+    controller.setLaunchOnStartup(true);
+    EXPECT_FALSE(controller.launchOnStartup());   // reverted
+    EXPECT_FALSE(fakePtr->isEnabled());
+    EXPECT_EQ(failures, 1);
+}
+
+TEST_F(SettingsControllerTest, AutostartSupportedFollowsBackend)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    compactphone::sip::SettingsManager settings(&db);
+    auto fake = std::make_unique<compactphone::platform::MemoryAutostart>();
+    fake->setSupported(false);
+    compactphone::SettingsController controller(
+        nullptr, &settings, tmp.path(), std::move(fake));
+    EXPECT_FALSE(controller.autostartSupported());
+}
+
+TEST_F(SettingsControllerTest, StartMinimizedToTrayPersistsAndDefaultsOff)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    compactphone::sip::SettingsManager settings(&db);
+    compactphone::SettingsController controller(nullptr, &settings, tmp.path());
+
+    EXPECT_FALSE(controller.startMinimizedToTray());
+
+    int changes = 0;
+    QObject::connect(&controller,
+                     &compactphone::SettingsController::startMinimizedToTrayChanged,
+                     [&] { ++changes; });
+
+    controller.setStartMinimizedToTray(true);
+    EXPECT_TRUE(controller.startMinimizedToTray());
+    EXPECT_EQ(settings.getOr("start_minimized_to_tray", ""), "1");
+    EXPECT_EQ(changes, 1);
+
+    controller.setStartMinimizedToTray(true);   // no-op
+    EXPECT_EQ(changes, 1);
 }

@@ -74,6 +74,15 @@ add_library(compactphone_core STATIC
     core/platform/Keychain_factory.cpp
     core/platform/Keychain_windows.h
     core/platform/Keychain_windows.cpp
+    core/platform/Autostart.h
+    core/platform/Autostart_memory.h
+    core/platform/Autostart_memory.cpp
+    core/platform/Autostart_factory.h
+    core/platform/Autostart_factory.cpp
+    core/platform/Autostart_linux.h
+    core/platform/Autostart_linux.cpp
+    core/platform/Autostart_windows.h
+    core/platform/Autostart_windows.cpp
     core/Contact.h
     core/ContactsManager.h
     core/ContactsManager.cpp
@@ -127,17 +136,21 @@ if(APPLE)
         core/platform/Keychain_macos.mm
         core/platform/TouchIdGate.h
         core/platform/TouchIdGate.mm
+        core/platform/Autostart_macos.h
+        core/platform/Autostart_macos.mm
         core/PowerMonitor_macos.mm
     )
     set_source_files_properties(
         core/platform/Keychain_macos.mm
         core/platform/TouchIdGate.mm
+        core/platform/Autostart_macos.mm
         core/PowerMonitor_macos.mm
         PROPERTIES COMPILE_FLAGS "-fobjc-arc")
     target_link_libraries(compactphone_core PUBLIC
         "-framework AppKit"
         "-framework Security"
         "-framework LocalAuthentication"
+        "-framework ServiceManagement"
         "-framework Foundation"
     )
 endif()

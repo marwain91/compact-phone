@@ -11,6 +11,8 @@ to change it.
 | **Theme** | Light, Dark, or one of the system-matched options. Changes apply instantly. |
 | **Log level** | Verbosity of the in-app log (Logs viewer in **Advanced**). `info` is the sane default. Bump to `debug` or `trace` when reproducing a bug. |
 | **Always on top** | When enabled, the main window stays above all other windows. Independent of this setting, an incoming-call ring always pops the window to the front so it can't be hidden behind a fullscreen app. |
+| **Launch on startup** | Start Compact Phone automatically when you log in. Registers a per-user login item (macOS Login Items, the Windows `Run` key, or a Linux XDG autostart entry). Hidden on systems without a desktop session. |
+| **Start minimized to tray** | Open hidden in the system tray instead of showing the window. Applies to every launch — pair it with **Launch on startup** to come online silently at login, ready to take calls. |
 
 ## Audio
 

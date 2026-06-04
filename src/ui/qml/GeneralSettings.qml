@@ -113,6 +113,61 @@ ScrollView {
                     }
                 }
 
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.s10
+                    visible: PhoneController.settings.autostartSupported
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Text {
+                            text: qsTr("Launch on startup")
+                            color: Theme.textPrimary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fbody
+                            font.weight: Font.Medium
+                        }
+                        Text {
+                            text: qsTr("Start Compact Phone when you log in")
+                            color: Theme.textTertiary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fxs
+                        }
+                    }
+                    Item { Layout.fillWidth: true; implicitHeight: 1 }
+                    AppSwitch {
+                        checked: PhoneController.settings.launchOnStartup
+                        onToggled: PhoneController.settings.launchOnStartup = checked
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.s10
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Text {
+                            text: qsTr("Start minimized to tray")
+                            color: Theme.textPrimary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fbody
+                            font.weight: Font.Medium
+                        }
+                        Text {
+                            text: qsTr("Open hidden in the tray instead of showing the window")
+                            color: Theme.textTertiary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fxs
+                        }
+                    }
+                    Item { Layout.fillWidth: true; implicitHeight: 1 }
+                    AppSwitch {
+                        checked: PhoneController.settings.startMinimizedToTray
+                        onToggled: PhoneController.settings.startMinimizedToTray = checked
+                    }
+                }
+
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
 
                 Text {

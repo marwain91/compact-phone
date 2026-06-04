@@ -12,6 +12,10 @@ class SettingsManager;
 class SipEngine;
 }
 
+namespace compactphone::platform {
+class IAutostart;
+}
+
 namespace compactphone {
 
 class SettingsController : public QObject {
@@ -41,11 +45,22 @@ class SettingsController : public QObject {
     Q_PROPERTY(bool enterpriseFeaturesEnabled READ enterpriseFeaturesEnabled WRITE setEnterpriseFeaturesEnabled NOTIFY enterpriseFeaturesEnabledChanged)
     Q_PROPERTY(bool crashReportingEnabled READ crashReportingEnabled WRITE setCrashReportingEnabled NOTIFY crashReportingEnabledChanged)
     Q_PROPERTY(bool alwaysOnTop READ alwaysOnTop WRITE setAlwaysOnTop NOTIFY alwaysOnTopChanged)
+    Q_PROPERTY(bool launchOnStartup READ launchOnStartup WRITE setLaunchOnStartup NOTIFY launchOnStartupChanged)
+    Q_PROPERTY(bool autostartSupported READ autostartSupported CONSTANT)
+    Q_PROPERTY(bool startMinimizedToTray READ startMinimizedToTray WRITE setStartMinimizedToTray NOTIFY startMinimizedToTrayChanged)
 public:
     explicit SettingsController(sip::SipEngine *engine,
                                 sip::SettingsManager *settings,
                                 QString appDataPath,
                                 QObject *parent = nullptr);
+    // Test seam: inject a specific autostart backend. Production uses the
+    // 4-arg overload above, which selects the platform backend itself — so
+    // call sites never need IAutostart to be a complete type.
+    SettingsController(sip::SipEngine *engine,
+                       sip::SettingsManager *settings,
+                       QString appDataPath,
+                       std::unique_ptr<platform::IAutostart> autostart,
+                       QObject *parent = nullptr);
     ~SettingsController() override;
 
     QString logLevel() const { return m_logLevel; }
@@ -115,6 +130,19 @@ public:
     bool alwaysOnTop() const { return m_alwaysOnTop; }
     void setAlwaysOnTop(bool enabled);
 
+    // Registers/removes an OS login item. The OS entry is the source of
+    // truth — launchOnStartup() reflects the backend's isEnabled(). A
+    // failed setEnabled() reverts the toggle and emits launchOnStartupFailed.
+    bool launchOnStartup() const { return m_launchOnStartup; }
+    void setLaunchOnStartup(bool enabled);
+    bool autostartSupported() const;
+
+    // On every launch, when on and a system tray is available, the window
+    // starts hidden. Applies to all launches (manual and login); a boot/
+    // provisioning --minimize-to-tray still overrides it. Off by default.
+    bool startMinimizedToTray() const { return m_startMinimizedToTray; }
+    void setStartMinimizedToTray(bool enabled);
+
     // Sentry / crash-report opt-in. Off by default; only honored when the
     // build was configured with -DCOMPACTPHONE_ENABLE_SENTRY=ON.
     bool crashReportingEnabled() const { return m_crashReportingEnabled; }
@@ -146,6 +174,9 @@ signals:
     void enterpriseFeaturesEnabledChanged();
     void crashReportingEnabledChanged();
     void alwaysOnTopChanged();
+    void launchOnStartupChanged();
+    void launchOnStartupFailed(const QString &message);
+    void startMinimizedToTrayChanged();
 
 private:
     sip::SipEngine *m_engine = nullptr;
@@ -170,6 +201,9 @@ private:
     bool m_enterpriseFeaturesEnabled = false;
     bool m_crashReportingEnabled = false;
     bool m_alwaysOnTop = false;
+    bool m_launchOnStartup = false;
+    bool m_startMinimizedToTray = false;
+    std::unique_ptr<platform::IAutostart> m_autostart;
     std::unique_ptr<sip::RingtonePlayer> m_ringtone;
 
     void applyRingtoneState();

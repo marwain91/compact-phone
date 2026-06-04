@@ -14,7 +14,7 @@ container today; a native package is on the roadmap.
 4. When prompted, allow microphone access. Audio calls won't work
    without it.
 
-**System requirements:** macOS 12 (Monterey) or later. Apple Silicon
+**System requirements:** macOS 13 (Ventura) or later. Apple Silicon
 and Intel both supported.
 
 ## Windows
