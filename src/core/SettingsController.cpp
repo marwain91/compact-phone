@@ -4,6 +4,8 @@
 #include "RingtonePlayer.h"
 #include "SettingsManager.h"
 #include "SipEngine.h"
+#include "platform/Autostart.h"
+#include "platform/Autostart_factory.h"
 
 #include <QFile>
 #include <QTimer>
@@ -34,11 +36,24 @@ SettingsController::SettingsController(sip::SipEngine *engine,
                                        sip::SettingsManager *settings,
                                        QString appDataPath,
                                        QObject *parent)
+    : SettingsController(engine, settings, std::move(appDataPath),
+                         platform::makeAutostart(), parent)
+{
+}
+
+SettingsController::SettingsController(sip::SipEngine *engine,
+                                       sip::SettingsManager *settings,
+                                       QString appDataPath,
+                                       std::unique_ptr<platform::IAutostart> autostart,
+                                       QObject *parent)
     : QObject(parent),
       m_engine(engine),
       m_settings(settings),
-      m_appDataPath(std::move(appDataPath))
+      m_appDataPath(std::move(appDataPath)),
+      m_autostart(std::move(autostart))
 {
+    // OS login item is the source of truth for the toggle's initial state.
+    m_launchOnStartup = m_autostart && m_autostart->isEnabled();
     if (m_settings) {
         m_logLevel = QString::fromStdString(m_settings->getOr("log_level", "info"));
         m_ringtoneEnabled = m_settings->getOr("ringtone_enabled", "1") != "0";
@@ -250,6 +265,29 @@ void SettingsController::setAlwaysOnTop(bool enabled)
     m_alwaysOnTop = enabled;
     if (m_settings) m_settings->set("always_on_top", enabled ? "1" : "0");
     emit alwaysOnTopChanged();
+}
+
+bool SettingsController::autostartSupported() const
+{
+    return m_autostart && m_autostart->isSupported();
+}
+
+void SettingsController::setLaunchOnStartup(bool enabled)
+{
+    if (m_launchOnStartup == enabled) return;
+    if (!m_autostart || !m_autostart->setEnabled(enabled)) {
+        spdlog::warn("SettingsController: failed to {} launch-on-startup",
+                     enabled ? "enable" : "disable");
+        // Leave m_launchOnStartup unchanged; emit Changed so a bound QML
+        // switch snaps back to the real state, and Failed for a notice.
+        emit launchOnStartupFailed(
+            enabled ? QStringLiteral("Couldn't enable launch on startup.")
+                    : QStringLiteral("Couldn't disable launch on startup."));
+        emit launchOnStartupChanged();
+        return;
+    }
+    m_launchOnStartup = enabled;
+    emit launchOnStartupChanged();
 }
 
 QVariantList SettingsController::audioInputs() const
