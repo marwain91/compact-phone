@@ -16,7 +16,7 @@ taking the open path.
 
 ## Which platforms are supported?
 
-- **macOS** — Apple Silicon and Intel, macOS 12 (Monterey) and up.
+- **macOS** — Apple Silicon and Intel, macOS 13 (Ventura) and up.
   Signed `.app` bundle in Releases.
 - **Windows** — x64, Windows 10 (1903) and up. MSI installer in
   Releases.
