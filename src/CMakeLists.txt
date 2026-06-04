@@ -74,6 +74,9 @@ add_library(compactphone_core STATIC
     core/platform/Keychain_factory.cpp
     core/platform/Keychain_windows.h
     core/platform/Keychain_windows.cpp
+    core/platform/Autostart.h
+    core/platform/Autostart_memory.h
+    core/platform/Autostart_memory.cpp
     core/Contact.h
     core/ContactsManager.h
     core/ContactsManager.cpp
