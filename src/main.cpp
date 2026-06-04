@@ -11,6 +11,7 @@
 
 #if COMPACTPHONE_WITH_TRAY
 #include <QApplication>
+#include <QSystemTrayIcon>
 using CompactPhoneApplication = QApplication;
 #else
 using CompactPhoneApplication = QGuiApplication;
@@ -177,13 +178,24 @@ int main(int argc, char *argv[])
         applyBootConfig(bootCfg, *pc);
     }
 
-    if (bootCfg.minimizeToTray && *bootCfg.minimizeToTray) {
+    // Effective start-minimized = explicit boot/provisioning override if set,
+    // else the persisted user setting. Never hide with no tray to restore from
+    // (so the whole thing is gated on tray support being built in).
+#if COMPACTPHONE_WITH_TRAY
+    bool startMinimized = false;
+    if (bootCfg.minimizeToTray.has_value()) {
+        startMinimized = *bootCfg.minimizeToTray;
+    } else if (pc) {
+        startMinimized = pc->settingsController()->startMinimizedToTray();
+    }
+    if (startMinimized && QSystemTrayIcon::isSystemTrayAvailable()) {
         QTimer::singleShot(120, &app, [&engine] {
             for (auto *root : engine.rootObjects()) {
                 if (root) root->setProperty("visible", false);
             }
         });
     }
+#endif
 
     // Crash reporting is only available when the release build embeds a
     // usable DSN, and it remains gated by the user's Settings opt-in.
