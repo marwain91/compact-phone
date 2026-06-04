@@ -77,6 +77,12 @@ add_library(compactphone_core STATIC
     core/platform/Autostart.h
     core/platform/Autostart_memory.h
     core/platform/Autostart_memory.cpp
+    core/platform/Autostart_factory.h
+    core/platform/Autostart_factory.cpp
+    core/platform/Autostart_linux.h
+    core/platform/Autostart_linux.cpp
+    core/platform/Autostart_windows.h
+    core/platform/Autostart_windows.cpp
     core/Contact.h
     core/ContactsManager.h
     core/ContactsManager.cpp
