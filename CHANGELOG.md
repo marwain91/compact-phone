@@ -6,6 +6,30 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-04
+
+### Added
+- **Launch on startup** — start Compact Phone automatically when you log
+  in. Registers a per-user OS login item (macOS Login Items via
+  `SMAppService`, the Windows `Run` key, or a Linux XDG autostart entry).
+  Hidden on systems without a desktop session.
+- **Start minimized to tray** — open hidden in the system tray instead of
+  showing the window. Applies to every launch; pair it with Launch on
+  startup to come online silently at login, ready to take calls.
+
+### Changed
+- Minimum macOS is now **13 (Ventura)**, up from 12 (Monterey). The Launch
+  on startup integration uses `SMAppService`, which requires macOS 13;
+  macOS 12 is no longer supported.
+
+### Fixed
+- Dialpad no longer overflows when more than one account is configured.
+  The v0.1.1 account selector was a separate fixed-width control that
+  pushed the keypad and Call button off the right edge of the window; the
+  registration status pill and the account switcher are now a single
+  dynamic element (the pill gains a chevron and opens an account menu when
+  multiple accounts exist).
+
 ## [0.1.1] - 2026-06-02
 
 ### Fixed
