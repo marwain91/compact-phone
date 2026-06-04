@@ -157,10 +157,16 @@ ColumnLayout {
                     property var info: root._activeAccountInfo()
                     readonly property bool ok: info.registered
                     readonly property string ext: info.ext
+                    // With more than one account the pill doubles as the account
+                    // switcher (chevron + popup). One dynamic element instead of a
+                    // separate combo, which used to overflow the narrow header row.
+                    readonly property bool multiAccount: PhoneController.accounts.count > 1
                     implicitHeight: 24
                     implicitWidth: pillRow.implicitWidth + Theme.s16
                     radius: Theme.rFull
-                    color: Theme.isDark ? Theme.surfaceHi : "#F7F8FC"
+                    color: statusPill.multiAccount && pillTap.containsMouse
+                           ? (Theme.isDark ? Theme.surface : "#EEF1F7")
+                           : (Theme.isDark ? Theme.surfaceHi : "#F7F8FC")
                     border.width: Theme.isDark ? 1 : 0
                     border.color: Theme.border
 
@@ -186,7 +192,86 @@ ColumnLayout {
                             font.weight: Font.Medium
                             font.letterSpacing: 0
                         }
+                        AppIcon {
+                            visible: statusPill.multiAccount
+                            Layout.preferredWidth: 12
+                            Layout.preferredHeight: 12
+                            Layout.alignment: Qt.AlignVCenter
+                            path: Icons.chevronDown
+                            color: Theme.textTertiary
+                        }
                     }
+
+                    MouseArea {
+                        id: pillTap
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        enabled: statusPill.multiAccount
+                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: accountMenu.opened ? accountMenu.close()
+                                                      : accountMenu.open()
+                    }
+
+                    Popup {
+                        id: accountMenu
+                        y: statusPill.height + 4
+                        width: Math.max(statusPill.width, 200)
+                        padding: Theme.s4
+                        background: Rectangle {
+                            radius: Theme.r8
+                            color: Theme.bgElevated
+                            border.color: Theme.border
+                        }
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: accountMenu.visible ? PhoneController.accounts : null
+                            delegate: ItemDelegate {
+                                id: acctDlg
+                                width: ListView.view ? ListView.view.width : 0
+                                height: 34
+                                required property int accountId
+                                required property string label
+                                required property string registrationState
+                                readonly property bool isActive:
+                                    accountId === PhoneController.activeAccountId
+                                contentItem: RowLayout {
+                                    spacing: Theme.s8
+                                    Rectangle {
+                                        width: 7; height: 7; radius: 4
+                                        color: acctDlg.registrationState === "registered"
+                                               ? Theme.success : Theme.textTertiary
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: acctDlg.label
+                                        color: acctDlg.isActive ? Theme.accent : Theme.textPrimary
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fbody
+                                        font.weight: acctDlg.isActive ? Font.DemiBold : Font.Medium
+                                        elide: Text.ElideRight
+                                    }
+                                    AppIcon {
+                                        visible: acctDlg.isActive
+                                        Layout.preferredWidth: 13
+                                        Layout.preferredHeight: 13
+                                        Layout.alignment: Qt.AlignVCenter
+                                        path: Icons.check
+                                        color: Theme.accent
+                                    }
+                                }
+                                background: Rectangle {
+                                    radius: Theme.r6
+                                    color: acctDlg.hovered ? Theme.accentSoft : "transparent"
+                                }
+                                onClicked: {
+                                    PhoneController.activeAccountId = acctDlg.accountId
+                                    accountMenu.close()
+                                }
+                            }
+                        }
+                    }
+
                     Connections {
                         target: PhoneController
                         function onActiveAccountIdChanged() { statusPill.info = root._activeAccountInfo() }
@@ -204,33 +289,6 @@ ColumnLayout {
                     Layout.preferredWidth: markWidth
                     Layout.preferredHeight: markHeight
                     Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                }
-
-                AppComboBox {
-                    id: accountCombo
-                    visible: PhoneController.accounts.count > 1
-                    implicitWidth: 110
-                    implicitHeight: 22
-                    flat: true
-                    model: PhoneController.accounts
-                    textRole: "label"
-                    valueRole: "accountId"
-                    background: Rectangle {
-                        radius: Theme.rFull
-                        color: accountCombo.hovered ? Theme.surfaceHi : "transparent"
-                        border.width: 1
-                        border.color: Theme.border
-                    }
-                    currentIndex: {
-                        const aid = PhoneController.activeAccountId
-                        const n = PhoneController.accounts.count
-                        if (aid <= 0) return 0
-                        for (let i = 0; i < n; i++) {
-                            if (model.data(model.index(i, 0), Qt.UserRole + 1) === aid) return i
-                        }
-                        return 0
-                    }
-                    onActivated: PhoneController.activeAccountId = currentValue
                 }
 
                 IconButton {
