@@ -76,6 +76,8 @@ SettingsController::SettingsController(sip::SipEngine *engine,
         m_enterpriseFeaturesEnabled = m_settings->getOr("enterprise_features_enabled", "0") == "1";
         m_crashReportingEnabled = m_settings->getOr("crash_reporting_enabled", "0") == "1";
         m_alwaysOnTop = m_settings->getOr("always_on_top", "0") == "1";
+        m_startMinimizedToTray =
+            m_settings->getOr("start_minimized_to_tray", "0") == "1";
         m_recordingsPath = QString::fromStdString(
             m_settings->getOr("recordings_path", ""));
     }
@@ -288,6 +290,15 @@ void SettingsController::setLaunchOnStartup(bool enabled)
     }
     m_launchOnStartup = enabled;
     emit launchOnStartupChanged();
+}
+
+void SettingsController::setStartMinimizedToTray(bool enabled)
+{
+    if (m_startMinimizedToTray == enabled) return;
+    m_startMinimizedToTray = enabled;
+    if (m_settings) m_settings->set("start_minimized_to_tray",
+                                    enabled ? "1" : "0");
+    emit startMinimizedToTrayChanged();
 }
 
 QVariantList SettingsController::audioInputs() const

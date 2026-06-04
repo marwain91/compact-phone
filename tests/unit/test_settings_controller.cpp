@@ -277,3 +277,26 @@ TEST_F(SettingsControllerTest, AutostartSupportedFollowsBackend)
         nullptr, &settings, tmp.path(), std::move(fake));
     EXPECT_FALSE(controller.autostartSupported());
 }
+
+TEST_F(SettingsControllerTest, StartMinimizedToTrayPersistsAndDefaultsOff)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    compactphone::sip::SettingsManager settings(&db);
+    compactphone::SettingsController controller(nullptr, &settings, tmp.path());
+
+    EXPECT_FALSE(controller.startMinimizedToTray());
+
+    int changes = 0;
+    QObject::connect(&controller,
+                     &compactphone::SettingsController::startMinimizedToTrayChanged,
+                     [&] { ++changes; });
+
+    controller.setStartMinimizedToTray(true);
+    EXPECT_TRUE(controller.startMinimizedToTray());
+    EXPECT_EQ(settings.getOr("start_minimized_to_tray", ""), "1");
+    EXPECT_EQ(changes, 1);
+
+    controller.setStartMinimizedToTray(true);   // no-op
+    EXPECT_EQ(changes, 1);
+}
