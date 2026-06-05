@@ -6,6 +6,8 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-05
+
 ### Fixed
 - Hammering Enter (or the Call button) on the dialpad no longer places
   several duplicate calls to the same number. The dial action was
