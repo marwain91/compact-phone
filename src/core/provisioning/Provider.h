@@ -64,6 +64,18 @@ public:
             tr("This provider does not support token-based sign-in."));
     }
 
+    // Finish a sign-in that stalled on passwordRequired: the user typed the
+    // SIP secret by hand because the provider couldn't fetch it (e.g. the
+    // account lacks permission to read the device record). The provider
+    // merges it into the params it already gathered and emits
+    // provisioningSucceeded / provisioningFailed. Default = unsupported.
+    virtual void completeWithPassword(const QString &password)
+    {
+        Q_UNUSED(password);
+        emit provisioningFailed(
+            tr("This provider cannot complete sign-in without a password."));
+    }
+
     // Probe the host to confirm it's reachable and is the kind of
     // backend this provider expects (typo guard). Subclasses must
     // always emit either authMethodsDiscovered or authMethodsFailed.
@@ -94,6 +106,12 @@ signals:
     void tokenIssued(QString host, QString accessToken);
 
     void provisioningFailed(QString error);
+
+    // Automatic credential fetch was denied (or returned no secret) but we
+    // gathered enough to finish if the user types the SIP password. The wizard
+    // should prompt and then call completeWithPassword(). partialParams is the
+    // account map with an empty "password".
+    void passwordRequired(QVariantMap partialParams);
 
     // host is echoed back so a wizard can ignore stale responses.  methods
     // is a QVariantList<QVariantMap> (see discoverAuthMethods()).

@@ -12,9 +12,20 @@ void CallSessionTracker::noteOutbound(CallId id,
     auto &s = m_sessions[id];
     s.accountId = accountId;
     s.remoteUri = remoteUri;
+    s.dialedTarget = remoteUri;
     s.direction = CallDirection::Outbound;
     s.hasDirection = true;
     if (s.firstSeenAt == 0) s.firstSeenAt = nowMs;
+}
+
+bool CallSessionTracker::hasLiveOutboundTo(const std::string &dialedTarget) const
+{
+    if (dialedTarget.empty()) return false;
+    for (const auto &[id, session] : m_sessions) {
+        (void)id;
+        if (session.dialedTarget == dialedTarget) return true;
+    }
+    return false;
 }
 
 void CallSessionTracker::noteIncoming(const CallEntry &entry, std::int64_t nowMs)

@@ -152,6 +152,59 @@ TEST(CallSessionTracker, EraseBeforeDisconnectDropsTheSession)
         bare, compactphone::sip::CallState::Disconnected, 500));
 }
 
+TEST(CallSessionTracker, ReportsLiveOutboundTargetForDedup)
+{
+    compactphone::sip::CallSessionTracker tracker;
+    // Nothing dialed yet.
+    EXPECT_FALSE(tracker.hasLiveOutboundTo("sip:x@example.com"));
+
+    tracker.noteOutbound(1, 10, "sip:x@example.com", 1000);
+    EXPECT_TRUE(tracker.hasLiveOutboundTo("sip:x@example.com"));
+    // A different target is not deduped — a deliberate second call is allowed.
+    EXPECT_FALSE(tracker.hasLiveOutboundTo("sip:y@example.com"));
+}
+
+TEST(CallSessionTracker, LiveOutboundClearsAfterDisconnect)
+{
+    compactphone::sip::CallSessionTracker tracker;
+    const auto out = entry(1, 10, "sip:x@example.com",
+                           compactphone::sip::CallDirection::Outbound);
+
+    tracker.noteOutbound(out.id, out.accountId, out.remoteUri, 1000);
+    EXPECT_TRUE(tracker.hasLiveOutboundTo("sip:x@example.com"));
+
+    // Once the call ends, the same number may be dialed again.
+    tracker.noteState(out, compactphone::sip::CallState::Disconnected, 2000);
+    EXPECT_FALSE(tracker.hasLiveOutboundTo("sip:x@example.com"));
+}
+
+TEST(CallSessionTracker, LiveOutboundMatchesDialedTargetDespiteStateUpserts)
+{
+    // PJSIP state callbacks upsert the session with whatever remote URI it
+    // reports, which can differ from what the user dialed (tags, params,
+    // canonicalisation). Dedup must keep matching the *dialed* target so a
+    // fast second Enter that races a Calling event is still suppressed.
+    compactphone::sip::CallSessionTracker tracker;
+    compactphone::sip::CallEntry reported =
+        entry(1, 10, "sip:x@10.0.0.5;transport=tls",
+              compactphone::sip::CallDirection::Outbound);
+
+    tracker.noteOutbound(1, 10, "sip:x@example.com", 1000); // what the user dialed
+    tracker.noteState(reported, compactphone::sip::CallState::Calling, 1100);
+
+    EXPECT_TRUE(tracker.hasLiveOutboundTo("sip:x@example.com"));
+}
+
+TEST(CallSessionTracker, InboundDoesNotCountAsLiveOutbound)
+{
+    compactphone::sip::CallSessionTracker tracker;
+    const auto inbound = entry(1, 10, "sip:caller@example.com",
+                               compactphone::sip::CallDirection::Inbound);
+
+    tracker.noteIncoming(inbound, 1000);
+    EXPECT_FALSE(tracker.hasLiveOutboundTo("sip:caller@example.com"));
+}
+
 TEST(CallSessionTracker, PreservesRemoteDisplayName)
 {
     compactphone::sip::CallSessionTracker tracker;

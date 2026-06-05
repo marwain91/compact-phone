@@ -13,6 +13,8 @@
 #include <QMetaObject>
 #include <QTimer>
 
+#include <spdlog/spdlog.h>
+
 #include <optional>
 #include <utility>
 
@@ -268,6 +270,18 @@ void CallsController::dial(const QString &uri)
             normalizedUri = sip::normalizeSipTarget(
                 normalizedUri, acc->domain, acc->transport);
         }
+    }
+
+    // De-bounce duplicate dials. makeCall() is synchronous and the dialer keeps
+    // its Call action live (the number stays in the field), so a burst of Enter
+    // presses — natural when the user is unsure the first one registered — would
+    // otherwise stack several identical concurrent calls. Ignore a request whose
+    // target already has a live outbound call; a different target (second line /
+    // attended transfer) and a re-dial after this call ends are still allowed.
+    if (m_callSessions.hasLiveOutboundTo(normalizedUri)) {
+        spdlog::debug("CallsController::dial: ignoring duplicate dial to {} "
+                      "(call already in progress)", normalizedUri);
+        return;
     }
 
     if (aid > 0) {

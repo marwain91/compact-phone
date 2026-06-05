@@ -22,6 +22,23 @@ ColumnLayout {
         const m = Math.floor(s/60); const r = s%60
         return m + "m " + r + "s"
     }
+    // The full SIP URI (sip:721352367@daktela.daktela.com) is noisy in the
+    // list. Show the contact's name when we know it, otherwise just the user
+    // part of the URI — the dialled number. Falls back to the raw URI if
+    // extraction yields nothing.
+    function peerLabel(displayName, uri) {
+        if (displayName && displayName.length > 0)
+            return displayName
+        let s = (uri || "").trim()
+        const lt = s.indexOf('<'), gt = s.indexOf('>')
+        if (lt >= 0 && gt > lt) s = s.substring(lt + 1, gt) // name-addr form
+        s = s.replace(/^sips?:/i, "")                        // strip scheme
+        const at = s.indexOf('@')
+        if (at >= 0) s = s.substring(0, at)                  // user part only
+        const semi = s.indexOf(';')
+        if (semi >= 0) s = s.substring(0, semi)              // drop user params
+        return s.length > 0 ? s : (uri || "")
+    }
 
     Text {
         text: qsTr("Call History")
@@ -87,7 +104,7 @@ ColumnLayout {
                         // without it the Text keeps its full implicit width and
                         // long SIP URIs never truncate.
                         Layout.fillWidth: true
-                        text: remoteUri
+                        text: peerLabel(remoteDisplayName, remoteUri)
                         color: durationMs === 0 && direction === "in" ? Theme.danger : Theme.textPrimary
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fbody

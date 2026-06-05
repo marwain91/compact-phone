@@ -320,10 +320,17 @@ std::vector<SipEngine::AudioDevice> SipEngine::audioDevices() const
         const auto devs = m_endpoint->audDevManager().enumDev2();
         for (size_t i = 0; i < devs.size(); ++i) {
             AudioDevice d;
-            d.id = static_cast<int>(i);
+            // Use the pjmedia device id, NOT the position in the enum vector.
+            // setCaptureDev()/setPlaybackDev()/getCaptureDev() all speak device
+            // ids, and pjsua2 does not guarantee id == index — on macOS
+            // CoreAudio they diverge, so indexing by position selects the wrong
+            // device (or none) and the picked device never takes effect.
+            d.id = devs[i].id;
             d.name = devs[i].name;
             d.inputCount = devs[i].inputCount;
             d.outputCount = devs[i].outputCount;
+            spdlog::debug("SipEngine: audio dev id={} \"{}\" in={} out={}",
+                          d.id, d.name, d.inputCount, d.outputCount);
             out.push_back(std::move(d));
         }
     } catch (const pj::Error &e) {

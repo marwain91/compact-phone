@@ -108,7 +108,10 @@ QUrl DaktelaProvider::sipDeviceUrl(const QUrl &host,
                                    const QString &extensionName)
 {
     QUrl u = host;
-    u.setPath(host.path() + QStringLiteral("/api/v6/extensions/sipdevices/")
+    // Top-level sipDevices model (camelCase), keyed by the extension/device
+    // name — NOT nested under /extensions/. The device record carries the SIP
+    // secret (subject to the caller's read permission).
+    u.setPath(host.path() + QStringLiteral("/api/v6/sipDevices/")
               + extensionName + QStringLiteral(".json"));
     return u;
 }
@@ -171,6 +174,21 @@ QString DaktelaProvider::extractExtensionName(const QJsonValue &result, QString 
     if (obj.contains(QStringLiteral("user")) && obj.value(QStringLiteral("user")).isObject()) {
         obj = obj.value(QStringLiteral("user")).toObject();
     }
+
+    // V6 whoim returns the user's SIP devices as user.extensions[] — an ARRAY
+    // of sipDevices records (each `{ name, title, transport, ... }`). The SIP
+    // device name we need for the credential fetch is each element's `name`.
+    // Use the first element that carries one.
+    const auto extsVal = obj.value(QStringLiteral("extensions"));
+    if (extsVal.isArray()) {
+        for (const auto &item : extsVal.toArray()) {
+            if (!item.isObject()) continue;
+            const auto name = item.toObject().value(QStringLiteral("name")).toString();
+            if (!name.isEmpty()) return name;
+        }
+    }
+
+    // Back-compat: some shapes expose a singular `extension` (string or object).
     const auto extVal = obj.value(QStringLiteral("extension"));
     if (extVal.isString()) return extVal.toString();
     if (extVal.isObject()) {
@@ -182,6 +200,31 @@ QString DaktelaProvider::extractExtensionName(const QJsonValue &result, QString 
         }
     }
     if (err) *err = QObject::tr("Your Daktela account is not assigned to a SIP extension.");
+    return {};
+}
+
+QJsonObject DaktelaProvider::extractExtensionRecord(const QJsonValue &result)
+{
+    if (!result.isObject()) return {};
+    auto obj = result.toObject();
+    if (obj.value(QStringLiteral("user")).isObject()) {
+        obj = obj.value(QStringLiteral("user")).toObject();
+    }
+    const auto exts = obj.value(QStringLiteral("extensions"));
+    if (exts.isArray()) {
+        for (const auto &item : exts.toArray()) {
+            if (!item.isObject()) continue;
+            if (!item.toObject().value(QStringLiteral("name")).toString().isEmpty()) {
+                return item.toObject();
+            }
+        }
+    }
+    // Back-compat singular shapes: a device object, or a bare name string.
+    const auto extVal = obj.value(QStringLiteral("extension"));
+    if (extVal.isObject()) return extVal.toObject();
+    if (extVal.isString() && !extVal.toString().isEmpty()) {
+        return QJsonObject{ {QStringLiteral("name"), extVal.toString()} };
+    }
     return {};
 }
 
@@ -205,7 +248,13 @@ QVariantMap DaktelaProvider::buildAccountParams(const QUrl &host,
     p[QStringLiteral("username")] = name;
     p[QStringLiteral("authUser")] = name;
     p[QStringLiteral("domain")] = domain;
-    p[QStringLiteral("password")] = obj.value(QStringLiteral("password")).toString();
+    // The sipDevices record may expose the secret as "password" or, in the
+    // Asterisk-derived shape, "secret". whoim's extensions[] carries neither
+    // (secrets are redacted there) — that empty value is what drives the
+    // manual-password fallback when the dedicated fetch is denied.
+    auto secret = obj.value(QStringLiteral("password")).toString();
+    if (secret.isEmpty()) secret = obj.value(QStringLiteral("secret")).toString();
+    p[QStringLiteral("password")] = secret;
     p[QStringLiteral("transport")] = transport;
     p[QStringLiteral("srtpMode")] = srtpMode;
     p[QStringLiteral("dtmfMethod")] = dtmf;
@@ -420,6 +469,9 @@ void DaktelaProvider::onWhoamiReply(QNetworkReply *r)
 
     m_extensionName = extractExtensionName(result, &err);
     if (m_extensionName.isEmpty()) { fail(err); return; }
+    // Keep the device metadata so we can still build the account if the
+    // dedicated secret fetch is denied (permissions) — see onSipDeviceReply.
+    m_extensionRecord = extractExtensionRecord(result);
 
     emit progress(QStringLiteral("fetching-extension"));
 
@@ -440,7 +492,13 @@ void DaktelaProvider::onWhoamiReply(QNetworkReply *r)
 void DaktelaProvider::onSipDeviceReply(QNetworkReply *r)
 {
     if (r->error() != QNetworkReply::NoError) {
-        fail(tr("Could not fetch SIP credentials: %1").arg(r->errorString()));
+        // Reading the device record (which carries the SIP secret) commonly
+        // needs admin rights. Rather than dead-end, keep the metadata whoim
+        // already gave us and ask the user to type the SIP password.
+        spdlog::info("Daktela provisioning: sipDevices fetch failed ({}); "
+                     "prompting for the SIP password",
+                     r->errorString().toStdString());
+        promptForPassword(buildAccountParams(m_host, m_extensionRecord, m_displayName));
         return;
     }
     QString err;
@@ -449,13 +507,45 @@ void DaktelaProvider::onSipDeviceReply(QNetworkReply *r)
 
     auto params = buildAccountParams(m_host, result, m_displayName);
     if (params.isEmpty() || params.value(QStringLiteral("username")).toString().isEmpty()) {
-        fail(tr("Daktela returned an empty SIP device record."));
+        // Detail call succeeded but yielded nothing usable — fall back to the
+        // whoim metadata + a manually-entered password.
+        promptForPassword(buildAccountParams(m_host, m_extensionRecord, m_displayName));
         return;
     }
     if (params.value(QStringLiteral("password")).toString().isEmpty()) {
-        spdlog::warn("Daktela provisioning: server omitted the SIP password");
+        // Record returned but the secret was withheld → ask the user for it.
+        spdlog::info("Daktela provisioning: device record omitted the secret; "
+                     "prompting for the SIP password");
+        promptForPassword(params);
+        return;
     }
 
+    emit progress(QStringLiteral("done"));
+    emit provisioningSucceeded(params);
+}
+
+void DaktelaProvider::promptForPassword(const QVariantMap &partialParams)
+{
+    if (partialParams.isEmpty()
+        || partialParams.value(QStringLiteral("username")).toString().isEmpty()) {
+        fail(tr("Could not determine which SIP extension to set up."));
+        return;
+    }
+    m_pendingParams = partialParams;
+    m_pendingParams[QStringLiteral("password")] = QString();
+    emit passwordRequired(m_pendingParams);
+}
+
+void DaktelaProvider::completeWithPassword(const QString &password)
+{
+    if (m_pendingParams.isEmpty()
+        || m_pendingParams.value(QStringLiteral("username")).toString().isEmpty()) {
+        fail(tr("There is no pending Daktela sign-in to finish."));
+        return;
+    }
+    auto params = m_pendingParams;
+    params[QStringLiteral("password")] = password;
+    m_pendingParams.clear();
     emit progress(QStringLiteral("done"));
     emit provisioningSucceeded(params);
 }

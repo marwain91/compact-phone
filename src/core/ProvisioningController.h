@@ -36,12 +36,19 @@ public:
     Q_INVOKABLE void provisionWithToken(const QString &providerId,
                                         const QString &host,
                                         const QString &accessToken);
+    // Finish a sign-in that emitted passwordRequired: hand the user-typed SIP
+    // secret back to the provider to complete account creation.
+    Q_INVOKABLE void provideManualPassword(const QString &providerId,
+                                           const QString &password);
     Q_INVOKABLE void discoverAuthMethods(const QString &providerId,
                                          const QString &host);
 
 signals:
     void provisioningProgress(QString providerId, QString stage);
     void provisioningFailed(QString providerId, QString error);
+    // Provider needs the user to type the SIP password (auto-fetch denied).
+    // partialParams carries the resolved account fields minus the secret.
+    void passwordRequired(QString providerId, QVariantMap partialParams);
     void accountProvisioned(QString providerId, int accountId);
     void authMethodsDiscovered(QString providerId, QString host, QVariantList methods);
     void authMethodsFailed(QString providerId, QString host, QString error);

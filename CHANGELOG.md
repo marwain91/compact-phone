@@ -6,6 +6,40 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-05
+
+### Fixed
+- Hammering Enter (or the Call button) on the dialpad no longer places
+  several duplicate calls to the same number. The dial action was
+  synchronous with no re-submit guard, so each keypress — natural when
+  you're unsure the first one registered — started another concurrent
+  call. A dial to a target that already has a live outbound call is now
+  ignored; deliberately calling a *different* number (second line /
+  attended transfer) and re-dialing the same number after the call ends
+  both still work.
+- Selecting a different microphone or speaker in **Settings → Audio** now
+  actually switches the device. The device list keyed each entry by its
+  position in the enumeration instead of its pjsua2 device id; the two
+  are not guaranteed equal (notably on macOS CoreAudio), so picking a
+  device applied the wrong id — or none — and the picker could snap back.
+  Entries now carry the real device id.
+- Call History shows just the dialled number (or the contact's name when
+  known) instead of the full `sip:user@domain` URI.
+- Daktela sign-in no longer fails with "Could not fetch SIP credentials".
+  Two bugs: the user profile (`whoim`) lists SIP devices under
+  `user.extensions[]` (an array) but we only looked for a singular
+  `extension`, so we never found the device; and the device-record URL was
+  wrong (`/api/v6/extensions/sipdevices/…` instead of the top-level
+  `/api/v6/sipDevices/{name}.json`).
+
+### Changed
+- The provider sign-in wizard now prompts for the SIP password when it
+  can't be fetched automatically — e.g. your Daktela account lacks
+  permission to read the device record — instead of failing outright. It
+  already has every other account detail from your profile.
+- The sign-in wizard advances on **Enter**: it submits each step, and Enter
+  on the username field jumps to the password field.
+
 ## [0.1.2] - 2026-06-04
 
 ### Added
