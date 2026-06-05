@@ -40,6 +40,10 @@ ProvisioningController::ProvisioningController(AddAccountFn addAccount,
             if (m_noticeSink) m_noticeSink(tr("Account added"), notice::kDefault);
             emit accountProvisioned(id, newId);
         });
+        connect(p, &provisioning::Provider::passwordRequired,
+                this, [this, id](const QVariantMap &partialParams) {
+            emit passwordRequired(id, partialParams);
+        });
         connect(p, &provisioning::Provider::authMethodsDiscovered,
                 this, [this, id](const QString &host, const QVariantList &methods) {
             emit authMethodsDiscovered(id, host, methods);
@@ -87,6 +91,20 @@ void ProvisioningController::provisionWithToken(const QString &providerId,
         return;
     }
     p->provisionWithToken(host, accessToken);
+}
+
+void ProvisioningController::provideManualPassword(const QString &providerId,
+                                                   const QString &password)
+{
+    if (!m_registry) return;
+    auto *p = m_registry->find(providerId);
+    if (!p) {
+        const QString msg = tr("Unknown provisioning provider: %1").arg(providerId);
+        if (m_noticeSink) m_noticeSink(msg, notice::kError);
+        emit provisioningFailed(providerId, msg);
+        return;
+    }
+    p->completeWithPassword(password);
 }
 
 void ProvisioningController::discoverAuthMethods(const QString &providerId,

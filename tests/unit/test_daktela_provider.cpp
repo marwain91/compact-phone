@@ -66,7 +66,7 @@ TEST(DaktelaProviderTest, SipDeviceUrlEmbedsExtensionInPathWithoutToken)
 {
     const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
     const auto url = DaktelaProvider::sipDeviceUrl(host, "1001");
-    EXPECT_EQ(url.path(), "/api/v6/extensions/sipdevices/1001.json");
+    EXPECT_EQ(url.path(), "/api/v6/sipDevices/1001.json");
     EXPECT_FALSE(url.hasQuery());
     QUrlQuery q(url);
     EXPECT_FALSE(q.hasQueryItem("accessToken"));
@@ -159,6 +159,70 @@ TEST(DaktelaProviderTest, ExtractExtensionNameFailsWhenAbsent)
     QString err;
     EXPECT_TRUE(DaktelaProvider::extractExtensionName(root, &err).isEmpty());
     EXPECT_FALSE(err.isEmpty());
+}
+
+TEST(DaktelaProviderTest, ExtractExtensionNameFromUserExtensionsArray)
+{
+    // Real v6 whoim shape: user.extensions is an ARRAY of sipDevices records;
+    // the device name lives in each element's `name` (e.g. "404").
+    QJsonObject dev{
+        {"name", "404"},
+        {"title", "jerry hw phone"},
+        {"transport", "udp"},
+    };
+    QJsonObject user{ {"name", "jerry"}, {"extensions", QJsonArray{ dev }} };
+    QJsonObject root{ {"user", user} };
+    QString err;
+    EXPECT_EQ(DaktelaProvider::extractExtensionName(root, &err), "404");
+    EXPECT_TRUE(err.isEmpty());
+}
+
+TEST(DaktelaProviderTest, ExtractExtensionNameSkipsUnnamedExtensions)
+{
+    // Pick the first element that actually carries a name.
+    QJsonObject blank{ {"title", "no name yet"} };
+    QJsonObject dev{ {"name", "404"} };
+    QJsonObject user{ {"extensions", QJsonArray{ blank, dev }} };
+    QJsonObject root{ {"user", user} };
+    QString err;
+    EXPECT_EQ(DaktelaProvider::extractExtensionName(root, &err), "404");
+    EXPECT_TRUE(err.isEmpty());
+}
+
+TEST(DaktelaProviderTest, ExtractExtensionRecordReturnsDeviceFromExtensionsArray)
+{
+    QJsonObject dev{
+        {"name", "404"},
+        {"title", "jerry hw phone"},
+        {"transport", "udp"},
+        {"dtmfmode", "rfc4733"},
+    };
+    QJsonObject user{ {"extensions", QJsonArray{ dev }} };
+    QJsonObject root{ {"user", user} };
+    const auto rec = DaktelaProvider::extractExtensionRecord(root);
+    EXPECT_EQ(rec.value("name").toString(), "404");
+    EXPECT_EQ(rec.value("title").toString(), "jerry hw phone");
+    EXPECT_EQ(rec.value("transport").toString(), "udp");
+}
+
+TEST(DaktelaProviderTest, BuildAccountParamsReadsSecretWhenPasswordAbsent)
+{
+    // The sipDevices record may name the SIP secret "secret" (Asterisk shape).
+    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
+    QJsonObject sip{ {"name", "404"}, {"secret", "s3cr3t"} };
+    const auto params = DaktelaProvider::buildAccountParams(host, sip, "");
+    EXPECT_EQ(params.value("password").toString(), "s3cr3t");
+}
+
+TEST(DaktelaProviderTest, BuildAccountParamsLeavesPasswordEmptyForWhoimMetadata)
+{
+    // whoim's extensions[] element carries no secret — password stays empty,
+    // which is exactly what drives the manual-password fallback.
+    const auto host = DaktelaProvider::normalizeHost("acme.daktela.com");
+    QJsonObject sip{ {"name", "404"}, {"transport", "udp"} };
+    const auto params = DaktelaProvider::buildAccountParams(host, sip, "Jerry");
+    EXPECT_EQ(params.value("username").toString(), "404");
+    EXPECT_TRUE(params.value("password").toString().isEmpty());
 }
 
 TEST(DaktelaProviderTest, BuildAccountParamsMapsCoreFields)

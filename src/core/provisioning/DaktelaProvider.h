@@ -14,9 +14,14 @@ namespace compactphone::provisioning {
 
 // Bootstraps a CompactPhone SIP account from a Daktela V6 instance.
 // Login flow:
-//   1. POST  {host}/api/v6/login.json   form: username,password,only_token=1
-//   2. GET   {host}/api/v6/whoim.json?accessToken=<tok>
-//   3. GET   {host}/api/v6/extensions/sipdevices/<extName>.json?accessToken=<tok>
+//   1. POST {host}/api/v6/login.json   form: username,password,only_token=1
+//   2. GET  {host}/api/v6/whoim.json            header: X-AUTH-TOKEN
+//      -> result.user.extensions[] holds the SIP device records (metadata,
+//         no secret); we pick the first named one.
+//   3. GET  {host}/api/v6/sipDevices/<name>.json header: X-AUTH-TOKEN
+//      -> the device record incl. the SIP secret. If this is denied (the
+//         account may lack permission to read it) we keep the step-2 metadata
+//         and emit passwordRequired so the wizard can prompt for the secret.
 //
 // The parsing of each step is exposed as a static helper so it can be
 // unit-tested without a network in the loop.
@@ -43,6 +48,7 @@ public:
                    const QString &password) override;
     void provisionWithToken(const QString &host,
                             const QString &accessToken) override;
+    void completeWithPassword(const QString &password) override;
     void discoverAuthMethods(const QString &host) override;
 
     // --- Static helpers (pure functions, unit-tested) ---
@@ -56,6 +62,10 @@ public:
     static QJsonValue unwrapResult(const QByteArray &body, QString *err);
     static QString extractAccessToken(const QJsonValue &result, QString *err);
     static QString extractExtensionName(const QJsonValue &result, QString *err);
+    // The full SIP device record from whoim's user.extensions[] (metadata only,
+    // no secret). Used to build the account when the dedicated secret fetch is
+    // denied. Returns an empty object when no usable extension is present.
+    static QJsonObject extractExtensionRecord(const QJsonValue &result);
     static QVariantMap buildAccountParams(const QUrl &host,
                                           const QJsonValue &sipDevice,
                                           const QString &displayName);
@@ -81,6 +91,9 @@ private:
     void onDiscoveryReply(QNetworkReply *r, const QUrl &host);
     void startWhoamiFetch();
     void fail(const QString &message);
+    // Stash partial account params (no secret) and ask the wizard for the
+    // SIP password. Fails outright if there isn't even a usable username.
+    void promptForPassword(const QVariantMap &partialParams);
 
     QNetworkAccessManager *m_nam = nullptr;
     bool m_ownsNam = false;
@@ -89,7 +102,9 @@ private:
     QString m_password;
     QString m_accessToken;
     QString m_extensionName;
+    QJsonObject m_extensionRecord;  // whoim device metadata, for the fallback
     QString m_displayName;
+    QVariantMap m_pendingParams;    // awaiting a manually-typed SIP password
 };
 
 } // namespace compactphone::provisioning

@@ -23,10 +23,21 @@ public:
                                           std::int64_t nowMs);
     void erase(CallId id);
 
+    // True while an outbound call placed to this exact dialed target is still
+    // live (recorded by noteOutbound, dropped on Disconnected). Used to dedupe
+    // repeated dial requests so hammering Enter / Call does not stack multiple
+    // identical calls. Matches the dialed string, not PJSIP's later-reported
+    // remote URI, so an in-flight state callback cannot defeat the guard.
+    bool hasLiveOutboundTo(const std::string &dialedTarget) const;
+
 private:
     struct Session {
         AccountId accountId = kInvalidAccountId;
         std::string remoteUri;
+        // The exact string the user dialed. Set once by noteOutbound and never
+        // overwritten by state-callback upserts, so dedup stays stable across a
+        // call's lifetime. Empty for inbound sessions.
+        std::string dialedTarget;
         std::string remoteDisplayName;
         CallDirection direction = CallDirection::Outbound;
         std::int64_t firstSeenAt = 0;

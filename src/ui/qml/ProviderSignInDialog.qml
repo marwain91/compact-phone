@@ -34,7 +34,7 @@ Window {
 
     property string providerId: ""
     property var    providerDescriptor: ({ id: "", displayName: "", hostPlaceholder: "", markPath: "" })
-    property string step: "host"     // host | methods | password | token | provisioning
+    property string step: "host"     // host | methods | password | token | extension-password | provisioning
     property string normalizedHost: ""
     // Methods are static — Daktela has no desktop-friendly OAuth, so we
     // always offer the same two paths regardless of what /internal/
@@ -43,6 +43,9 @@ Window {
     property var    methods: []
     property var    selectedMethod: ({})
     property string errorMessage: ""
+    // The SIP extension/username we resolved when the automatic secret fetch
+    // was denied; shown on the manual-password step.
+    property string pendingUsername: ""
 
     function staticMethodsFor(host) {
         return [
@@ -82,9 +85,40 @@ Window {
         userField.text = ""
         passField.text = ""
         tokenField.text = ""
+        dialog.pendingUsername = ""
         dialog.show()
         dialog.raise()
         dialog.requestActivate()
+    }
+
+    // --- Per-step submit actions. Shared by the primary buttons and the
+    //     Enter key so the wizard is fully keyboard-drivable. Each no-ops
+    //     unless its step's inputs are valid (mirrors the button enabled:).
+    function submitHost() {
+        if (hostField.text.length === 0) return
+        dialog.errorMessage = ""
+        dialog.normalizedHost = hostField.text
+        dialog.methods = dialog.staticMethodsFor(hostField.text)
+        dialog.step = "methods"
+    }
+    function submitPassword() {
+        if (userField.text.length === 0 || passField.text.length === 0) return
+        dialog.errorMessage = ""
+        PhoneController.provisioning.provision(
+            dialog.providerId, dialog.normalizedHost,
+            userField.text, passField.text)
+    }
+    function submitToken() {
+        if (tokenField.text.trim().length === 0) return
+        dialog.errorMessage = ""
+        PhoneController.provisioning.provisionWithToken(
+            dialog.providerId, dialog.normalizedHost, tokenField.text.trim())
+    }
+    function submitExtensionPassword() {
+        if (extPassField.text.length === 0) return
+        dialog.errorMessage = ""
+        PhoneController.provisioning.provideManualPassword(
+            dialog.providerId, extPassField.text)
     }
 
     Connections {
@@ -94,10 +128,21 @@ Window {
             // Once provisioning starts, ignore any further user interactions.
             if (stage !== "done") dialog.step = "provisioning"
         }
+        function onPasswordRequired(provId, partial) {
+            if (provId !== dialog.providerId) return
+            // Auto-fetch of the SIP secret was denied — collect it by hand.
+            dialog.pendingUsername = (partial && partial.username) ? partial.username : ""
+            dialog.errorMessage = ""
+            extPassField.text = ""
+            dialog.step = "extension-password"
+        }
         function onProvisioningFailed(provId, err) {
             if (provId !== dialog.providerId) return
             dialog.errorMessage = err
-            // Hop back to whichever input screen we came from.
+            // Stay on the manual-password step so the user can retry the SIP
+            // secret; otherwise hop back to whichever input screen we came from.
+            if (dialog.step === "extension-password")
+                return
             if (dialog.selectedMethod && dialog.selectedMethod.kind === "token")
                 dialog.step = "token"
             else
@@ -122,6 +167,10 @@ Window {
         property alias text: tf.text
         property alias echoMode: tf.echoMode
         property bool tfFocus: tf.activeFocus
+        // Fired when the user presses Enter/Return in the field, so each step
+        // can submit (or advance focus) without a mouse.
+        signal accepted()
+        function focusField() { tf.forceActiveFocus() }
         Layout.fillWidth: true
         implicitHeight: col.implicitHeight
         color: "transparent"
@@ -154,6 +203,7 @@ Window {
                     font.pixelSize: Theme.fbody
                     background: null
                     selectByMouse: true
+                    onAccepted: rt.accepted()
                 }
             }
         }
@@ -204,6 +254,7 @@ Window {
                     : dialog.step === "methods"       ? qsTr("How would you like to sign in?")
                     : dialog.step === "password"      ? qsTr("Sign in to %1").arg(dialog.normalizedHost)
                     : dialog.step === "token"           ? dialog.selectedMethod.displayName || qsTr("Sign in")
+                    : dialog.step === "extension-password" ? qsTr("Enter your SIP password")
                     : qsTr("Setting up your account…")
                 color: Theme.textPrimary
                 font.family: Theme.fontFamily
@@ -232,6 +283,10 @@ Window {
                 id: hostField
                 label: qsTr("SERVER")
                 placeholder: dialog.providerDescriptor.hostPlaceholder
+                // Static methods, no server probe — Daktela has no
+                // desktop-friendly OAuth so the auth method list doesn't depend
+                // on the tenant. submitHost() normalizes the host downstream.
+                onAccepted: dialog.submitHost()
             }
             Item { Layout.fillHeight: true }
             RowLayout {
@@ -247,17 +302,7 @@ Window {
                     variant: "primary"
                     text: qsTr("Continue")
                     enabled: hostField.text.length > 0
-                    onClicked: {
-                        dialog.errorMessage = ""
-                        // Static methods, no server probe — Daktela has no
-                        // desktop-friendly OAuth so the auth method list
-                        // doesn't depend on the tenant. We do normalize the
-                        // host via the provider so http(s):// and trailing
-                        // slashes are handled consistently downstream.
-                        dialog.normalizedHost = hostField.text
-                        dialog.methods = dialog.staticMethodsFor(hostField.text)
-                        dialog.step = "methods"
-                    }
+                    onClicked: dialog.submitHost()
                 }
             }
         }
@@ -367,11 +412,16 @@ Window {
                 id: userField
                 label: qsTr("USERNAME")
                 placeholder: qsTr("yourname")
+                // Enter moves to the password field, or submits if it's filled.
+                onAccepted: passField.text.length === 0
+                            ? passField.focusField()
+                            : dialog.submitPassword()
             }
             AppField {
                 id: passField
                 label: qsTr("PASSWORD")
                 echoMode: TextInput.Password
+                onAccepted: dialog.submitPassword()
             }
             Item { Layout.fillHeight: true }
             RowLayout {
@@ -392,14 +442,7 @@ Window {
                     variant: "primary"
                     text: qsTr("Sign in")
                     enabled: userField.text.length > 0 && passField.text.length > 0
-                    onClicked: {
-                        dialog.errorMessage = ""
-                        PhoneController.provisioning.provision(
-                            dialog.providerId,
-                            dialog.normalizedHost,
-                            userField.text,
-                            passField.text)
-                    }
+                    onClicked: dialog.submitPassword()
                 }
             }
         }
@@ -434,6 +477,7 @@ Window {
                 id: tokenField
                 label: qsTr("ACCESS TOKEN")
                 placeholder: qsTr("Paste the token from Daktela here")
+                onAccepted: dialog.submitToken()
             }
 
             Item { Layout.fillHeight: true }
@@ -455,13 +499,57 @@ Window {
                     variant: "primary"
                     text: qsTr("Continue")
                     enabled: tokenField.text.trim().length > 0
-                    onClicked: {
-                        dialog.errorMessage = ""
-                        PhoneController.provisioning.provisionWithToken(
-                            dialog.providerId,
-                            dialog.normalizedHost,
-                            tokenField.text.trim())
-                    }
+                    onClicked: dialog.submitToken()
+                }
+            }
+        }
+
+        // ===== STEP: extension-password ======================================
+        // Reached when login + whoim succeeded but the SIP secret couldn't be
+        // fetched automatically (the account may lack permission to read the
+        // device record). We have every other account field already; the user
+        // just supplies the SIP password.
+        ColumnLayout {
+            visible: dialog.step === "extension-password"
+            Layout.fillWidth: true
+            spacing: Theme.s12
+
+            Text {
+                Layout.fillWidth: true
+                text: dialog.pendingUsername.length > 0
+                      ? qsTr("We couldn't read the SIP password for extension %1 automatically. Enter it to finish.").arg(dialog.pendingUsername)
+                      : qsTr("Enter the SIP password for your extension to finish.")
+                color: Theme.textTertiary
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fsm
+                wrapMode: Text.WordWrap
+            }
+            AppField {
+                id: extPassField
+                label: qsTr("SIP PASSWORD")
+                echoMode: TextInput.Password
+                onAccepted: dialog.submitExtensionPassword()
+            }
+            Item { Layout.fillHeight: true }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.s8
+                AppButton {
+                    variant: "secondary"
+                    text: qsTr("Back")
+                    onClicked: dialog.step = "methods"
+                }
+                Item { Layout.fillWidth: true }
+                AppButton {
+                    variant: "secondary"
+                    text: qsTr("Cancel")
+                    onClicked: dialog.close()
+                }
+                AppButton {
+                    variant: "primary"
+                    text: qsTr("Sign in")
+                    enabled: extPassField.text.length > 0
+                    onClicked: dialog.submitExtensionPassword()
                 }
             }
         }
