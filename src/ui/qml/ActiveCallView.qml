@@ -87,7 +87,7 @@ ColumnLayout {
                     pulse: !root.ended && (root.state !== "active" || root.held)
                 }
                 Text {
-                    text: root.remoteUri
+                    text: Format.phoneNumber(root.remoteUri)
                     color: Theme.textPrimary
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.flg
@@ -108,6 +108,10 @@ ColumnLayout {
 
             ColumnLayout {
                 visible: !root.showDtmf
+                // fillWidth (not just centered) so the caller name below can be
+                // width-bounded and elide instead of overflowing the card. The
+                // avatar and status badge stay centered via their own alignment.
+                Layout.fillWidth: true
                 Layout.alignment: Qt.AlignHCenter
                 spacing: Theme.s10
                 opacity: root.ended ? 0.6 : 1.0
@@ -134,14 +138,19 @@ ColumnLayout {
                     }
                 }
                 Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: root.remoteUri
+                    // fillWidth + centered alignment so it stays centred when
+                    // it fits but has a bound to elide against when it doesn't.
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Theme.s8
+                    Layout.rightMargin: Theme.s8
+                    horizontalAlignment: Text.AlignHCenter
+                    text: Format.phoneNumber(root.remoteUri)
                     color: Theme.textPrimary
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.f2xl
                     font.weight: Font.Bold
                     font.letterSpacing: -0.4
-                    elide: Text.ElideMiddle
+                    elide: Text.ElideRight
                 }
                 StatusBadge {
                     Layout.alignment: Qt.AlignHCenter
