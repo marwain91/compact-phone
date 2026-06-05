@@ -32,6 +32,7 @@
 #include "platform/Keychain_factory.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -276,7 +277,14 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
         if (changed) {
             emit latestUpdateChanged();
         }
-        postNotice(tr("Update available: %1").arg(v), notice::kImportant);
+        // An automatic (startup) check stays silent about a version the user
+        // already chose to ignore; a manual check always surfaces it.
+        const QString skipped = m_settingsController
+            ? m_settingsController->skippedUpdateVersion() : QString();
+        if (m_autoUpdateCheckActive && !skipped.isEmpty() && v == skipped) {
+            return;
+        }
+        emit updatePromptRequested(v, url.toString());
     });
     connect(m_updateChecker.get(), &UpdateChecker::upToDate,
             this, [this] {
@@ -285,11 +293,16 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
             m_latestUpdateUrl = QUrl();
             emit latestUpdateChanged();
         }
-        postNotice(tr("Compact Phone is up to date"), notice::kDefault);
+        // Only confirm "up to date" for a check the user explicitly triggered.
+        if (!m_autoUpdateCheckActive) {
+            postNotice(tr("Compact Phone is up to date"), notice::kDefault);
+        }
     });
     connect(m_updateChecker.get(), &UpdateChecker::checkFailed,
             this, [this](const QString &reason) {
-        postNotice(tr("Update check failed: %1").arg(reason), notice::kError);
+        if (!m_autoUpdateCheckActive) {
+            postNotice(tr("Update check failed: %1").arg(reason), notice::kError);
+        }
     });
 
     // Auto-provisioning. The Registry owns every backend Provider; we wire
@@ -580,8 +593,33 @@ void PhoneController::setDialerUri(const QString &u)
 void PhoneController::checkForUpdates()
 {
     if (!m_updateChecker) return;
+    m_autoUpdateCheckActive = false; // manual: always give feedback
+    if (m_settingsController) {
+        m_settingsController->setLastUpdateCheckMs(
+            QDateTime::currentMSecsSinceEpoch());
+    }
     postNotice(tr("Checking for updates…"), notice::kBrief);
     m_updateChecker->check();
+}
+
+void PhoneController::maybeCheckForUpdatesOnStartup()
+{
+    if (!m_updateChecker || !m_settingsController) return;
+    if (!m_settingsController->autoUpdateCheckEnabled()) return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 last = m_settingsController->lastUpdateCheckMs();
+    constexpr qint64 kThrottleMs = 24 * 60 * 60 * 1000; // at most once/day
+    if (last > 0 && now - last < kThrottleMs) return;
+    m_autoUpdateCheckActive = true; // quiet unless an update worth prompting
+    m_settingsController->setLastUpdateCheckMs(now);
+    m_updateChecker->check();
+}
+
+void PhoneController::skipUpdateVersion(const QString &version)
+{
+    if (m_settingsController) {
+        m_settingsController->setSkippedUpdateVersion(version);
+    }
 }
 
 QString PhoneController::latestUpdateVersion() const

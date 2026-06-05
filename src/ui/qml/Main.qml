@@ -65,6 +65,17 @@ ApplicationWindow {
         function onTrayHideRequested() {
             window.hide()
         }
+        function onUpdatePromptRequested(version, url) {
+            updateDialog.openFor(version)
+        }
+    }
+
+    // Auto-check for updates a few seconds after launch (throttled + gated by
+    // the Settings toggle, both enforced in PhoneController). Delayed so it
+    // doesn't compete with SIP registration at startup.
+    Timer {
+        interval: 3000; running: true; repeat: false
+        onTriggered: PhoneController.maybeCheckForUpdatesOnStartup()
     }
 
     Connections {
@@ -301,6 +312,7 @@ ApplicationWindow {
 
 
     IncomingCallDialog { id: incomingDialog }
+    UpdateDialog { id: updateDialog }
 
     // In-app keyboard shortcuts. These fire when the Compact Phone window
     // has focus. System-wide global hotkeys (working even when minimized)

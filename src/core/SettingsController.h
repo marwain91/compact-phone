@@ -48,6 +48,8 @@ class SettingsController : public QObject {
     Q_PROPERTY(bool launchOnStartup READ launchOnStartup WRITE setLaunchOnStartup NOTIFY launchOnStartupChanged)
     Q_PROPERTY(bool autostartSupported READ autostartSupported CONSTANT)
     Q_PROPERTY(bool startMinimizedToTray READ startMinimizedToTray WRITE setStartMinimizedToTray NOTIFY startMinimizedToTrayChanged)
+    Q_PROPERTY(bool autoUpdateCheckEnabled READ autoUpdateCheckEnabled WRITE setAutoUpdateCheckEnabled NOTIFY autoUpdateCheckEnabledChanged)
+    Q_PROPERTY(QString skippedUpdateVersion READ skippedUpdateVersion NOTIFY skippedUpdateVersionChanged)
 public:
     explicit SettingsController(sip::SipEngine *engine,
                                 sip::SettingsManager *settings,
@@ -143,6 +145,19 @@ public:
     bool startMinimizedToTray() const { return m_startMinimizedToTray; }
     void setStartMinimizedToTray(bool enabled);
 
+    // Auto-check for updates on startup (throttled). On by default.
+    bool autoUpdateCheckEnabled() const { return m_autoUpdateCheckEnabled; }
+    void setAutoUpdateCheckEnabled(bool enabled);
+
+    // The update version the user chose to "ignore this version"; that
+    // version is not surfaced again by the automatic check (newer ones are).
+    QString skippedUpdateVersion() const { return m_skippedUpdateVersion; }
+    void setSkippedUpdateVersion(const QString &version);
+
+    // Throttle bookkeeping for the startup check (epoch ms; 0 = never).
+    qint64 lastUpdateCheckMs() const;
+    void setLastUpdateCheckMs(qint64 ms);
+
     // Sentry / crash-report opt-in. Off by default; only honored when the
     // build was configured with -DCOMPACTPHONE_ENABLE_SENTRY=ON.
     bool crashReportingEnabled() const { return m_crashReportingEnabled; }
@@ -177,6 +192,8 @@ signals:
     void launchOnStartupChanged();
     void launchOnStartupFailed(const QString &message);
     void startMinimizedToTrayChanged();
+    void autoUpdateCheckEnabledChanged();
+    void skippedUpdateVersionChanged();
 
 private:
     sip::SipEngine *m_engine = nullptr;
@@ -203,6 +220,8 @@ private:
     bool m_alwaysOnTop = false;
     bool m_launchOnStartup = false;
     bool m_startMinimizedToTray = false;
+    bool m_autoUpdateCheckEnabled = true;
+    QString m_skippedUpdateVersion;
     std::unique_ptr<platform::IAutostart> m_autostart;
     std::unique_ptr<sip::RingtonePlayer> m_ringtone;
 

@@ -145,6 +145,12 @@ public:
     Q_INVOKABLE bool exportDiagnostics(const QString &path) const;
     Q_INVOKABLE void checkForUpdates();
     Q_INVOKABLE void openLatestUpdateUrl();
+    // Throttled auto-check used at startup; respects the user's setting and
+    // their "ignore this version" choice. Safe to call on every launch.
+    Q_INVOKABLE void maybeCheckForUpdatesOnStartup();
+    // Persist a version the user chose to ignore; the auto-check won't surface
+    // it again (newer versions still prompt).
+    Q_INVOKABLE void skipUpdateVersion(const QString &version);
 
     // Live RTCP-derived media stats for the in-call quality indicator.
     // Returns a QVariantMap with keys: mos (double), lossPct (double),
@@ -167,6 +173,9 @@ signals:
     void incomingCallChanged();
     void noticeChanged();
     void latestUpdateChanged();
+    // A newer version is available and should be offered to the user in a
+    // modal prompt (Download / Ignore for now / Ignore this version).
+    void updatePromptRequested(QString version, QString url);
     void dialerUriChanged();
     void registeredAccountCountChanged();
     void activeAccountIdChanged();
@@ -181,6 +190,10 @@ private:
     QTimer m_noticeTimer;
     QString m_latestUpdateVersion;
     QUrl m_latestUpdateUrl;
+    // True while a startup auto-check is in flight: suppresses the "checking/
+    // up-to-date" notices and honours the skipped-version preference. A manual
+    // check (Settings button) clears it so the user always gets feedback.
+    bool m_autoUpdateCheckActive = false;
 
     std::unique_ptr<persistence::Database>      m_db;
     std::unique_ptr<platform::IKeychain>        m_keychain;

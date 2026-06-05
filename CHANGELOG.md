@@ -6,6 +6,16 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-05
+
+### Added
+- Automatic update check on startup (throttled to at most once a day), with a
+  modal prompt offering **Download**, **Ignore for now**, or **Ignore this
+  version**. A new "Check for updates automatically" toggle in Settings →
+  Advanced controls it (on by default). "Ignore this version" is remembered so
+  the automatic check stays quiet about that version; newer ones still prompt.
+  Downloads still open in the browser — the app does not self-install.
+
 ## [0.1.5] - 2026-06-05
 
 ### Fixed
