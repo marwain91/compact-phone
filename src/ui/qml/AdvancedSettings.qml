@@ -197,6 +197,35 @@ ScrollView {
                     onLinkActivated: (link) => Qt.openUrlExternally(link)
                 }
                 RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.s4
+                    spacing: Theme.s10
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Text {
+                            text: qsTr("Check for updates automatically")
+                            color: Theme.textPrimary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fbody
+                            font.weight: Font.Medium
+                        }
+                        Text {
+                            text: qsTr("On startup, check for a newer version and offer it (at most once a day)")
+                            color: Theme.textTertiary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fxs
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                    Item { Layout.fillWidth: true; implicitHeight: 1 }
+                    AppSwitch {
+                        checked: PhoneController.settings.autoUpdateCheckEnabled
+                        onToggled: PhoneController.settings.autoUpdateCheckEnabled = checked
+                    }
+                }
+                RowLayout {
                     Layout.topMargin: Theme.s4
                     spacing: Theme.s8
                     AppButton {

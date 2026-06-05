@@ -78,6 +78,10 @@ SettingsController::SettingsController(sip::SipEngine *engine,
         m_alwaysOnTop = m_settings->getOr("always_on_top", "0") == "1";
         m_startMinimizedToTray =
             m_settings->getOr("start_minimized_to_tray", "0") == "1";
+        m_autoUpdateCheckEnabled =
+            m_settings->getOr("update_check_on_startup", "1") != "0";
+        m_skippedUpdateVersion = QString::fromStdString(
+            m_settings->getOr("skipped_update_version", ""));
         m_recordingsPath = QString::fromStdString(
             m_settings->getOr("recordings_path", ""));
     }
@@ -299,6 +303,40 @@ void SettingsController::setStartMinimizedToTray(bool enabled)
     if (m_settings) m_settings->set("start_minimized_to_tray",
                                     enabled ? "1" : "0");
     emit startMinimizedToTrayChanged();
+}
+
+void SettingsController::setAutoUpdateCheckEnabled(bool enabled)
+{
+    if (m_autoUpdateCheckEnabled == enabled) return;
+    m_autoUpdateCheckEnabled = enabled;
+    if (m_settings) m_settings->set("update_check_on_startup",
+                                    enabled ? "1" : "0");
+    emit autoUpdateCheckEnabledChanged();
+}
+
+void SettingsController::setSkippedUpdateVersion(const QString &version)
+{
+    if (m_skippedUpdateVersion == version) return;
+    m_skippedUpdateVersion = version;
+    if (m_settings) m_settings->set("skipped_update_version",
+                                    version.toStdString());
+    emit skippedUpdateVersionChanged();
+}
+
+qint64 SettingsController::lastUpdateCheckMs() const
+{
+    if (!m_settings) return 0;
+    try {
+        return std::stoll(m_settings->getOr("last_update_check_ms", "0"));
+    } catch (...) {
+        return 0;
+    }
+}
+
+void SettingsController::setLastUpdateCheckMs(qint64 ms)
+{
+    if (m_settings) m_settings->set("last_update_check_ms",
+                                    std::to_string(ms));
 }
 
 QVariantList SettingsController::audioInputs() const

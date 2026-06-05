@@ -271,6 +271,7 @@ qt_add_qml_module(compactphone
         ui/qml/ProviderSignInDialog.qml
         ui/qml/ActiveCallView.qml
         ui/qml/IncomingCallDialog.qml
+        ui/qml/UpdateDialog.qml
         ui/qml/Snackbar.qml
         ui/qml/TransferDialog.qml
         ui/qml/ContactsPane.qml
