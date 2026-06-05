@@ -248,7 +248,7 @@ if(APPLE)
     endif()
 endif()
 
-set_source_files_properties(ui/qml/Theme.qml ui/qml/Icons.qml
+set_source_files_properties(ui/qml/Theme.qml ui/qml/Icons.qml ui/qml/Format.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 if(COMMAND qt_policy)
@@ -264,6 +264,7 @@ qt_add_qml_module(compactphone
         ui/qml/Main.qml
         ui/qml/Theme.qml
         ui/qml/Icons.qml
+        ui/qml/Format.qml
         ui/qml/DialerPane.qml
         ui/qml/AccountsPane.qml
         ui/qml/AccountEditDialog.qml
