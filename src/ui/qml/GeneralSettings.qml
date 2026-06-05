@@ -29,16 +29,12 @@ ScrollView {
                     font.weight: Font.Bold
                     font.letterSpacing: 1.2
                 }
-                GridLayout {
+                Flow {
                     Layout.fillWidth: true
-                    columns: 2
-                    rowSpacing: Theme.s8
-                    columnSpacing: Theme.s8
+                    spacing: Theme.s8
                     Repeater {
                         model: Theme.themes
                         delegate: ThemeCard {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 72
                             themeId: modelData.id
                             name: modelData.name
                             isCurrent: PhoneController.settings.themeId === modelData.id

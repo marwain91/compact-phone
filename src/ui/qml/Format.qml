@@ -20,9 +20,18 @@ QtObject {
         return s.length > 0 ? s : (uri || "")
     }
 
-    // The contact's name when we know it, otherwise the dialled number.
+    // True when a "display name" is really a SIP URI in disguise — e.g. the
+    // remote Contact header (<sip:95.80.200.178:5060;transport=tcp>) that
+    // PJSIP hands us when the peer sends no human name. Such strings must not
+    // be shown as-is; they should be reduced to the dialled number instead.
+    function looksLikeUri(s) {
+        return /(^\s*<)|(sips?:)|@/i.test(s || "")
+    }
+
+    // The contact's name when we have a real one, otherwise the dialled
+    // number. A URI masquerading as a display name is treated as no name.
     function peerLabel(displayName, uri) {
-        if (displayName && displayName.length > 0)
+        if (displayName && displayName.length > 0 && !looksLikeUri(displayName))
             return displayName
         return phoneNumber(uri)
     }

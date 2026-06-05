@@ -6,6 +6,23 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-06-05
+
+### Fixed
+- Call History again shows just the dialled number for calls to a bare SIP
+  address. The list row labels itself from the remote *display name* and only
+  falls back to the number when that's empty — but for these calls PJSIP hands
+  us the remote Contact header (`<sip:95.80.200.178:5060;transport=tcp>`) as
+  the "display name", so the row printed the raw URI verbatim. A display name
+  that is actually a SIP URI is now treated as no name and reduced to the
+  number.
+
+### Changed
+- The **Settings → General** theme picker is now a compact row of wrapping
+  chips (swatch + name) instead of large preview tiles. The old fixed-size
+  two-column tiles overflowed the window width; the chips size to their
+  content and always fit.
+
 ## [0.1.4] - 2026-06-05
 
 ### Fixed
