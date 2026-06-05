@@ -6,6 +6,8 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-06-05
+
 ### Fixed
 - The active-call screen no longer lets a long SIP address run off the edge
   of the window. It now shows just the number (consistent with Call History)
