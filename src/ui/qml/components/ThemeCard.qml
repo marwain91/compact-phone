@@ -2,6 +2,10 @@ import QtQuick
 import QtQuick.Controls
 import CompactPhone
 
+// Compact theme picker chip: a small palette swatch + the theme name, sized
+// to its content so a row of them wraps in a Flow. Selection is shown with an
+// accent border + soft fill (no checkmark) so picking one doesn't change the
+// chip's width and reflow the row.
 AbstractButton {
     id: root
     property string themeId: ""
@@ -10,13 +14,13 @@ AbstractButton {
 
     readonly property QtObject p: Theme.paletteFor(themeId)
 
-    implicitWidth: 124
-    implicitHeight: 72
+    implicitHeight: 28
+    implicitWidth: Theme.s10 + sw.width + Theme.s8 + lbl.implicitWidth + Theme.s10
     hoverEnabled: true
 
     background: Rectangle {
-        radius: Theme.r10
-        color: Theme.surface
+        radius: Theme.r8
+        color: root.isCurrent ? Theme.accentSoft : Theme.surface
         border.color: root.isCurrent ? Theme.accent
                     : (root.hovered ? Theme.borderStrong : Theme.border)
         border.width: root.isCurrent ? 2 : 1
@@ -24,70 +28,41 @@ AbstractButton {
 
     contentItem: Item {
         Rectangle {
-            id: preview
-            anchors.top: parent.top; anchors.topMargin: Theme.s10
-            anchors.left: parent.left; anchors.leftMargin: Theme.s10
-            anchors.right: parent.right; anchors.rightMargin: Theme.s10
-            height: 36
-            radius: Theme.r6
+            id: sw
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.s10
+            anchors.verticalCenter: parent.verticalCenter
+            width: 22; height: 15; radius: 4
             color: root.p.bg
             border.color: root.p.border
             border.width: 1
             clip: true
-
+            // mini "sidebar" band
             Rectangle {
                 anchors.left: parent.left
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
-                width: 32
+                width: 7
                 color: root.p.bgElevated
-                Column {
-                    anchors.left: parent.left; anchors.leftMargin: 4
-                    anchors.top: parent.top; anchors.topMargin: 6
-                    spacing: 3
-                    Repeater {
-                        model: 3
-                        delegate: Rectangle {
-                            width: 22; height: 4; radius: 2
-                            color: index === 0 ? root.p.accent : root.p.surfaceHi
-                        }
-                    }
-                }
             }
+            // accent dot
             Rectangle {
-                anchors.left: parent.left; anchors.leftMargin: 36
-                anchors.right: parent.right; anchors.rightMargin: 4
-                anchors.top: parent.top; anchors.topMargin: 6
-                anchors.bottom: parent.bottom; anchors.bottomMargin: 6
-                radius: 4
-                color: root.p.surface
-                border.color: root.p.border
-                Rectangle {
-                    anchors.right: parent.right; anchors.rightMargin: 4
-                    anchors.top: parent.top; anchors.topMargin: 4
-                    width: 14; height: 4; radius: 2
-                    color: root.p.accent
-                }
+                anchors.right: parent.right; anchors.rightMargin: 3
+                anchors.verticalCenter: parent.verticalCenter
+                width: 8; height: 3; radius: 1.5
+                color: root.p.accent
             }
         }
-
         Text {
-            anchors.left: parent.left; anchors.leftMargin: Theme.s10
-            anchors.bottom: parent.bottom; anchors.bottomMargin: Theme.s10
+            id: lbl
+            anchors.left: sw.right
+            anchors.leftMargin: Theme.s8
+            anchors.verticalCenter: parent.verticalCenter
             text: root.name
             color: Theme.textPrimary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fsm
             font.weight: Font.DemiBold
-        }
-        AppIcon {
-            visible: root.isCurrent
-            anchors.right: parent.right; anchors.rightMargin: Theme.s10
-            anchors.bottom: parent.bottom; anchors.bottomMargin: Theme.s10
-            width: 14; height: 14
-            path: Icons.check
-            color: Theme.accent
-            stroke: 2.6
         }
     }
 }
