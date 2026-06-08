@@ -6,6 +6,15 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-06-08
+
+### Fixed
+- The dialpad no longer submits repeated outbound calls when Enter or the Call
+  button is pressed multiple times in quick succession.
+- The Settings → General theme selector uses larger, easier-to-hit theme chips.
+- On macOS, clicking the Dock icon restores the window after it has been hidden
+  to the menu bar/tray.
+
 ## [0.1.6] - 2026-06-05
 
 ### Added
