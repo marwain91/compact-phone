@@ -6,6 +6,14 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-06-08
+
+### Fixed
+- Closing the window to the menu bar/tray now happens only when a system tray
+  icon is actually available; otherwise the close button quits the app instead
+  of leaving it hidden with no way to bring it back. Packaged builds now always
+  include the tray icon (Qt Widgets is required when tray support is enabled).
+
 ## [0.1.7] - 2026-06-08
 
 ### Fixed
