@@ -49,10 +49,12 @@ ApplicationWindow {
     }
 
     onClosing: (close) => {
-        // Close X = hide to tray, not quit. PhoneController.requestQuit()
-        // from the tray menu (or another platform-quit path) actually exits.
         close.accepted = false
-        window.hide()
+        if (PhoneController.trayAvailable) {
+            window.hide()
+        } else {
+            PhoneController.requestQuit()
+        }
     }
 
     Connections {

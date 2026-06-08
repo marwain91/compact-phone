@@ -1,6 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QJsonValue>
 #include <QString>
 #include <QTextStream>
 
@@ -70,6 +75,42 @@ TEST(ReleasePackaging, LinuxReleaseMakesDockerDistArtifactsHostWritable)
     ASSERT_GE(chownOffset, 0);
     EXPECT_LT(bundleOffset, chownOffset);
     EXPECT_LT(chownOffset, appcastOffset);
+}
+
+TEST(ReleasePackaging, TrayBuildRequiresQtWidgets)
+{
+    const auto rootCmake = readProjectFile(QStringLiteral("/CMakeLists.txt"));
+    const auto manifest = readProjectFile(QStringLiteral("/vcpkg.json"));
+    ASSERT_FALSE(rootCmake.isEmpty());
+    ASSERT_FALSE(manifest.isEmpty());
+
+    EXPECT_TRUE(rootCmake.contains(QStringLiteral(
+        "find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)")));
+
+    QJsonParseError error;
+    const auto doc = QJsonDocument::fromJson(manifest.toUtf8(), &error);
+    ASSERT_EQ(error.error, QJsonParseError::NoError)
+        << error.errorString().toStdString();
+    ASSERT_TRUE(doc.isObject());
+
+    QJsonObject qtbase;
+    const auto deps = doc.object().value(QStringLiteral("dependencies")).toArray();
+    for (const auto &dep : deps) {
+        if (dep.isObject()
+            && dep.toObject().value(QStringLiteral("name")).toString()
+                   == QStringLiteral("qtbase")) {
+            qtbase = dep.toObject();
+            break;
+        }
+    }
+    ASSERT_FALSE(qtbase.isEmpty()) << "qtbase dependency not found";
+
+    QStringList features;
+    const auto featureValues = qtbase.value(QStringLiteral("features")).toArray();
+    for (const auto &feature : featureValues) {
+        features.push_back(feature.toString());
+    }
+    EXPECT_TRUE(features.contains(QStringLiteral("widgets")));
 }
 
 TEST(ReleasePackaging, WindowsReleaseSkipsProductionArtifactWithoutSigningSecret)

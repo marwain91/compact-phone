@@ -9,7 +9,7 @@
     {
       "name": "qtbase",
       "default-features": false,
-      "features": ["gui", "network", "openssl"]
+      "features": ["gui", "network", "openssl", "widgets"]
     },
     "qtdeclarative",
     "qtquickcontrols2"
