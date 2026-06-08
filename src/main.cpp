@@ -17,6 +17,7 @@ using CompactPhoneApplication = QApplication;
 using CompactPhoneApplication = QGuiApplication;
 #endif
 
+#include "core/AppActivationBridge.h"
 #include "core/BootConfig.h"
 #include "core/CrashReporting.h"
 #include "core/LogBuffer.h"
@@ -170,6 +171,14 @@ int main(int argc, char *argv[])
 
     auto *pc = engine.singletonInstance<compactphone::PhoneController *>(
         "CompactPhone", "PhoneController");
+
+    compactphone::AppActivationBridge activationBridge(&app);
+    if (pc) {
+        QObject::connect(&activationBridge,
+                         &compactphone::AppActivationBridge::restoreRequested,
+                         pc,
+                         &compactphone::PhoneController::requestShow);
+    }
 
     if (pc && !bootCfg.empty()) {
         // QML evaluation has already instantiated the PhoneController

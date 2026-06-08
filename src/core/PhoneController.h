@@ -166,6 +166,7 @@ public:
     QString activeVoicemailNumber() const;
     Q_INVOKABLE void dialVoicemail();
 
+    Q_INVOKABLE void requestShow();
     Q_INVOKABLE void requestQuit();
 
 signals:

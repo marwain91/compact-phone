@@ -202,7 +202,7 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     m_trayController = std::make_unique<TrayController>(this);
     if (m_trayController->isAvailable()) {
         connect(m_trayController.get(), &TrayController::showRequested,
-                this, &PhoneController::trayShowRequested);
+                this, &PhoneController::requestShow);
         connect(m_trayController.get(), &TrayController::hideRequested,
                 this, &PhoneController::trayHideRequested);
         connect(m_trayController.get(), &TrayController::quitRequested,
@@ -727,6 +727,11 @@ void PhoneController::redialFromHistory(int historyId)
 int PhoneController::registeredAccountCount() const
 {
     return m_accountsController ? m_accountsController->registeredAccountCount() : 0;
+}
+
+void PhoneController::requestShow()
+{
+    emit trayShowRequested();
 }
 
 void PhoneController::requestQuit()

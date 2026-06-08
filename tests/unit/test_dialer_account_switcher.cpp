@@ -6,6 +6,17 @@
 
 namespace {
 
+int countOccurrences(const QString &text, const QString &needle)
+{
+    int count = 0;
+    qsizetype pos = 0;
+    while ((pos = text.indexOf(needle, pos)) >= 0) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
 QString readQml(const QString &relativePath)
 {
     QFile file(QStringLiteral(COMPACTPHONE_SOURCE_DIR) + relativePath);
@@ -44,4 +55,27 @@ TEST(DialerAccountSwitcher, StatusPillDoublesAsAccountSwitcher)
     EXPECT_TRUE(qml.contains(QStringLiteral("id: accountMenu")));
     EXPECT_TRUE(qml.contains(
         QStringLiteral("PhoneController.activeAccountId = acctDlg.accountId")));
+}
+
+TEST(DialerAccountSwitcher, DialActionSuppressesRepeatedEnterSubmits)
+{
+    const auto qml = readQml(QStringLiteral("/src/ui/qml/DialerPane.qml"));
+    ASSERT_FALSE(qml.isEmpty());
+
+    EXPECT_TRUE(qml.contains(QStringLiteral("property bool _dialSubmitPending: false")));
+    EXPECT_TRUE(qml.contains(QStringLiteral("function requestDial()")));
+    EXPECT_TRUE(qml.contains(QStringLiteral("if (!callButton.enabled || root._dialSubmitPending) return")));
+    EXPECT_TRUE(qml.contains(QStringLiteral("root._dialSubmitPending = true")));
+    EXPECT_TRUE(qml.contains(QStringLiteral("dialRetryTimer.restart()")));
+
+    EXPECT_EQ(countOccurrences(qml, QStringLiteral("PhoneController.dial(root.dialTarget)")), 1);
+    EXPECT_EQ(countOccurrences(qml, QStringLiteral("callButton.clicked()")), 0);
+    EXPECT_TRUE(qml.contains(QStringLiteral("onAccepted: root.requestDial()")));
+    EXPECT_GE(countOccurrences(qml, QStringLiteral("onClicked: root.requestDial()")), 2);
+
+    EXPECT_TRUE(qml.contains(QStringLiteral("enabled: idleView.visible")));
+    EXPECT_TRUE(qml.contains(QStringLiteral("&& !root._dialSubmitPending")));
+    EXPECT_TRUE(qml.contains(QStringLiteral("function onRowsInserted() { root._dialSubmitPending = false }")));
+    EXPECT_TRUE(qml.contains(QStringLiteral("function onRowsRemoved() { root._dialSubmitPending = false }")));
+    EXPECT_TRUE(qml.contains(QStringLiteral("function onModelReset() { root._dialSubmitPending = false }")));
 }
