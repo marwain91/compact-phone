@@ -118,3 +118,28 @@ TEST(DaktelaBrandingLayout, ThemeSelectorUsesReadableRadioChips)
     EXPECT_TRUE(settingsQml.contains(QRegularExpression(
         QStringLiteral("Flow\\s*\\{\\s*Layout\\.fillWidth:\\s*true\\s*spacing:\\s*Theme\\.s10"))));
 }
+
+TEST(DaktelaBrandingLayout, AppActivationRestoresHiddenTrayWindow)
+{
+    const auto mainCpp = readQml(QStringLiteral("/src/main.cpp"));
+    ASSERT_FALSE(mainCpp.isEmpty());
+    EXPECT_TRUE(mainCpp.contains(QStringLiteral("compactphone::AppActivationBridge activationBridge(&app);")));
+    EXPECT_TRUE(mainCpp.contains(QStringLiteral("&compactphone::AppActivationBridge::restoreRequested")));
+    EXPECT_TRUE(mainCpp.contains(QStringLiteral("&compactphone::PhoneController::requestShow")));
+
+    const auto controllerHeader = readQml(QStringLiteral("/src/core/PhoneController.h"));
+    ASSERT_FALSE(controllerHeader.isEmpty());
+    EXPECT_TRUE(controllerHeader.contains(QStringLiteral("Q_INVOKABLE void requestShow();")));
+
+    const auto controllerCpp = readQml(QStringLiteral("/src/core/PhoneController.cpp"));
+    ASSERT_FALSE(controllerCpp.isEmpty());
+    EXPECT_TRUE(controllerCpp.contains(QStringLiteral("void PhoneController::requestShow()")));
+    EXPECT_TRUE(controllerCpp.contains(QStringLiteral("emit trayShowRequested();")));
+    EXPECT_TRUE(controllerCpp.contains(QStringLiteral("&TrayController::showRequested,")));
+    EXPECT_TRUE(controllerCpp.contains(QStringLiteral("&PhoneController::requestShow")));
+
+    const auto macDockHook = readQml(QStringLiteral("/src/core/AppActivationBridge_macos.mm"));
+    ASSERT_FALSE(macDockHook.isEmpty());
+    EXPECT_TRUE(macDockHook.contains(QStringLiteral("applicationShouldHandleReopen:hasVisibleWindows:")));
+    EXPECT_TRUE(macDockHook.contains(QStringLiteral("requestRestore")));
+}

@@ -30,6 +30,7 @@ add_executable(test_unit
     unit/test_calls_model.cpp
     unit/test_autostart_memory.cpp
     unit/test_autostart_linux.cpp
+    unit/test_app_activation_bridge.cpp
 )
 target_link_libraries(test_unit
     PRIVATE GTest::gtest GTest::gtest_main Qt6::Test compactphone_core

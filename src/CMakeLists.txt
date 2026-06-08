@@ -13,6 +13,8 @@ add_library(compactphone_core STATIC
     core/ProvisioningController.cpp
     core/TrayController.h
     core/TrayController.cpp
+    core/AppActivationBridge.h
+    core/AppActivationBridge.cpp
     core/NetworkMonitor.h
     core/NetworkMonitor.cpp
     core/PowerMonitor.h
@@ -139,12 +141,14 @@ if(APPLE)
         core/platform/Autostart_macos.h
         core/platform/Autostart_macos.mm
         core/PowerMonitor_macos.mm
+        core/AppActivationBridge_macos.mm
     )
     set_source_files_properties(
         core/platform/Keychain_macos.mm
         core/platform/TouchIdGate.mm
         core/platform/Autostart_macos.mm
         core/PowerMonitor_macos.mm
+        core/AppActivationBridge_macos.mm
         PROPERTIES COMPILE_FLAGS "-fobjc-arc")
     target_link_libraries(compactphone_core PUBLIC
         "-framework AppKit"
