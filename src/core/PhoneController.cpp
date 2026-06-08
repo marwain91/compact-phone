@@ -390,6 +390,11 @@ SettingsController *PhoneController::settingsController() const
     return m_settingsController.get();
 }
 
+bool PhoneController::trayAvailable() const
+{
+    return m_trayController && m_trayController->isAvailable();
+}
+
 QAbstractListModel *PhoneController::accountsModel() const
 {
     return m_accountsController ? m_accountsController->model() : nullptr;

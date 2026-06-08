@@ -83,6 +83,7 @@ class PhoneController : public QObject {
     // Settings live on the SettingsController, reachable from QML as
     // PhoneController.settings.<x> — PhoneController no longer re-exports them.
     Q_PROPERTY(bool crashReportingAvailable READ crashReportingAvailable CONSTANT)
+    Q_PROPERTY(bool trayAvailable READ trayAvailable CONSTANT)
     QML_ELEMENT
     QML_SINGLETON
 public:
@@ -126,6 +127,8 @@ public:
     Q_INVOKABLE bool isRecording(int callId) const;
 
     bool crashReportingAvailable() const;
+
+    bool trayAvailable() const;
 
     // Returns the first held confirmed call other than excludeCallId, or
     // -1 if none — used by the UI to enable the Merge button.

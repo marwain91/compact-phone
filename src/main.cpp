@@ -11,7 +11,6 @@
 
 #if COMPACTPHONE_WITH_TRAY
 #include <QApplication>
-#include <QSystemTrayIcon>
 using CompactPhoneApplication = QApplication;
 #else
 using CompactPhoneApplication = QGuiApplication;
@@ -197,7 +196,7 @@ int main(int argc, char *argv[])
     } else if (pc) {
         startMinimized = pc->settingsController()->startMinimizedToTray();
     }
-    if (startMinimized && QSystemTrayIcon::isSystemTrayAvailable()) {
+    if (startMinimized && pc && pc->trayAvailable()) {
         QTimer::singleShot(120, &app, [&engine] {
             for (auto *root : engine.rootObjects()) {
                 if (root) root->setProperty("visible", false);

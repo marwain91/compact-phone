@@ -119,6 +119,21 @@ TEST(DaktelaBrandingLayout, ThemeSelectorUsesReadableRadioChips)
         QStringLiteral("Flow\\s*\\{\\s*Layout\\.fillWidth:\\s*true\\s*spacing:\\s*Theme\\.s10"))));
 }
 
+TEST(DaktelaBrandingLayout, CloseToTrayRequiresAvailableTray)
+{
+    const auto mainQml = readQml(QStringLiteral("/src/ui/qml/Main.qml"));
+    ASSERT_FALSE(mainQml.isEmpty());
+    EXPECT_TRUE(mainQml.contains(QStringLiteral("if (PhoneController.trayAvailable)")));
+    EXPECT_TRUE(mainQml.contains(QStringLiteral("window.hide()")));
+    EXPECT_TRUE(mainQml.contains(QStringLiteral("PhoneController.requestQuit()")));
+
+    const auto controllerHeader = readQml(QStringLiteral("/src/core/PhoneController.h"));
+    ASSERT_FALSE(controllerHeader.isEmpty());
+    EXPECT_TRUE(controllerHeader.contains(QStringLiteral(
+        "Q_PROPERTY(bool trayAvailable READ trayAvailable CONSTANT)")));
+    EXPECT_TRUE(controllerHeader.contains(QStringLiteral("bool trayAvailable() const;")));
+}
+
 TEST(DaktelaBrandingLayout, AppActivationRestoresHiddenTrayWindow)
 {
     const auto mainCpp = readQml(QStringLiteral("/src/main.cpp"));
