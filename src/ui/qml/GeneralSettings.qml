@@ -31,7 +31,7 @@ ScrollView {
                 }
                 Flow {
                     Layout.fillWidth: true
-                    spacing: Theme.s8
+                    spacing: Theme.s10
                     Repeater {
                         model: Theme.themes
                         delegate: ThemeCard {

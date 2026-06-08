@@ -2,10 +2,10 @@ import QtQuick
 import QtQuick.Controls
 import CompactPhone
 
-// Compact theme picker chip: a small palette swatch + the theme name, sized
+// Theme picker chip: a readable palette swatch + the theme name, sized
 // to its content so a row of them wraps in a Flow. Selection is shown with an
-// accent border + soft fill (no checkmark) so picking one doesn't change the
-// chip's width and reflow the row.
+// accent border + soft fill (no checkmark) so picking one does not change the
+// chip width and reflow the row.
 AbstractButton {
     id: root
     property string themeId: ""
@@ -14,14 +14,18 @@ AbstractButton {
 
     readonly property QtObject p: Theme.paletteFor(themeId)
 
-    implicitHeight: 28
-    implicitWidth: Theme.s10 + sw.width + Theme.s8 + lbl.implicitWidth + Theme.s10
+    implicitHeight: 34
+    implicitWidth: Theme.s12 + sw.width + Theme.s10 + lbl.implicitWidth + Theme.s12
     hoverEnabled: true
+
+    Accessible.role: Accessible.RadioButton
+    Accessible.name: root.name
+    Accessible.checked: root.isCurrent
 
     background: Rectangle {
         radius: Theme.r8
-        color: root.isCurrent ? Theme.accentSoft : Theme.surface
-        border.color: root.isCurrent ? Theme.accent
+        color: root.isCurrent ? Theme.accentSoft : (root.hovered ? Theme.surfaceHi : Theme.surface)
+        border.color: root.isCurrent || root.activeFocus ? Theme.accent
                     : (root.hovered ? Theme.borderStrong : Theme.border)
         border.width: root.isCurrent ? 2 : 1
     }
@@ -30,9 +34,9 @@ AbstractButton {
         Rectangle {
             id: sw
             anchors.left: parent.left
-            anchors.leftMargin: Theme.s10
+            anchors.leftMargin: Theme.s12
             anchors.verticalCenter: parent.verticalCenter
-            width: 22; height: 15; radius: 4
+            width: 28; height: 18; radius: 5
             color: root.p.bg
             border.color: root.p.border
             border.width: 1
@@ -42,26 +46,26 @@ AbstractButton {
                 anchors.left: parent.left
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
-                width: 7
+                width: 8
                 color: root.p.bgElevated
             }
             // accent dot
             Rectangle {
-                anchors.right: parent.right; anchors.rightMargin: 3
+                anchors.right: parent.right; anchors.rightMargin: 4
                 anchors.verticalCenter: parent.verticalCenter
-                width: 8; height: 3; radius: 1.5
+                width: 9; height: 4; radius: 2
                 color: root.p.accent
             }
         }
         Text {
             id: lbl
             anchors.left: sw.right
-            anchors.leftMargin: Theme.s8
+            anchors.leftMargin: Theme.s10
             anchors.verticalCenter: parent.verticalCenter
             text: root.name
             color: Theme.textPrimary
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fsm
+            font.pixelSize: Theme.fbody
             font.weight: Font.DemiBold
         }
     }

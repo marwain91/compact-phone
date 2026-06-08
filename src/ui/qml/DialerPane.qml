@@ -9,6 +9,12 @@ ColumnLayout {
 
     property string dialTarget: ""
     property bool _syncingDialField: false
+    property bool _dialSubmitPending: false
+
+    onDialTargetChanged: {
+        root._dialSubmitPending = false
+        dialRetryTimer.stop()
+    }
 
     readonly property var keys: [
         ["1", ""], ["2", "ABC"], ["3", "DEF"],
@@ -24,7 +30,16 @@ ColumnLayout {
 
     function clearDialTarget() {
         dialTarget = ""
+        root._dialSubmitPending = false
+        dialRetryTimer.stop()
         syncDialField()
+    }
+
+    function requestDial() {
+        if (!callButton.enabled || root._dialSubmitPending) return
+        root._dialSubmitPending = true
+        dialRetryTimer.restart()
+        PhoneController.dial(root.dialTarget)
     }
 
     function isPhoneLike(value) {
@@ -130,6 +145,20 @@ ColumnLayout {
             domain: domain,
             isDaktela: root._isDaktelaAccount(m.data(idx, providerRole) || "")
         }
+    }
+
+    Timer {
+        id: dialRetryTimer
+        interval: 750
+        repeat: false
+        onTriggered: root._dialSubmitPending = false
+    }
+
+    Connections {
+        target: PhoneController.calls
+        function onRowsInserted() { root._dialSubmitPending = false }
+        function onRowsRemoved() { root._dialSubmitPending = false }
+        function onModelReset() { root._dialSubmitPending = false }
     }
 
     Item {
@@ -369,7 +398,7 @@ ColumnLayout {
                             root.syncDialField()
                         }
                     }
-                    onAccepted: { if (callButton.enabled) callButton.clicked() }
+                    onAccepted: root.requestDial()
                     Connections {
                         target: PhoneController
                         function onDialerUriChanged() {
@@ -510,20 +539,22 @@ ColumnLayout {
                         hoverEnabled: true
                         enabled: callButton.enabled
                         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: callButton.clicked()
+                        onClicked: root.requestDial()
                     }
                 }
 
-                // Invisible Button preserves keyboard activation; Enter on
-                // the dial field clicks it, and other components can target
-                // callButton.clicked() as a single signal source.
+                // Invisible Button preserves keyboard activation; Enter, mouse,
+                // and programmatic activation all go through requestDial(),
+                // which suppresses repeated submits while a call is being placed.
                 Button {
                     id: callButton
                     anchors.fill: parent
                     opacity: 0
-                    enabled: PhoneController.activeAccountId > 0
+                    enabled: idleView.visible
+                             && !root._dialSubmitPending
+                             && PhoneController.activeAccountId > 0
                              && root.dialTarget.length > 0
-                    onClicked: PhoneController.dial(root.dialTarget)
+                    onClicked: root.requestDial()
                 }
             }
         }

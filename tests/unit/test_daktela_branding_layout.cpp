@@ -72,3 +72,24 @@ TEST(DaktelaBrandingLayout, DaktelaMarkUsesBundledBrandingAssets)
         "            : \"qrc:/branding/daktela-mark-light.svg\"")));
     EXPECT_TRUE(qml.contains(QStringLiteral("Image")));
 }
+
+TEST(DaktelaBrandingLayout, ThemeSelectorUsesReadableRadioChips)
+{
+    const auto cardQml = readQml(QStringLiteral("/src/ui/qml/components/ThemeCard.qml"));
+    ASSERT_FALSE(cardQml.isEmpty());
+
+    EXPECT_TRUE(cardQml.contains(QStringLiteral("implicitHeight: 34")));
+    EXPECT_TRUE(cardQml.contains(QStringLiteral(
+        "implicitWidth: Theme.s12 + sw.width + Theme.s10 + lbl.implicitWidth + Theme.s12")));
+    EXPECT_TRUE(cardQml.contains(QStringLiteral("width: 28; height: 18; radius: 5")));
+    EXPECT_TRUE(cardQml.contains(QStringLiteral("font.pixelSize: Theme.fbody")));
+    EXPECT_TRUE(cardQml.contains(QStringLiteral("Accessible.role: Accessible.RadioButton")));
+    EXPECT_TRUE(cardQml.contains(QStringLiteral("Accessible.checked: root.isCurrent")));
+
+    const auto settingsQml = readQml(QStringLiteral("/src/ui/qml/GeneralSettings.qml"));
+    ASSERT_FALSE(settingsQml.isEmpty());
+
+    EXPECT_TRUE(settingsQml.contains(QStringLiteral(
+        "spacing: Theme.s10\n"
+        "                    Repeater")));
+}
