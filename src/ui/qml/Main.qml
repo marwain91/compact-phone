@@ -102,7 +102,6 @@ ApplicationWindow {
             window.show()
             window.raise()
             window.requestActivate()
-            console.warn("DKPHN show fired visible=" + window.visible)
         }
     }
 

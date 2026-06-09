@@ -45,6 +45,7 @@ add_executable(test_qml_layout
     unit/test_active_call_layout.cpp
     unit/test_daktela_branding_layout.cpp
     unit/test_dialer_account_switcher.cpp
+    unit/test_update_dialog_surfaces.cpp
 )
 target_link_libraries(test_qml_layout
     PRIVATE
