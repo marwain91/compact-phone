@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(CompactPhone
-    VERSION 0.1.8
+    VERSION 0.1.9
     DESCRIPTION "Free multiplatform SIP softphone (Sponsored by CompactPhone)"
     LANGUAGES CXX
 )

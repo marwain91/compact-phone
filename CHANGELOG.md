@@ -6,6 +6,14 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-06-09
+
+### Fixed
+- The "update available" prompt now appears on its own right after launch when
+  a newer version is found. It previously stayed hidden behind the main window
+  until you changed focus (for example by opening Settings → Advanced), making
+  it look like the startup check never ran.
+
 ## [0.1.8] - 2026-06-08
 
 ### Fixed
