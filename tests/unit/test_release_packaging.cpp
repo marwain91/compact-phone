@@ -113,6 +113,61 @@ TEST(ReleasePackaging, TrayBuildRequiresQtWidgets)
     EXPECT_TRUE(features.contains(QStringLiteral("widgets")));
 }
 
+TEST(ReleasePackaging, WarmCachesDispatchBuildsDepsButNeverSignsOrPublishes)
+{
+    // A workflow_dispatch with warm_caches_only=true, run on the main ref,
+    // builds the expensive vcpkg/Qt deps and saves the caches scoped to main
+    // — where every future tag run can restore them (tag-scoped caches are
+    // invisible across tags). The run must stop short of signing/publishing.
+    const auto macos =
+        readProjectFile(QStringLiteral("/.github/workflows/release-macos.yml"));
+    const auto windows =
+        readProjectFile(QStringLiteral("/.github/workflows/release-windows.yml"));
+    ASSERT_FALSE(macos.isEmpty());
+    ASSERT_FALSE(windows.isEmpty());
+
+    for (const auto &workflow : {macos, windows}) {
+        EXPECT_TRUE(workflow.contains(QStringLiteral("warm_caches_only:")));
+        // Tag validation must be skipped: warm runs dispatch off main with a
+        // placeholder tag that intentionally fails verify-release-version.py.
+        const auto validateOffset =
+            workflow.indexOf(QStringLiteral("- name: Validate release tag"));
+        ASSERT_GE(validateOffset, 0);
+        const auto validateGuard = workflow.indexOf(
+            QStringLiteral("if: inputs.warm_caches_only != true"), validateOffset);
+        ASSERT_GE(validateGuard, 0);
+        const auto validateRun =
+            workflow.indexOf(QStringLiteral("run:"), validateOffset);
+        EXPECT_LT(validateGuard, validateRun);
+    }
+
+    // macOS: the upload step must carry the warm guard.
+    const auto macUploadOffset =
+        macos.indexOf(QStringLiteral("- name: Upload DMG + appcast to release"));
+    ASSERT_GE(macUploadOffset, 0);
+    const auto macUploadGuard = macos.indexOf(
+        QStringLiteral("if: inputs.warm_caches_only != true"), macUploadOffset);
+    const auto macUploadUses =
+        macos.indexOf(QStringLiteral("uses:"), macUploadOffset);
+    ASSERT_GE(macUploadGuard, 0);
+    EXPECT_LT(macUploadGuard, macUploadUses);
+
+    // Windows: warm mode forces publish=true (so deps build) but
+    // should_sign=false, and the MSI/upload steps carry the warm guard.
+    EXPECT_TRUE(windows.contains(QStringLiteral("WARM_ONLY")));
+    EXPECT_TRUE(windows.contains(QStringLiteral(
+        "if: steps.signing-config.outputs.publish == 'true' && inputs.warm_caches_only != true")));
+    const auto winUploadOffset =
+        windows.indexOf(QStringLiteral("- name: Upload MSI + appcast to release"));
+    ASSERT_GE(winUploadOffset, 0);
+    const auto winUploadGuard = windows.indexOf(
+        QStringLiteral("inputs.warm_caches_only != true"), winUploadOffset);
+    const auto winUploadUses =
+        windows.indexOf(QStringLiteral("uses:"), winUploadOffset);
+    ASSERT_GE(winUploadGuard, 0);
+    EXPECT_LT(winUploadGuard, winUploadUses);
+}
+
 TEST(ReleasePackaging, WindowsReleaseSkipsProductionArtifactWithoutSigningSecret)
 {
     const auto workflow =
