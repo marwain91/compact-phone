@@ -23,6 +23,16 @@ on:
         required: false
         default: ""
         type: string
+      warm_caches_only:
+        # GitHub Actions caches saved on a tag ref are invisible to runs on
+        # other tags; only same-ref and default-branch caches are restorable.
+        # Dispatch this workflow ON THE MAIN REF with this flag (tag input can
+        # be a placeholder like "warm") after vcpkg.json/triplet changes, so
+        # release tags stop paying the ~2h cold Qt build.
+        description: "Build deps + save caches only; no signing/publishing. Dispatch on main."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write   # needed to attach assets to the release
@@ -61,6 +71,7 @@ jobs:
       # of the job is skipped (publish=false) rather than failed — see the
       # "Check Windows signing config" step and CLAUDE.md (#56).
       - name: Validate release tag
+        if: inputs.warm_caches_only != true
         shell: pwsh
         run: |
           if ($env:RELEASE_TAG -notlike "v*") {
@@ -74,14 +85,21 @@ jobs:
         env:
           REF_NAME: ${{ env.RELEASE_TAG }}
           TRUSTED_SIGNING_PROFILE: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+          WARM_ONLY: ${{ inputs.warm_caches_only == true }}
         run: |
           # Artifact Signing (formerly Trusted Signing) replaces the old
           # cert-store thumbprint signing. Production tags publish only when
           # signing is configured; otherwise the Windows artifact is skipped
           # (not failed). -test tags always publish, and sign only when a
-          # profile is configured.
+          # profile is configured. Warm-caches runs take the publish path so
+          # the deps get built and cached, but never sign — the MSI/publish
+          # steps additionally carry their own warm_caches_only guard.
           $hasProfile = -not [string]::IsNullOrWhiteSpace($env:TRUSTED_SIGNING_PROFILE)
-          if ($env:REF_NAME -like "*-test*") {
+          if ($env:WARM_ONLY -eq 'true') {
+            Write-Host "Warm-caches-only run; building deps and saving caches, no signing or publishing."
+            "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "should_sign=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } elseif ($env:REF_NAME -like "*-test*") {
             Write-Host "Test tag detected; artifact is published, and signed only when Artifact Signing is configured."
             "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             "should_sign=$($hasProfile.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -117,7 +135,7 @@ jobs:
           "VCPKG_ROOT=C:\v" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Install WiX 4
-        if: steps.signing-config.outputs.publish == 'true'
+        if: steps.signing-config.outputs.publish == 'true' && inputs.warm_caches_only != true
         shell: pwsh
         run: dotnet tool install --global wix --version 4.0.6
 
@@ -243,8 +261,11 @@ jobs:
             C:\b\vcpkg_installed
           key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
+      # Warm-caches runs stop after Configure: the vcpkg cache saved above is
+      # fully populated by the manifest install during Configure, so compiling
+      # the app itself adds nothing to it.
       - name: Build
-        if: steps.signing-config.outputs.publish == 'true'
+        if: steps.signing-config.outputs.publish == 'true' && inputs.warm_caches_only != true
         shell: pwsh
         run: |
           $cmd = "`"$env:VSDEVCMD`" -arch=amd64 -host_arch=amd64 " +
@@ -253,7 +274,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Stage runtime (windeployqt)
-        if: steps.signing-config.outputs.publish == 'true'
+        if: steps.signing-config.outputs.publish == 'true' && inputs.warm_caches_only != true
         shell: pwsh
         run: |
           $stage = "C:\b\stage"
@@ -286,7 +307,7 @@ jobs:
           Copy-Item THIRD_PARTY_LICENSES.md "$stage\THIRD_PARTY_LICENSES.md"
 
       - name: Build MSI
-        if: steps.signing-config.outputs.publish == 'true'
+        if: steps.signing-config.outputs.publish == 'true' && inputs.warm_caches_only != true
         shell: pwsh
         env:
           REF_NAME: ${{ env.RELEASE_TAG }}
@@ -327,7 +348,7 @@ jobs:
           timestamp-digest:    SHA256
 
       - name: Generate Windows appcast
-        if: steps.signing-config.outputs.publish == 'true'
+        if: steps.signing-config.outputs.publish == 'true' && inputs.warm_caches_only != true
         shell: pwsh
         env:
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
@@ -349,7 +370,7 @@ jobs:
               --output dist\appcast-windows.xml
 
       - name: Upload MSI + appcast to release
-        if: steps.signing-config.outputs.publish == 'true'
+        if: steps.signing-config.outputs.publish == 'true' && inputs.warm_caches_only != true
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}

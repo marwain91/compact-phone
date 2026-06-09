@@ -19,6 +19,16 @@ on:
         required: false
         default: ""
         type: string
+      warm_caches_only:
+        # GitHub Actions caches saved on a tag ref are invisible to runs on
+        # other tags; only same-ref and default-branch caches are restorable.
+        # Dispatch this workflow ON THE MAIN REF with this flag (tag input can
+        # be a placeholder like "warm") after vcpkg.json/triplet changes, so
+        # release tags stop paying the cold Qt build that killed v0.1.9.
+        description: "Build deps + save caches only; no signing/publishing. Dispatch on main."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write   # attach assets to the release
@@ -54,7 +64,10 @@ jobs:
         with:
           ref: ${{ env.BUILD_REF }}
 
+      # Warm-caches runs skip both validations: they dispatch off main with a
+      # placeholder tag, and never touch signing.
       - name: Validate release tag
+        if: inputs.warm_caches_only != true
         run: |
           if [[ "$RELEASE_TAG" != v* ]]; then
             echo "error: release tag must start with v; got '$RELEASE_TAG'" >&2
@@ -63,6 +76,7 @@ jobs:
           python3 tools/release/verify-release-version.py "$RELEASE_TAG"
 
       - name: Validate production signing config
+        if: inputs.warm_caches_only != true
         env:
           REF_NAME: ${{ env.RELEASE_TAG }}
           P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
@@ -183,7 +197,11 @@ jobs:
             -DVCPKG_OVERLAY_TRIPLETS="${{ github.workspace }}/tools/release/triplets" \
             "${sentry_args[@]}"
 
+      # Warm-caches runs stop after Configure: the vcpkg caches saved below are
+      # fully populated by the manifest install during Configure, so compiling
+      # the app itself adds nothing to them.
       - name: Build
+        if: inputs.warm_caches_only != true
         run: cmake --build --preset macos
 
       # Save the expensive vcpkg caches now, right after a successful build and
@@ -209,6 +227,7 @@ jobs:
           key: ${{ steps.vcpkg-deps-cache.outputs.cache-primary-key }}
 
       - name: Import signing identity
+        if: inputs.warm_caches_only != true
         env:
           P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
@@ -231,6 +250,7 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
 
       - name: Build, sign, notarize DMG
+        if: inputs.warm_caches_only != true
         env:
           DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
@@ -266,6 +286,7 @@ jobs:
       # but it's the right hygiene for when we adopt the real Sparkle
       # framework).
       - name: Generate macOS appcast
+        if: inputs.warm_caches_only != true
         env:
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
           REF_NAME: ${{ env.RELEASE_TAG }}
@@ -291,6 +312,7 @@ jobs:
             --output dist/appcast-macos.xml
 
       - name: Upload DMG + appcast to release
+        if: inputs.warm_caches_only != true
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}

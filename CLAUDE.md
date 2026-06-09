@@ -294,6 +294,29 @@ Gotchas:
   `src/CMakeLists.txt`) and is **untestable in the Linux dev
   container** — it only compiles/runs on the Windows runner.
 
+### Release caches are tag-scoped — warm them from `main` or every tag builds cold
+
+GitHub Actions cache isolation: a run can only restore caches created on
+its own ref or on the default branch. Release workflows run on tag refs,
+so the caches they save (`refs/tags/v0.1.8`) are invisible to the next
+tag's run (`refs/tags/v0.1.9`) — every release pays the full cold Qt
+build on macOS (~1h) and Windows (~2h) unless a `main`-scoped cache
+exists. This is GitHub's security model; there is no setting to widen it.
+The v0.1.9 macOS release died mid-cold-build ("runner lost communication")
+exactly because of this.
+
+Fix: `release-macos.yml` and `release-windows.yml` take a
+`warm_caches_only` workflow_dispatch input. Dispatch them **on the `main`
+ref** with that flag (tag input can be a placeholder like `warm`) after
+changing `vcpkg.json`, `vcpkg-configuration.json`, or the release
+triplets. The run restores/builds deps, runs Configure, saves the caches
+main-scoped, and skips build/sign/publish entirely. Tag runs then restore
+those caches (and skip their own save on a primary-key hit, so the 10 GB
+repo cache budget isn't double-charged — relevant because the Windows
+cache alone is ~6 GB). Linux needs no warm input: `ci.yml` and
+`release-linux.yml` share a cache key, so any manual CI dispatch on
+`main` warms it.
+
 ### `actions/cache` does NOT save on job failure by default
 
 For expensive caches (Windows Qt cold build is ~2h), use
