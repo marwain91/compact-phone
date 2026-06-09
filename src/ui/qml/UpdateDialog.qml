@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Window
 import CompactPhone
 
 // Modal prompt shown when a newer version is found (auto-check on startup or
@@ -9,26 +8,39 @@ import CompactPhone
 // version. Download opens the release page in the browser (the app does not
 // self-install); "ignore this version" persists so the auto-check stays quiet
 // about it.
-Window {
+//
+// Rendered as an in-scene Dialog (not a separate top-level Window) so it
+// surfaces immediately, even a few seconds after launch. A top-level modal
+// Window only rises to the front when its parent window is the key/active
+// window at show() time; right after startup that often isn't true, so the
+// prompt used to stay hidden behind the main window until the next focus
+// change (e.g. navigating to Settings → Advanced). Matching IncomingCallDialog's
+// in-scene pattern removes that race.
+Dialog {
     id: dialog
+    modal: true
+    standardButtons: Dialog.NoButton
+    closePolicy: Popup.CloseOnEscape
+    padding: Theme.s16
+
+    // Center on the parent window — Dialog doesn't do this automatically
+    // when only width is set.
+    anchors.centerIn: parent
     width: 380
-    height: 210
-    minimumWidth: 380
-    maximumWidth: 380
-    minimumHeight: 210
-    maximumHeight: 210
-    modality: Qt.ApplicationModal
-    flags: Qt.Dialog
-    color: Theme.bgElevated
-    title: qsTr("Update available")
+
+    background: Rectangle {
+        color: Theme.bgElevated
+        radius: Theme.r16
+        border.color: Theme.border
+        border.width: 1
+    }
+    header: null
 
     property string version: ""
 
     function openFor(v) {
         dialog.version = v
-        dialog.show()
-        dialog.raise()
-        dialog.requestActivate()
+        dialog.open()
     }
 
     function download() {
@@ -36,12 +48,9 @@ Window {
         dialog.close()
     }
 
-    Shortcut { sequences: ["Esc"]; onActivated: dialog.close() }
     Shortcut { sequences: ["Return", "Enter"]; onActivated: dialog.download() }
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: Theme.s16
+    contentItem: ColumnLayout {
         spacing: Theme.s10
 
         RowLayout {
@@ -79,10 +88,9 @@ Window {
             wrapMode: Text.WordWrap
         }
 
-        Item { Layout.fillHeight: true }
-
         RowLayout {
             Layout.fillWidth: true
+            Layout.topMargin: Theme.s6
             spacing: Theme.s8
             AppButton {
                 variant: "ghost"
