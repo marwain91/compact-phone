@@ -48,7 +48,10 @@ public:
 
     // Returns -1 if a < b, 0 if equal, +1 if a > b. Compares dotted
     // numeric segments (1.2.3 vs 1.2.10 etc.); non-numeric segments
-    // resolve to 0.
+    // resolve to 0. Semver-style suffixes are honoured: a "-prerelease"
+    // suffix sorts below its own full release (0.1.10-test1 < 0.1.10)
+    // and prereleases order naturally (test2 < test10); "+build"
+    // metadata is ignored.
     static int compareVersions(const QString &a, const QString &b);
 
 signals:

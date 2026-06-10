@@ -46,7 +46,40 @@ TEST(UpdateCheckerVersions, DoubleDigitSegmentsBeatSingleDigit)
 TEST(UpdateCheckerVersions, NonNumericSegmentsResolveToZero)
 {
     EXPECT_EQ(UpdateChecker::compareVersions("alpha", "0"), 0);
-    EXPECT_EQ(UpdateChecker::compareVersions("1.0-rc1", "1.0"), 0);
+    EXPECT_EQ(UpdateChecker::compareVersions("1.x.2", "1.0.2"), 0);
+}
+
+// Regression for the prerelease-suffix bug: release tags like v0.1.10-test1
+// publish appcast version "0.1.10-test1", and the old parser ran
+// "10-test1".toInt() == 0, so the entry self-identified as 0.1.0 — losing to
+// 0.1.9 and inverting both parseAppcast's best-entry pick and the
+// up-to-date decision.
+TEST(UpdateCheckerVersions, PrereleaseSuffixDoesNotZeroItsSegment)
+{
+    EXPECT_GT(UpdateChecker::compareVersions("0.1.10-test1", "0.1.9"), 0);
+    EXPECT_LT(UpdateChecker::compareVersions("0.1.9", "0.1.10-test1"), 0);
+    EXPECT_GT(UpdateChecker::compareVersions("0.1.10-test1", "0.1.0"), 0);
+}
+
+TEST(UpdateCheckerVersions, PrereleaseSortsBelowItsOwnRelease)
+{
+    EXPECT_LT(UpdateChecker::compareVersions("0.1.10-test1", "0.1.10"), 0);
+    EXPECT_GT(UpdateChecker::compareVersions("0.1.10", "0.1.10-test1"), 0);
+    EXPECT_LT(UpdateChecker::compareVersions("1.0-rc1", "1.0"), 0);
+}
+
+TEST(UpdateCheckerVersions, PrereleasesOrderNumericallyWithinDigitRuns)
+{
+    EXPECT_LT(UpdateChecker::compareVersions("0.1.10-test1", "0.1.10-test2"), 0);
+    // Natural ordering, not lexical: test2 < test10.
+    EXPECT_LT(UpdateChecker::compareVersions("0.1.10-test2", "0.1.10-test10"), 0);
+    EXPECT_EQ(UpdateChecker::compareVersions("0.1.10-test3", "0.1.10-test3"), 0);
+}
+
+TEST(UpdateCheckerVersions, BuildMetadataIsIgnored)
+{
+    EXPECT_EQ(UpdateChecker::compareVersions("1.2.3+build7", "1.2.3"), 0);
+    EXPECT_LT(UpdateChecker::compareVersions("1.2.3+build7", "1.2.4"), 0);
 }
 
 TEST(UpdateCheckerParse, WellFormedFeedReturnsHighestEnclosure)
