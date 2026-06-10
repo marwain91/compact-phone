@@ -85,7 +85,7 @@ TEST(ReleasePackaging, TrayBuildRequiresQtWidgets)
     ASSERT_FALSE(manifest.isEmpty());
 
     EXPECT_TRUE(rootCmake.contains(QStringLiteral(
-        "find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)")));
+        "find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Svg)")));
 
     QJsonParseError error;
     const auto doc = QJsonDocument::fromJson(manifest.toUtf8(), &error);

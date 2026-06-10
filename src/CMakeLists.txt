@@ -127,7 +127,7 @@ target_link_libraries(compactphone_core
         unofficial::sqlite3::sqlite3
 )
 if(COMPACTPHONE_WITH_TRAY)
-    target_link_libraries(compactphone_core PUBLIC Qt6::Widgets)
+    target_link_libraries(compactphone_core PUBLIC Qt6::Widgets Qt6::Svg)
 endif()
 
 if(APPLE)

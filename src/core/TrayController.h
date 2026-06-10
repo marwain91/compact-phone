@@ -12,6 +12,8 @@
 class QSystemTrayIcon;
 class QMenu;
 class QAction;
+class QIcon;
+class QImage;
 
 namespace compactphone {
 
@@ -22,6 +24,15 @@ public:
     ~TrayController() override;
 
     bool isAvailable() const;
+
+#if COMPACTPHONE_WITH_TRAY
+    // The monochrome tray glyph — the same Lucide phone path the dock
+    // icon and in-app brand marks use.
+    static QIcon phoneTrayIcon();
+    // One rendered frame of that glyph. QImage-based so tests can verify
+    // the rendering without a QGuiApplication / platform plugin.
+    static QImage phoneGlyphImage(int size);
+#endif
 
     // Sets the on-icon badge shown for missed calls. 0 = no badge.
     // Also updates the macOS dock badge.

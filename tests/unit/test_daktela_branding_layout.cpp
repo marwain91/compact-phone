@@ -119,6 +119,25 @@ TEST(DaktelaBrandingLayout, ThemeSelectorUsesReadableRadioChips)
         QStringLiteral("Flow\\s*\\{\\s*Layout\\.fillWidth:\\s*true\\s*spacing:\\s*Theme\\.s10"))));
 }
 
+TEST(DaktelaBrandingLayout, TrayIconUsesTheBrandPhoneGlyph)
+{
+    // The tray icon must render the exact Lucide phone path the dock icon
+    // and in-app marks use — not a hand-traced QPainterPath copy, which is
+    // how the tray glyph drifted into a distorted handset.
+    const auto icons = readQml(QStringLiteral("/src/ui/qml/Icons.qml"));
+    ASSERT_FALSE(icons.isEmpty());
+    const auto glyph = firstMatch(
+        icons, QStringLiteral("phone:\\s*\"<path d='([^']+)'/>\""));
+    ASSERT_TRUE(glyph.hasMatch());
+
+    const auto tray = readQml(QStringLiteral("/src/core/TrayController.cpp"));
+    ASSERT_FALSE(tray.isEmpty());
+    EXPECT_TRUE(tray.contains(glyph.captured(1)));
+    EXPECT_TRUE(tray.contains(QStringLiteral("QSvgRenderer")));
+    EXPECT_FALSE(tray.contains(QStringLiteral("QPainterPath")));
+    EXPECT_TRUE(tray.contains(QStringLiteral("setIsMask(true)")));
+}
+
 TEST(DaktelaBrandingLayout, CloseToTrayRequiresAvailableTray)
 {
     const auto mainQml = readQml(QStringLiteral("/src/ui/qml/Main.qml"));
