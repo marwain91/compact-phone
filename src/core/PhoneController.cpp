@@ -347,6 +347,19 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
 PhoneController::~PhoneController()
 {
+    // Quiesce the PJSIP-thread callbacks we registered before tearing down
+    // the objects they capture. The manager callback setters block until
+    // any in-flight invocation completes (see m_callbackMutex in the
+    // managers), so after these return the PJSIP thread can no longer enter
+    // our lambdas. Controller destructors below do the same for theirs. The
+    // teardown order itself is load-bearing: controllers (clear callbacks)
+    // -> managers (pj::Account / pj::Call destructors serialize against
+    // in-flight dispatch via the PJSUA lock) -> engine->stop() last,
+    // because libDestroy must run after every pjsua2 object is gone.
+    if (m_accounts) {
+        m_accounts->setOnMwiChanged({});
+        m_accounts->setOnInstantMessage({});
+    }
     m_networkMonitor.reset();
     m_powerMonitor.reset();
     m_updateChecker.reset();

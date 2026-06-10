@@ -49,6 +49,10 @@ using persistence::readText;
 class AccountsManager::AccountImpl : public pj::Account {
 public:
     AccountId id = kInvalidAccountId;
+    // Raw pointer is safe across threads: AccountsManager owns this impl,
+    // and pj::Account's destructor serializes against in-flight callback
+    // dispatch via the PJSUA lock — by the time AccountsManager dies, no
+    // callback can still be running.
     AccountsManager *owner = nullptr;
     std::atomic<RegistrationState> state{RegistrationState::Unregistered};
     // Guarded by ownersMutex on read; written only from the PJSIP thread
@@ -84,20 +88,32 @@ public:
             // user can still read the reason while a retry is in flight.
         }
         state.store(s);
-        if (owner && owner->m_cb) owner->m_cb(id, s);
+        // Invoke under the callback mutex: the main thread reassigns these
+        // std::functions (controller ctors/dtors) while this thread invokes
+        // them — see m_callbackMutex in the header.
+        if (owner) {
+            std::lock_guard<std::mutex> lk(owner->m_callbackMutex);
+            if (owner->m_cb) owner->m_cb(id, s);
+        }
     }
 
     void onIncomingCall(pj::OnIncomingCallParam &prm) override
     {
         spdlog::info("Account {} incoming call (pjsip id {})", id, prm.callId);
-        if (owner && owner->m_onIncoming) owner->m_onIncoming(id, prm.callId);
+        if (owner) {
+            std::lock_guard<std::mutex> lk(owner->m_callbackMutex);
+            if (owner->m_onIncoming) owner->m_onIncoming(id, prm.callId);
+        }
     }
 
     // Inbound SIP MESSAGE (RFC 3428 instant message).
     void onInstantMessage(pj::OnInstantMessageParam &prm) override
     {
-        if (owner && owner->m_onInstantMessage) {
-            owner->m_onInstantMessage(id, prm.fromUri, prm.msgBody);
+        if (owner) {
+            std::lock_guard<std::mutex> lk(owner->m_callbackMutex);
+            if (owner->m_onInstantMessage) {
+                owner->m_onInstantMessage(id, prm.fromUri, prm.msgBody);
+            }
         }
     }
 
@@ -652,6 +668,7 @@ void AccountsManager::unregisterAccount(AccountId id)
 
 MwiState AccountsManager::mwiStateOf(AccountId id) const
 {
+    std::lock_guard<std::mutex> lk(m_callbackMutex);
     auto it = m_mwi.find(id);
     return it == m_mwi.end() ? MwiState{} : it->second;
 }
@@ -659,10 +676,13 @@ MwiState AccountsManager::mwiStateOf(AccountId id) const
 void AccountsManager::updateMwi(AccountId id, int newCount, int oldCount,
                                 bool active)
 {
+    // Runs on the PJSIP worker thread (AccountImpl::onMwiInfo); the map and
+    // the callback are read on the main thread.
     MwiState s;
     s.newMessages = newCount;
     s.oldMessages = oldCount;
     s.active = active;
+    std::lock_guard<std::mutex> lk(m_callbackMutex);
     m_mwi[id] = s;
     if (m_onMwi) m_onMwi(id, s);
 }
@@ -670,6 +690,7 @@ void AccountsManager::updateMwi(AccountId id, int newCount, int oldCount,
 void AccountsManager::setOnMwiChanged(
     std::function<void(AccountId, MwiState)> cb)
 {
+    std::lock_guard<std::mutex> lk(m_callbackMutex);
     m_onMwi = std::move(cb);
 }
 
@@ -702,6 +723,7 @@ void AccountsManager::setOnInstantMessage(
     std::function<void(AccountId, const std::string &,
                        const std::string &)> cb)
 {
+    std::lock_guard<std::mutex> lk(m_callbackMutex);
     m_onInstantMessage = std::move(cb);
 }
 
@@ -748,11 +770,13 @@ RegError AccountsManager::lastRegErrorOf(AccountId id) const
 void AccountsManager::setOnRegistrationStateChanged(
     std::function<void(AccountId, RegistrationState)> cb)
 {
+    std::lock_guard<std::mutex> lk(m_callbackMutex);
     m_cb = std::move(cb);
 }
 
 void AccountsManager::setOnIncomingCall(std::function<void(AccountId, int)> cb)
 {
+    std::lock_guard<std::mutex> lk(m_callbackMutex);
     m_onIncoming = std::move(cb);
 }
 

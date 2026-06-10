@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -149,6 +150,15 @@ private:
     // password is already held in PJSIP's pj::AuthCredInfo for the lifetime
     // of the pj::Account, so this cache is not a fresh secrecy regression.
     std::unordered_map<std::string, std::string> m_passwordCache;
+    // Guards the four callback slots below plus m_mwi: assigned/read on the
+    // main thread (controller ctors/dtors, mwiStateOf), invoked/written on
+    // the PJSIP worker thread (AccountImpl callbacks). Invocation happens
+    // UNDER this mutex, so a setter call is a quiesce barrier — when
+    // setOnX({}) returns, no in-flight invocation of the previous callback
+    // exists and none can start; that is what makes clearing the callbacks
+    // in controller destructors safe while events are still arriving. Never
+    // call a setter from inside a callback.
+    mutable std::mutex m_callbackMutex;
     std::function<void(AccountId, RegistrationState)> m_cb;
     std::function<void(AccountId, int)> m_onIncoming;
     std::function<void(AccountId, MwiState)> m_onMwi;
