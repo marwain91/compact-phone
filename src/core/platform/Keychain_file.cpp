@@ -192,7 +192,11 @@ bool FileKeychain::open()
     QFile f(qpath);
     if (!f.exists()) {
         m_salt.resize(kSaltSize);
-        RAND_bytes(reinterpret_cast<uint8_t *>(m_salt.data()), kSaltSize);
+        if (RAND_bytes(reinterpret_cast<uint8_t *>(m_salt.data()), kSaltSize)
+                != 1) {
+            spdlog::error("FileKeychain: salt generation failed");
+            return false;
+        }
         return persist();
     }
     if (!f.open(QIODevice::ReadOnly)) {
@@ -264,8 +268,15 @@ bool FileKeychain::persist()
     }
     const auto plain = QJsonDocument(obj).toJson(QJsonDocument::Compact);
 
+    // Fail closed if entropy is unavailable: encrypting with the zero IV the
+    // buffer was initialised with would reuse the same AES-GCM nonce on every
+    // persist(), which breaks both confidentiality and the auth guarantee of
+    // everything stored under this key.
     QByteArray iv(kIvSize, 0);
-    RAND_bytes(reinterpret_cast<uint8_t *>(iv.data()), kIvSize);
+    if (RAND_bytes(reinterpret_cast<uint8_t *>(iv.data()), kIvSize) != 1) {
+        spdlog::error("FileKeychain::persist IV generation failed");
+        return false;
+    }
 
     std::array<uint8_t, kKeySize> key{};
     if (!deriveKey(m_salt, m_masterKey, key)) return false;
