@@ -49,6 +49,14 @@ race:pj_mutex_destroy
 # does not lock stat reads against the stream thread.
 race:pjmedia_stream_common_get_stat
 
+# pjmedia's WSOLA delay buffer is written from both the media 'clock'
+# thread and the pjsua-calling thread under *different* pj mutexes
+# (conference-bridge frame processing vs delaybuf put during call
+# accept/teardown churn) — internal pjmedia locking inconsistency on the
+# same heap block, surfaced rarely by the callback-reassignment stress
+# test. Our code never touches WSOLA buffers.
+race:pjmedia_wsola_save
+
 # Qt hands cross-thread QMetaObject::invokeMethod functors through its event
 # queue, which synchronizes via QBasicMutex futexes invisible to TSan in an
 # uninstrumented QtCore — the functor's heap storage (operator new on the

@@ -98,6 +98,7 @@ add_executable(test_integration
     integration/test_thread_stress.cpp
     integration/test_audio_playback.cpp
     integration/test_stream_stats_live.cpp
+    integration/test_zombie_call_guards.cpp
 )
 target_link_libraries(test_integration
     PRIVATE GTest::gtest GTest::gtest_main Qt6::Core compactphone_core

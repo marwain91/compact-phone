@@ -62,7 +62,18 @@ public:
 
     void onRegState(pj::OnRegStateParam &prm) override
     {
-        pj::AccountInfo info = getInfo();
+        pj::AccountInfo info;
+        try {
+            info = getInfo();
+        } catch (const pj::Error &e) {
+            // getInfo() only fails once pjsua has invalidated the account
+            // (shutdown/removal racing a final reg event). Nothing to
+            // report — and the exception must not unwind into PJSIP's C
+            // frames.
+            spdlog::warn("Account {} onRegState getInfo failed: {}", id,
+                         e.info());
+            return;
+        }
         spdlog::info("Account {} reg state: active={} code={} reason='{}'",
                      id, info.regIsActive, static_cast<int>(prm.code),
                      prm.reason);
