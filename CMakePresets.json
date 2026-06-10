@@ -36,11 +36,20 @@
       "cacheVariables": {
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/tools/dev/triplets"
       }
+    },
+    {
+      "name": "linux-tsan",
+      "inherits": "linux",
+      "description": "ThreadSanitizer build for the dev container — regression gate for PJSIP-worker-thread vs main-thread races (`make test-tsan`). Separate binaryDir; vcpkg populates its own vcpkg_installed there (fast via the binary cache, but ~extra disk).",
+      "cacheVariables": {
+        "COMPACTPHONE_ENABLE_TSAN": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "macos", "configurePreset": "macos" },
     { "name": "windows", "configurePreset": "windows" },
-    { "name": "linux", "configurePreset": "linux" }
+    { "name": "linux", "configurePreset": "linux" },
+    { "name": "linux-tsan", "configurePreset": "linux-tsan" }
   ]
 }

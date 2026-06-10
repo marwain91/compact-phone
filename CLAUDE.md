@@ -574,6 +574,44 @@ the audio device enumeration on Docker-for-Mac apparently doesn't
 trip the pjsua2 init path the same way as on the GitHub x86_64
 runner. So "tests pass on my machine" is not signal for these.
 
+### ThreadSanitizer gate — `make test-tsan`
+
+The `linux-tsan` CMake preset builds our code with `-fsanitize=thread`
+into `build/linux-tsan` (own `vcpkg_installed`, restored from the binary
+cache; deps stay uninstrumented — TSan still sees their pthread-level
+locking). `make test-tsan` runs the `ThreadStressTest` integration test
+under it: PJSIP-thread call adoption hammered against main-thread
+`snapshot()`/`callCount()` polling. Red-proven: removing a CallManager
+lock makes TSan halt with the exact file:line.
+
+Gotchas, in the order they will bite you:
+
+- **libtsan needs the `personality()` syscall** (to disable ASLR on
+  aarch64); Docker's default seccomp profile blocks it and every TSan
+  binary dies before `main()` with a cryptic
+  `CHECK failed ... personality` — even during the build, because
+  `gtest_discover_tests` executes the test binaries. The dev service
+  sets `seccomp=unconfined`; after pulling that compose change, recreate
+  the container (`docker compose ... up -d --force-recreate dev`).
+- **Don't busy-poll instrumented code in tests.** A tight
+  snapshot()/processEvents loop monopolizes the PJSUA lock under TSan
+  and livelocks the PJSIP worker (calls get no response for 5+ s);
+  1 ms sleep per iteration fixes it. Deadlines need ~4× headroom.
+- `detect_deadlocks=0` is deliberate: PJSIP takes its own mutexes in
+  both orders internally, and any deadlock suppression matching pj
+  frames would also mask cycles involving our `m_mutex`. Lock-order
+  discipline lives in the CallManager.h contract instead.
+- `tools/dev/tsan.supp` carries three narrow pj-internal race
+  suppressions (socket close-vs-send, pool reset vs logging,
+  call-info string copy). Keep suppressions leaf-function-narrow;
+  broad `pj*` globs would mask our own races, whose PJSIP-thread
+  stacks always contain pjsua frames.
+- The gate is scoped to `ThreadStressTest` until backlog task #6
+  (callback assign-vs-invoke race, 12 live TSan reports) and the
+  older tests' mutex+cv-inside-callback pattern (14 double-lock
+  reports — pjsua can deliver `onRegState` re-entrantly on the
+  registering thread) are fixed; then widen to `-L integration`.
+
 ## Branch + PR conventions
 
 - **`main` is protected** — direct pushes blocked, force-push blocked,

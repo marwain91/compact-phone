@@ -12,6 +12,12 @@ services:
     volumes:
       - ../..:/workspace
       - ${VCPKG_ARCHIVES_DIR:-vcpkg-archives}:/root/.cache/vcpkg
+    # ThreadSanitizer (make test-tsan) needs the personality() syscall to
+    # disable ASLR at startup on aarch64; Docker's default seccomp profile
+    # blocks it and libtsan CHECK-fails before main(). Local dev fixture
+    # only — never run untrusted code in this container.
+    security_opt:
+      - seccomp=unconfined
     command: sleep infinity
     tty: true
     stdin_open: true

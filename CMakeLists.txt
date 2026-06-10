@@ -19,6 +19,18 @@ option(COMPACTPHONE_BUILD_TESTS "Build unit and integration tests" ON)
 option(COMPACTPHONE_ENABLE_TRAY "Enable system tray integration when Qt Widgets is available" ON)
 option(COMPACTPHONE_ENABLE_SENTRY "Link the Sentry crash reporter (requires sentry-native via vcpkg)" OFF)
 set(COMPACTPHONE_SENTRY_DSN "" CACHE STRING "Sentry DSN embedded at build time; empty disables uploads")
+option(COMPACTPHONE_ENABLE_TSAN "Build with ThreadSanitizer (linux-tsan preset; dev/test only)" OFF)
+
+if(COMPACTPHONE_ENABLE_TSAN)
+    # Instruments our code only — vcpkg deps and PJSIP are prebuilt without
+    # TSan, which is fine: TSan's runtime intercepts pthread primitives
+    # process-wide, so locking done inside uninstrumented libraries is still
+    # modelled; we just don't get race reports for *their* internals. This is
+    # the regression gate for the CallManager/PJSIP-worker-thread races —
+    # see `make test-tsan` and tools/dev/tsan.supp.
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
+endif()
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Test)
 # LinguistTools is required only to regenerate translation files; without it
