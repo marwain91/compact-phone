@@ -77,6 +77,15 @@ protected:
     // Stays accessible to the lambdas wired into CallsController.
     int activeAccountId = -1;
 
+    // Observation state shared with the onCallEvent lambdas. Fixture members,
+    // NOT test-body locals: the callback installed on cm stays live until
+    // TearDown destroys cm, and a late PJSIP event (e.g. the adopted callee
+    // leg's Disconnected arriving just after the test body returns) would
+    // write through references to a dead stack frame.
+    std::mutex mtx;
+    std::unordered_map<int, compactphone::sip::CallState> observed;
+    std::chrono::steady_clock::time_point firstSeenConfirmed{};
+
     void SetUp() override
     {
         app = std::make_unique<QCoreApplication>(argc, &argv);
@@ -112,15 +121,25 @@ protected:
     }
 
     // Register both 1001 and 1002 and block until both are registered.
+    //
+    // The wait tracks each account's CURRENT registration state, not a count
+    // of transitions: counting "saw Registered twice" lets a single account
+    // that flaps (register -> drop -> re-register, common right after the
+    // Asterisk fixture restarts) satisfy the wait while the other account is
+    // still unregistered. The tests then INVITE an endpoint Asterisk has no
+    // contact for and get 480 — the caller leg goes Disconnected, which the
+    // DND test would treat as a (vacuous) pass and the auto-answer/forward
+    // tests as a spurious failure.
     void registerBothAccounts(compactphone::sip::AccountId &id1,
                               compactphone::sip::AccountId &id2)
     {
-        std::mutex mtx;
+        std::mutex regMtx;
         std::condition_variable cv;
-        int registeredCount = 0;
-        am->setOnRegistrationStateChanged([&](auto, auto s) {
-            std::lock_guard l(mtx);
-            if (s == compactphone::sip::RegistrationState::Registered) ++registeredCount;
+        std::unordered_map<compactphone::sip::AccountId,
+                           compactphone::sip::RegistrationState> regState;
+        am->setOnRegistrationStateChanged([&](auto accountId, auto s) {
+            std::lock_guard l(regMtx);
+            regState[accountId] = s;
             cv.notify_all();
         });
         auto mk = [&](const std::string &u, const std::string &p, bool def) {
@@ -134,8 +153,25 @@ protected:
         id2 = mk("1002", "compactphone1002", false);
         ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
         ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] { return registeredCount >= 2; }));
+        const auto bothRegistered = [&] {
+            return regState[id1] == compactphone::sip::RegistrationState::Registered &&
+                   regState[id2] == compactphone::sip::RegistrationState::Registered;
+        };
+        bool ok = false;
+        {
+            std::unique_lock l(regMtx);
+            ok = cv.wait_for(l, 10s, bothRegistered);
+        }
+        // The lambda above captures this function's stack locals by
+        // reference. Clearing the callback is a quiesce barrier (the setter
+        // and the PJSIP-thread invocation share m_callbackMutex), so after
+        // this line no late registration event — a mid-test flap or
+        // TearDown's unregister — can write through the dead stack frame.
+        // Must happen BEFORE the ASSERT, which returns early on failure.
+        am->setOnRegistrationStateChanged({});
+        ASSERT_TRUE(ok)
+            << "1001 state=" << static_cast<int>(regState[id1])
+            << " 1002 state=" << static_cast<int>(regState[id2]);
     }
 };
 
@@ -147,9 +183,7 @@ TEST_F(CallPoliciesTest, DndDeclinesIncomingCallAndOriginatorDisconnects)
 
     sc->setDndEnabled(true);
 
-    std::mutex mtx;
-    std::unordered_map<int, compactphone::sip::CallState> observed;
-    cm->setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    cm->setOnCallEvent([this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx); observed[id] = s;
     });
 
@@ -174,9 +208,7 @@ TEST_F(CallPoliciesTest, AutoAnswerAcceptsIncomingCallWithoutManualAccept)
     sc->setAutoAnswerEnabled(true);
     sc->setAutoAnswerDelayMs(0);
 
-    std::mutex mtx;
-    std::unordered_map<int, compactphone::sip::CallState> observed;
-    cm->setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    cm->setOnCallEvent([this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx); observed[id] = s;
     });
 
@@ -207,10 +239,7 @@ TEST_F(CallPoliciesTest, AutoAnswerWithDelayWaitsThenAccepts)
     sc->setAutoAnswerEnabled(true);
     sc->setAutoAnswerDelayMs(1500);
 
-    std::mutex mtx;
-    std::unordered_map<int, compactphone::sip::CallState> observed;
-    auto firstSeenConfirmed = std::chrono::steady_clock::time_point{};
-    cm->setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    cm->setOnCallEvent([this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx);
         observed[id] = s;
         if (s == compactphone::sip::CallState::Confirmed &&
@@ -248,9 +277,7 @@ TEST_F(CallPoliciesTest, ForwardAlwaysRedirectsIncoming)
     sc->setCfwdAlwaysEnabled(true);
     sc->setCfwdAlwaysTarget(QString::fromStdString(udpTarget("600")));
 
-    std::mutex mtx;
-    std::unordered_map<int, compactphone::sip::CallState> observed;
-    cm->setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    cm->setOnCallEvent([this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx); observed[id] = s;
     });
 
