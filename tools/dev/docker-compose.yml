@@ -48,6 +48,16 @@ services:
 networks:
   compactphone-net:
     driver: bridge
+    # Pinned: the Asterisk fixture's local_net (tests/integration/docker/
+    # pjsip.conf) must match this subnet exactly. Without ipam pinning,
+    # Docker assigns whatever pool is free at network-creation time; when
+    # that drifted off 192.168.144.0/24, Asterisk classified the dev
+    # container as "external" and rewrote Contact/SDP to 127.0.0.1 — every
+    # in-dialog request (re-INVITE/ACK/BYE) then targeted the wrong host and
+    # hold/unhold never completed.
+    ipam:
+      config:
+        - subnet: 192.168.144.0/24
 
 volumes:
   vcpkg-archives:

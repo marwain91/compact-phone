@@ -574,6 +574,32 @@ the audio device enumeration on Docker-for-Mac apparently doesn't
 trip the pjsua2 init path the same way as on the GitHub x86_64
 runner. So "tests pass on my machine" is not signal for these.
 
+### Asterisk fixture `local_net` must match the compose network subnet — it's pinned
+
+The integration fixture (`tests/integration/docker/pjsip.conf`) rewrites
+Contact/SDP to `127.0.0.1` for any peer outside its `local_net` list (the
+Mac-host scenario needs that). Docker assigns compose-network subnets
+dynamically — when the network got recreated onto a different pool
+(192.168.208.0/20 instead of 192.168.144.0/24), Asterisk classified the
+dev container as "external" and rewrote its dialog target to 127.0.0.1.
+Every in-dialog request (re-INVITE/ACK/BYE) then went to the wrong host.
+
+The insidious part: **all tests stayed green.** PJSIP terminates calls
+locally on transport error, so hangups "worked"; only hold/unhold — which
+needs the re-INVITE's final response — visibly misbehaved, and the old
+HoldTest asserted only bookkeeping. The failures even masqueraded as a
+missing-TCP-transport problem ("TCP connect() error: Connection refused"
+— PJSIP switching transports while retrying against the poisoned target).
+
+Fix: the subnet is pinned via `ipam` in `tools/dev/docker-compose.yml` to
+`192.168.144.0/24`, matching the fixture's `local_net`. If you change one,
+change the other (both files carry pointer comments). HoldTest and
+MuteTest now assert real media state via `CallManager::isMediaActive()`
+(ACTIVE → LOCAL_HOLD → ACTIVE), so a fixture that swallows re-INVITEs
+fails loudly instead of vacuously passing. After pulling the compose
+change, recreate the containers (`docker compose ... up -d`) so the
+network is rebuilt on the pinned subnet.
+
 ### ThreadSanitizer gate — `make test-tsan`
 
 The `linux-tsan` CMake preset builds our code with `-fsanitize=thread`

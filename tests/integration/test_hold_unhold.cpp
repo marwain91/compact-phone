@@ -12,6 +12,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -22,6 +23,22 @@ std::string sipServer()
 {
     if (const char *env = std::getenv("COMPACTPHONE_SIP_SERVER")) return env;
     return "asterisk:5060";
+}
+
+// Polls cond every 100ms until it holds or timeout elapses. Pumps the Qt
+// event loop each iteration so CallManager's queued invocations and retry
+// timers (e.g. requestUnhold's deferred re-INVITE) actually run.
+bool waitFor(const std::function<bool()> &cond,
+             std::chrono::milliseconds timeout)
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!cond()) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for(100ms);
+        QCoreApplication::processEvents();
+    }
+    return true;
 }
 } // namespace
 
@@ -83,13 +100,30 @@ TEST_F(HoldTest, HoldsAndUnholds)
         }));
     }
 
-    EXPECT_TRUE(cm.hold(callId));
-    std::this_thread::sleep_for(1s);
-    EXPECT_TRUE(cm.isHeld(callId));
+    // Media goes live shortly after CONFIRMED; the capture link appearing in
+    // the conference bridge is the "media is up" signal.
+    ASSERT_TRUE(waitFor([&] { return cm.isCaptureTransmitting(callId); }, 5s));
+    ASSERT_TRUE(cm.isMediaActive(callId));
 
+    // Hold sends a re-INVITE with a=sendonly. Only when Asterisk answers it
+    // does pjsua move the media out of ACTIVE (LOCAL_HOLD) and drop the
+    // capture link — asserting that pins the re-INVITE completing, not just
+    // CallManager's bookkeeping flag flipping.
+    EXPECT_TRUE(cm.hold(callId));
+    EXPECT_TRUE(cm.isHeld(callId));
+    EXPECT_TRUE(waitFor([&] { return !cm.isMediaActive(callId); }, 5s))
+        << "hold re-INVITE never completed (media still ACTIVE)";
+    EXPECT_TRUE(waitFor([&] { return !cm.isCaptureTransmitting(callId); }, 2s))
+        << "mic still wired into a held call";
+
+    // Unhold re-INVITEs back to sendrecv: media must return to ACTIVE and
+    // the mic re-wire.
     EXPECT_TRUE(cm.unhold(callId));
-    std::this_thread::sleep_for(1s);
     EXPECT_FALSE(cm.isHeld(callId));
+    EXPECT_TRUE(waitFor([&] { return cm.isMediaActive(callId); }, 5s))
+        << "unhold re-INVITE never completed (media not re-activated)";
+    EXPECT_TRUE(waitFor([&] { return cm.isCaptureTransmitting(callId); }, 2s))
+        << "mic not re-wired after unhold";
 
     cm.hangup(callId);
     {

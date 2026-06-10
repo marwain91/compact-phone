@@ -142,6 +142,13 @@ public:
     // tests must poll rather than assert immediately after a transition.
     bool isCaptureTransmitting(CallId id) const;
 
+    // Returns true if any of the call's audio media is in the ACTIVE state.
+    // Test-only accessor: hold parks media in LOCAL_HOLD and unhold brings it
+    // back to ACTIVE, so this is the observable that a locally-initiated
+    // re-INVITE actually completed (got its final response and renegotiated),
+    // which isHeld() (bookkeeping only) cannot show.
+    bool isMediaActive(CallId id) const;
+
     // Currently-active call id (the one transmitting audio). kInvalidCallId
     // if no calls are active. Updated by makeCall/accept/unhold/eraseCall.
     CallId activeCallId() const { return m_activeCallId; }

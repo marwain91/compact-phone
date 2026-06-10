@@ -165,6 +165,27 @@ bool CallManager::isCaptureTransmitting(CallId id) const
     return false;
 }
 
+bool CallManager::isMediaActive(CallId id) const
+{
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end() || !it->second) return false;
+        call = it->second.get();
+    }
+    try {
+        const auto info = call->getInfo();
+        for (unsigned i = 0; i < info.media.size(); ++i) {
+            if (info.media[i].type != PJMEDIA_TYPE_AUDIO) continue;
+            if (info.media[i].status == PJSUA_CALL_MEDIA_ACTIVE) return true;
+        }
+    } catch (const pj::Error &) {
+        // Call gone mid-query — no active media.
+    }
+    return false;
+}
+
 CallManager::StreamStats CallManager::streamStats(CallId id) const
 {
     StreamStats out;
