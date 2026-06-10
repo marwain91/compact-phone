@@ -73,10 +73,22 @@ public:
         spdlog::info("Call {} transfer status {} {} final={}", m_localId,
                      static_cast<int>(prm.statusCode), prm.reason,
                      prm.finalNotify);
-        m_owner->handleTransferStatus(m_localId,
-                                      static_cast<int>(prm.statusCode),
-                                      prm.finalNotify,
-                                      prm.reason);
+        // Marshal to the main thread: the handler walks main-thread-only
+        // transfer bookkeeping and hangs up calls (pj::Call::hangup re-enters
+        // onCallState on the calling thread). Unlike incoming-call adoption,
+        // nothing here is time-critical — the transfer outcome is already
+        // decided by the final NOTIFY; the post-transfer hangup tolerates an
+        // event-loop tick of latency.
+        const CallId callId = m_localId;
+        const int statusCode = static_cast<int>(prm.statusCode);
+        const bool finalNotify = prm.finalNotify;
+        const std::string reason = prm.reason;
+        CallManager *owner = m_owner;
+        QMetaObject::invokeMethod(owner,
+            [owner, callId, statusCode, finalNotify, reason]() {
+                owner->handleTransferStatus(callId, statusCode, finalNotify,
+                                            reason);
+            }, Qt::QueuedConnection);
         if (prm.finalNotify && prm.statusCode >= 200 &&
             prm.statusCode < 300) {
             prm.cont = false;
@@ -99,22 +111,28 @@ CallManager::~CallManager() = default;
 
 size_t CallManager::callCount() const
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
     return m_calls.size();
 }
 
 CallManager::StreamStats CallManager::streamStats(CallId id) const
 {
     StreamStats out;
-    auto it = m_calls.find(id);
-    if (it == m_calls.end() || !it->second) return out;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end() || !it->second) return out;
+        call = it->second.get();
+    }
 
     try {
-        pj::CallInfo info = it->second->getInfo();
+        pj::CallInfo info = call->getInfo();
         for (unsigned i = 0; i < info.media.size(); ++i) {
             if (info.media[i].type != PJMEDIA_TYPE_AUDIO) continue;
             if (info.media[i].status != PJSUA_CALL_MEDIA_ACTIVE) continue;
 
-            pj::StreamStat s = it->second->getStreamStat(i);
+            pj::StreamStat s = call->getStreamStat(i);
             const auto &rx = s.rtcp.rxStat;
             const auto &tx = s.rtcp.txStat;
             // Loss: combined Rx+Tx packet loss percentage.
@@ -148,19 +166,24 @@ CallManager::StreamStats CallManager::streamStats(CallId id) const
 void CallManager::releaseCallToGrace(int callId)
 {
     const auto id = static_cast<CallId>(callId);
-    auto it = m_calls.find(id);
-    if (it == m_calls.end()) return;
-
+    CallImpl *call = nullptr;
     LingeringCallSnapshot lingering;
-    auto acctIt = m_callAccount.find(id);
-    lingering.accountId = acctIt != m_callAccount.end()
-                              ? acctIt->second
-                              : kInvalidAccountId;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return;
+        call = it->second.get();
+        auto acctIt = m_callAccount.find(id);
+        lingering.accountId = acctIt != m_callAccount.end()
+                                  ? acctIt->second
+                                  : kInvalidAccountId;
+    }
+
     lingering.held = isHeld(id);
     lingering.muted = isMuted(id);
     lingering.recording = isRecording(id);
     try {
-        const auto info = it->second->getInfo();
+        const auto info = call->getInfo();
         if (!info.remoteUri.empty()) {
             m_remoteUriCache[id] = info.remoteUri;
         }
@@ -192,8 +215,19 @@ void CallManager::releaseCallToGrace(int callId)
                                           : std::string{};
     }
 
-    m_calls.erase(it);
-    m_callAccount.erase(id);
+    std::unique_ptr<CallImpl> dying;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it != m_calls.end()) {
+            dying = std::move(it->second);
+            m_calls.erase(it);
+        }
+        m_callAccount.erase(id);
+    }
+    // pj::Call's destructor calls into PJSIP — run it outside the lock.
+    dying.reset();
+
     m_heldState.erase(id);
     m_mutedState.erase(id);
     m_transfers.drop(id);
@@ -206,9 +240,13 @@ void CallManager::releaseCallToGrace(int callId)
     if (id == m_activeCallId) {
         m_activeCallId = kInvalidCallId;
         for (auto &kv : m_heldState) {
-            auto callIt = m_calls.find(kv.first);
-            if (kv.second && callIt != m_calls.end() &&
-                isConfirmedState(kv.first)) {
+            if (!kv.second) continue;
+            bool present = false;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                present = m_calls.count(kv.first) > 0;
+            }
+            if (present && isConfirmedState(kv.first)) {
                 m_activeCallId = kv.first;
                 requestUnhold(kv.first, 3);
                 break;
@@ -225,12 +263,23 @@ void CallManager::releaseCallToGrace(int callId)
 void CallManager::eraseCall(int callId)
 {
     const auto id = static_cast<CallId>(callId);
-    const bool present = m_calls.count(id) > 0 ||
-                         m_lingeringCalls.count(id) > 0;
-    m_calls.erase(id);
+    bool present = m_lingeringCalls.count(id) > 0;
+    std::unique_ptr<CallImpl> dying;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it != m_calls.end()) {
+            present = true;
+            dying = std::move(it->second);
+            m_calls.erase(it);
+        }
+        m_callAccount.erase(id);
+        m_callStates.erase(id);
+    }
+    // pj::Call's destructor calls into PJSIP — run it outside the lock.
+    dying.reset();
+
     m_lingeringCalls.erase(id);
-    m_callAccount.erase(id);
-    m_callStates.erase(id);
     m_heldState.erase(id);
     m_mutedState.erase(id);
     m_transfers.drop(id);
@@ -244,18 +293,22 @@ void CallManager::eraseCall(int callId)
         m_activeCallId = kInvalidCallId;
         // Promote a held call (if any) to active.
         for (auto &kv : m_heldState) {
-            auto callIt = m_calls.find(kv.first);
-            if (kv.second && callIt != m_calls.end() &&
-                isConfirmedState(kv.first)) {
-                m_activeCallId = kv.first;
-                pj::CallOpParam prm;
-                prm.opt.flag = PJSUA_CALL_UNHOLD;
-                prm.opt.audioCount = 1;
-                prm.opt.videoCount = 0;
-                try { callIt->second->reinvite(prm); } catch (...) {}
-                m_heldState[kv.first] = false;
-                break;
+            if (!kv.second) continue;
+            CallImpl *target = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                auto callIt = m_calls.find(kv.first);
+                if (callIt != m_calls.end()) target = callIt->second.get();
             }
+            if (!target || !isConfirmedState(kv.first)) continue;
+            m_activeCallId = kv.first;
+            pj::CallOpParam prm;
+            prm.opt.flag = PJSUA_CALL_UNHOLD;
+            prm.opt.audioCount = 1;
+            prm.opt.videoCount = 0;
+            try { target->reinvite(prm); } catch (...) {}
+            m_heldState[kv.first] = false;
+            break;
         }
     }
 }
@@ -278,7 +331,7 @@ CallId CallManager::makeCall(AccountId accountId, const std::string &uri)
                       accountId);
         return kInvalidCallId;
     }
-    CallId id = m_nextId++;
+    CallId id = m_nextId.fetch_add(1, std::memory_order_relaxed);
     auto call = std::make_unique<CallImpl>(*pjAcc, this, id, accountId);
     pj::CallOpParam prm(true);
     try {
@@ -287,22 +340,30 @@ CallId CallManager::makeCall(AccountId accountId, const std::string &uri)
         spdlog::error("CallManager::makeCall failed: {}", e.info());
         return kInvalidCallId;
     }
-    m_calls.emplace(id, std::move(call));
-    m_callAccount[id] = accountId;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_calls.emplace(id, std::move(call));
+        m_callAccount[id] = accountId;
+    }
     setActiveCall(id);
     return id;
 }
 
 CallId CallManager::adoptIncomingCall(AccountId accountId, int pjsipCallId)
 {
+    // Runs on the PJSIP worker thread (see CallsController: adoption must be
+    // synchronous or the INVITE session tears down before we claim it).
     if (!m_am) return kInvalidCallId;
     auto *pjAcc = m_am->pjAccountFor(accountId);
     if (!pjAcc) return kInvalidCallId;
 
-    CallId id = m_nextId++;
+    CallId id = m_nextId.fetch_add(1, std::memory_order_relaxed);
     auto call = std::make_unique<CallImpl>(*pjAcc, this, id, accountId, pjsipCallId);
-    m_calls.emplace(id, std::move(call));
-    m_callAccount[id] = accountId;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_calls.emplace(id, std::move(call));
+        m_callAccount[id] = accountId;
+    }
     notifyStateChange(id, CallState::Calling);
     return id;
 }
@@ -313,36 +374,53 @@ void CallManager::setActiveCall(CallId id)
     // Hold the previous active call (if any and not already held). We use
     // setHold directly (not the public hold()) to avoid round-trip through
     // additional bookkeeping.
-    auto previousIt = m_calls.find(m_activeCallId);
-    if (m_activeCallId != kInvalidCallId && previousIt != m_calls.end()
-        && isConfirmedState(m_activeCallId)
-        && !isHeld(m_activeCallId)) {
+    const CallId previousId = m_activeCallId;
+    CallImpl *previous = nullptr;
+    if (previousId != kInvalidCallId) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto previousIt = m_calls.find(previousId);
+        if (previousIt != m_calls.end()) previous = previousIt->second.get();
+    }
+    if (previous && isConfirmedState(previousId) && !isHeld(previousId)) {
         pj::CallOpParam prm;
-        try { previousIt->second->setHold(prm); } catch (...) {}
-        m_heldState[m_activeCallId] = true;
+        try { previous->setHold(prm); } catch (...) {}
+        m_heldState[previousId] = true;
     }
     m_activeCallId = id;
     // Unhold the new active call if it was held.
-    if (id != kInvalidCallId && m_calls.count(id) && isHeld(id)) {
-        pj::CallOpParam prm;
-        prm.opt.flag = PJSUA_CALL_UNHOLD;
-        prm.opt.audioCount = 1;
-        prm.opt.videoCount = 0;
-        try { m_calls[id]->reinvite(prm); } catch (...) {}
-        m_heldState[id] = false;
+    if (id != kInvalidCallId && isHeld(id)) {
+        CallImpl *next = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto it = m_calls.find(id);
+            if (it != m_calls.end()) next = it->second.get();
+        }
+        if (next) {
+            pj::CallOpParam prm;
+            prm.opt.flag = PJSUA_CALL_UNHOLD;
+            prm.opt.audioCount = 1;
+            prm.opt.videoCount = 0;
+            try { next->reinvite(prm); } catch (...) {}
+            m_heldState[id] = false;
+        }
     }
 }
 
 bool CallManager::accept(CallId id)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end()) return false;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+    }
     // Promote to active first — auto-holds whichever call was active.
     setActiveCall(id);
     pj::CallOpParam prm;
     prm.statusCode = PJSIP_SC_OK;
     try {
-        it->second->answer(prm);
+        call->answer(prm);
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::accept: {}", e.info());
         return false;
@@ -352,12 +430,17 @@ bool CallManager::accept(CallId id)
 
 bool CallManager::decline(CallId id)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end()) return false;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+    }
     pj::CallOpParam prm;
     prm.statusCode = PJSIP_SC_DECLINE;
     try {
-        it->second->hangup(prm);
+        call->hangup(prm);
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::decline: {}", e.info());
         return false;
@@ -383,9 +466,13 @@ pj::AudioMedia *firstActiveAudio(pj::Call *call)
 
 bool CallManager::mergeCalls(CallId activeCallId, CallId heldCallId)
 {
-    auto a = m_calls.find(activeCallId);
-    auto b = m_calls.find(heldCallId);
-    if (a == m_calls.end() || b == m_calls.end()) return false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_calls.find(activeCallId) == m_calls.end() ||
+            m_calls.find(heldCallId) == m_calls.end()) {
+            return false;
+        }
+    }
     if (!isConfirmedState(activeCallId) || !isConfirmedState(heldCallId)) {
         spdlog::warn("CallManager::mergeCalls: both calls must be confirmed");
         return false;
@@ -407,12 +494,19 @@ bool CallManager::mergeCalls(CallId activeCallId, CallId heldCallId)
 bool CallManager::wireBridge(CallId activeCallId, CallId heldCallId,
                              int retriesRemaining)
 {
-    auto a = m_calls.find(activeCallId);
-    auto b = m_calls.find(heldCallId);
-    if (a == m_calls.end() || b == m_calls.end()) return false;
+    CallImpl *a = nullptr;
+    CallImpl *b = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto aIt = m_calls.find(activeCallId);
+        auto bIt = m_calls.find(heldCallId);
+        if (aIt == m_calls.end() || bIt == m_calls.end()) return false;
+        a = aIt->second.get();
+        b = bIt->second.get();
+    }
 
-    auto *audA = firstActiveAudio(a->second.get());
-    auto *audB = firstActiveAudio(b->second.get());
+    auto *audA = firstActiveAudio(a);
+    auto *audB = firstActiveAudio(b);
     if (!audA || !audB) {
         if (retriesRemaining <= 0) {
             spdlog::warn("mergeCalls: active audio did not become ready");
@@ -438,9 +532,15 @@ bool CallManager::wireBridge(CallId activeCallId, CallId heldCallId,
 
 bool CallManager::startRecording(CallId id, const std::string &outputPath)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end() || outputPath.empty()) return false;
-    auto *aud = firstActiveAudio(it->second.get());
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+    }
+    if (outputPath.empty()) return false;
+    auto *aud = firstActiveAudio(call);
     if (!aud) {
         spdlog::warn("CallManager::startRecording: no active audio yet on {}",
                      id);
@@ -461,10 +561,16 @@ bool CallManager::isRecording(CallId id) const
 
 bool CallManager::playAudioFile(CallId id, const std::string &path, bool loop)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end() || path.empty()) return false;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+    }
+    if (path.empty()) return false;
 
-    auto *aud = firstActiveAudio(it->second.get());
+    auto *aud = firstActiveAudio(call);
     if (!aud) {
         spdlog::warn("CallManager::playAudioFile: no active audio yet on {}",
                      id);
@@ -502,8 +608,14 @@ bool CallManager::isPlayingAudioFile(CallId id) const
 
 bool CallManager::forwardCall(CallId id, const std::string &targetUri)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end() || targetUri.empty()) return false;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+    }
+    if (targetUri.empty()) return false;
     pj::CallOpParam prm;
     prm.statusCode = PJSIP_SC_MOVED_TEMPORARILY;   // 302
     prm.reason = "Forwarded";
@@ -515,7 +627,7 @@ bool CallManager::forwardCall(CallId id, const std::string &targetUri)
                          : ("<" + targetUri + ">");
     prm.txOption.headers.push_back(contact);
     try {
-        it->second->hangup(prm);
+        call->hangup(prm);
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::forwardCall: {}", e.info());
         return false;
@@ -526,12 +638,17 @@ bool CallManager::forwardCall(CallId id, const std::string &targetUri)
 
 bool CallManager::blindTransfer(CallId id, const std::string &targetUri)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end()) return false;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+    }
     m_transfers.record(id, {id});
     pj::CallOpParam prm;
     try {
-        it->second->xfer(targetUri, prm);
+        call->xfer(targetUri, prm);
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::blindTransfer: {}", e.info());
         m_transfers.drop(id);
@@ -544,14 +661,21 @@ bool CallManager::blindTransfer(CallId id, const std::string &targetUri)
 
 bool CallManager::attendedTransfer(CallId activeCallId, CallId destCallId)
 {
-    auto activeIt = m_calls.find(activeCallId);
-    auto destIt = m_calls.find(destCallId);
-    if (activeIt == m_calls.end() || destIt == m_calls.end()) return false;
     if (activeCallId == destCallId) return false;
+    CallImpl *active = nullptr;
+    CallImpl *dest = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto activeIt = m_calls.find(activeCallId);
+        auto destIt = m_calls.find(destCallId);
+        if (activeIt == m_calls.end() || destIt == m_calls.end()) return false;
+        active = activeIt->second.get();
+        dest = destIt->second.get();
+    }
     m_transfers.record(activeCallId, {activeCallId, destCallId});
     pj::CallOpParam prm;
     try {
-        activeIt->second->xferReplaces(*destIt->second, prm);
+        active->xferReplaces(*dest, prm);
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::attendedTransfer: {}", e.info());
         m_transfers.drop(activeCallId);
@@ -568,12 +692,17 @@ void CallManager::cleanupTransferredCalls(CallId transferCallId)
     if (cleanupIds.empty()) return;
 
     for (const auto cleanupId : cleanupIds) {
-        auto callIt = m_calls.find(cleanupId);
-        if (callIt == m_calls.end()) continue;
+        CallImpl *call = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto callIt = m_calls.find(cleanupId);
+            if (callIt != m_calls.end()) call = callIt->second.get();
+        }
+        if (!call) continue;
         pj::CallOpParam prm;
         prm.statusCode = PJSIP_SC_OK;
         try {
-            callIt->second->hangup(prm);
+            call->hangup(prm);
         } catch (const pj::Error &e) {
             spdlog::error("CallManager::cleanupTransferredCalls: {}", e.info());
         }
@@ -584,6 +713,8 @@ void CallManager::handleTransferStatus(CallId id, int statusCode,
                                        bool finalNotify,
                                        const std::string &reason)
 {
+    // Always runs on the main thread — CallImpl::onCallTransferStatus
+    // marshals here via a queued QMetaObject::invokeMethod.
     if (!finalNotify) return;
 
     const auto cleanupIds = m_transfers.take(id);
@@ -596,12 +727,17 @@ void CallManager::handleTransferStatus(CallId id, int statusCode,
     }
 
     for (const auto cleanupId : cleanupIds) {
-        auto callIt = m_calls.find(cleanupId);
-        if (callIt == m_calls.end()) continue;
+        CallImpl *call = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto callIt = m_calls.find(cleanupId);
+            if (callIt != m_calls.end()) call = callIt->second.get();
+        }
+        if (!call) continue;
         pj::CallOpParam prm;
         prm.statusCode = PJSIP_SC_OK;
         try {
-            callIt->second->hangup(prm);
+            call->hangup(prm);
         } catch (const pj::Error &e) {
             spdlog::error("CallManager::handleTransferStatus: {}", e.info());
         }
@@ -610,11 +746,16 @@ void CallManager::handleTransferStatus(CallId id, int statusCode,
 
 void CallManager::hangup(CallId id)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end()) return;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return;
+        call = it->second.get();
+    }
     pj::CallOpParam prm;
     prm.statusCode = PJSIP_SC_DECLINE;
-    try { it->second->hangup(prm); }
+    try { call->hangup(prm); }
     catch (const pj::Error &e) {
         spdlog::error("CallManager::hangup error: {}", e.info());
     }
@@ -622,11 +763,16 @@ void CallManager::hangup(CallId id)
 
 bool CallManager::hold(CallId id)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end()) return false;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+    }
     pj::CallOpParam prm;
     try {
-        it->second->setHold(prm);
+        call->setHold(prm);
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::hold: {}", e.info());
         return false;
@@ -642,14 +788,19 @@ bool CallManager::unhold(CallId id)
 
 bool CallManager::requestUnhold(CallId id, int retriesRemaining)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end()) return false;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+    }
     pj::CallOpParam prm;
     prm.opt.flag = PJSUA_CALL_UNHOLD;
     prm.opt.audioCount = 1;
     prm.opt.videoCount = 0;
     try {
-        it->second->reinvite(prm);
+        call->reinvite(prm);
     } catch (const pj::Error &e) {
         if (retriesRemaining > 0) {
             spdlog::warn("CallManager::unhold deferred: {}", e.info());
@@ -666,13 +817,19 @@ bool CallManager::requestUnhold(CallId id, int retriesRemaining)
     // Promote to active. Inlined (rather than setActiveCall) to avoid the
     // recursive re-invite that setActiveCall would issue for held targets.
     if (m_activeCallId != id) {
-        auto previousIt = m_calls.find(m_activeCallId);
-        if (m_activeCallId != kInvalidCallId && previousIt != m_calls.end()
-            && isConfirmedState(m_activeCallId)
-            && !isHeld(m_activeCallId)) {
+        const CallId previousId = m_activeCallId;
+        CallImpl *previous = nullptr;
+        if (previousId != kInvalidCallId) {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            auto previousIt = m_calls.find(previousId);
+            if (previousIt != m_calls.end()) {
+                previous = previousIt->second.get();
+            }
+        }
+        if (previous && isConfirmedState(previousId) && !isHeld(previousId)) {
             pj::CallOpParam holdPrm;
-            try { previousIt->second->setHold(holdPrm); } catch (...) {}
-            m_heldState[m_activeCallId] = true;
+            try { previous->setHold(holdPrm); } catch (...) {}
+            m_heldState[previousId] = true;
         }
         m_activeCallId = id;
     }
@@ -687,15 +844,20 @@ bool CallManager::isHeld(CallId id) const
 
 bool CallManager::setMuted(CallId id, bool muted)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end()) return false;
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+    }
 
-    auto info = it->second->getInfo();
+    auto info = call->getInfo();
     pj::AudioMedia *aud = nullptr;
     for (unsigned i = 0; i < info.media.size(); ++i) {
         if (info.media[i].type == PJMEDIA_TYPE_AUDIO &&
             info.media[i].status == PJSUA_CALL_MEDIA_ACTIVE) {
-            aud = static_cast<pj::AudioMedia *>(it->second->getMedia(i));
+            aud = static_cast<pj::AudioMedia *>(call->getMedia(i));
             break;
         }
     }
@@ -728,11 +890,18 @@ bool CallManager::isMuted(CallId id) const
 
 bool CallManager::sendDtmf(CallId id, const std::string &digits)
 {
-    auto it = m_calls.find(id);
-    if (it == m_calls.end()) return false;
-    auto acctIt = m_callAccount.find(id);
-    if (acctIt == m_callAccount.end()) return false;
-    const auto account = m_am ? m_am->find(acctIt->second) : std::nullopt;
+    CallImpl *call = nullptr;
+    AccountId acctId = kInvalidAccountId;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end()) return false;
+        call = it->second.get();
+        auto acctIt = m_callAccount.find(id);
+        if (acctIt == m_callAccount.end()) return false;
+        acctId = acctIt->second;
+    }
+    const auto account = m_am ? m_am->find(acctId) : std::nullopt;
     const auto method = account ? account->dtmfMethod : DtmfMethod::Rfc2833;
 
     try {
@@ -742,10 +911,10 @@ bool CallManager::sendDtmf(CallId id, const std::string &digits)
                 prm.method = PJSUA_DTMF_METHOD_SIP_INFO;
                 prm.digits = std::string(1, c);
                 prm.duration = PJSUA_CALL_SEND_DTMF_DURATION_DEFAULT;
-                it->second->sendDtmf(prm);
+                call->sendDtmf(prm);
             }
         } else {
-            it->second->dialDtmf(digits);
+            call->dialDtmf(digits);
         }
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::sendDtmf: {}", e.info());
@@ -756,15 +925,35 @@ bool CallManager::sendDtmf(CallId id, const std::string &digits)
 
 std::vector<CallEntry> CallManager::snapshot() const
 {
+    // Collect ids, raw call pointers, and account ids under the lock; do the
+    // PJSIP getInfo() calls after releasing it (PJSIP takes its own lock —
+    // holding ours across that call deadlocks against the worker-thread
+    // callbacks). The raw pointers stay valid because the main thread is the
+    // only eraser of m_calls.
+    struct LiveCall {
+        CallId id;
+        CallImpl *call;
+        AccountId accountId;
+    };
+    std::vector<LiveCall> live;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        live.reserve(m_calls.size());
+        for (const auto &[id, call] : m_calls) {
+            auto acctIt = m_callAccount.find(id);
+            live.push_back({id, call.get(),
+                            acctIt != m_callAccount.end()
+                                ? acctIt->second
+                                : kInvalidAccountId});
+        }
+    }
+
     std::vector<CallEntry> out;
-    out.reserve(m_calls.size() + m_lingeringCalls.size());
-    for (const auto &[id, call] : m_calls) {
+    out.reserve(live.size() + m_lingeringCalls.size());
+    for (const auto &[id, call, accountId] : live) {
         CallEntry e;
         e.id = id;
-        auto acctIt = m_callAccount.find(id);
-        e.accountId = acctIt != m_callAccount.end()
-                          ? acctIt->second
-                          : kInvalidAccountId;
+        e.accountId = accountId;
         try {
             auto info = call->getInfo();
             // PJSIP empties remoteUri once the call disconnects, so we cache
@@ -832,13 +1021,20 @@ void CallManager::setOnCallEvent(std::function<void(CallId, CallState)> cb)
 
 void CallManager::notifyStateChange(CallId id, CallState s)
 {
-    m_callStates[id] = s;
+    // Runs on the PJSIP worker thread (onCallState / adoptIncomingCall).
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_callStates[id] = s;
+    }
+    // Invoke the callbacks outside the lock — consumers queue work to the
+    // main thread and may call back into CallManager.
     if (m_cb) m_cb(s);
     if (m_eventCb) m_eventCb(id, s);
 }
 
 bool CallManager::isConfirmedState(CallId id) const
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_callStates.find(id);
     return it != m_callStates.end() && it->second == CallState::Confirmed;
 }
