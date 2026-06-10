@@ -4,8 +4,11 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QStringView>
 #include <QXmlStreamReader>
 #include <QtGlobal>
+
+#include <algorithm>
 
 #include <spdlog/spdlog.h>
 
@@ -90,22 +93,79 @@ void UpdateChecker::check()
             [this, reply] { onReplyFinished(reply); });
 }
 
+namespace {
+// Orders prerelease suffixes with digit runs compared numerically
+// ("test2" < "test10") and everything else compared lexically.
+int naturalCompare(QStringView a, QStringView b)
+{
+    qsizetype i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (a[i].isDigit() && b[j].isDigit()) {
+            qsizetype i2 = i, j2 = j;
+            while (i2 < a.size() && a[i2].isDigit()) ++i2;
+            while (j2 < b.size() && b[j2].isDigit()) ++j2;
+            const qulonglong x = a.mid(i, i2 - i).toULongLong();
+            const qulonglong y = b.mid(j, j2 - j).toULongLong();
+            if (x != y) return x < y ? -1 : 1;
+            i = i2;
+            j = j2;
+        } else {
+            if (a[i] != b[j]) return a[i] < b[j] ? -1 : 1;
+            ++i;
+            ++j;
+        }
+    }
+    if (i < a.size()) return 1;
+    if (j < b.size()) return -1;
+    return 0;
+}
+
+struct ParsedVersion {
+    QList<int> release;
+    QString prerelease; // empty = full release
+};
+
+ParsedVersion parseVersion(const QString &v)
+{
+    ParsedVersion out;
+    // Semver shape: release tags like v0.1.10-test1 publish appcast version
+    // "0.1.10-test1". The prerelease suffix must be split off before the
+    // numeric parse — "10-test1".toInt() silently returned 0, making a
+    // 0.1.10-test1 entry order as 0.1.0 (below every published release).
+    // Build metadata after '+' never affects ordering.
+    QString s = v;
+    if (const auto plus = s.indexOf(QLatin1Char('+')); plus >= 0) {
+        s.truncate(plus);
+    }
+    if (const auto dash = s.indexOf(QLatin1Char('-')); dash >= 0) {
+        out.prerelease = s.mid(dash + 1);
+        s.truncate(dash);
+    }
+    for (const auto &p : s.split(QLatin1Char('.'))) {
+        bool ok = false;
+        const int n = p.toInt(&ok);
+        out.release << (ok && n >= 0 ? n : 0);
+    }
+    return out;
+}
+} // namespace
+
 int UpdateChecker::compareVersions(const QString &a, const QString &b)
 {
-    const auto parts = [](const QString &v) {
-        QList<int> out;
-        for (const auto &p : v.split('.')) out << p.toInt();
-        return out;
-    };
-    const auto av = parts(a);
-    const auto bv = parts(b);
-    const int n = std::max(av.size(), bv.size());
-    for (int i = 0; i < n; ++i) {
-        const int x = i < av.size() ? av[i] : 0;
-        const int y = i < bv.size() ? bv[i] : 0;
+    const auto av = parseVersion(a);
+    const auto bv = parseVersion(b);
+    const auto n = std::max(av.release.size(), bv.release.size());
+    for (qsizetype i = 0; i < n; ++i) {
+        const int x = i < av.release.size() ? av.release[i] : 0;
+        const int y = i < bv.release.size() ? bv.release[i] : 0;
         if (x != y) return x < y ? -1 : 1;
     }
-    return 0;
+    // Equal release part: a prerelease sorts below its own full release
+    // (0.1.10-test1 < 0.1.10), and two prereleases order naturally.
+    if (av.prerelease.isEmpty() != bv.prerelease.isEmpty()) {
+        return av.prerelease.isEmpty() ? 1 : -1;
+    }
+    return naturalCompare(av.prerelease, bv.prerelease);
 }
 
 UpdateChecker::ParsedFeed UpdateChecker::parseAppcast(const QByteArray &xml)
