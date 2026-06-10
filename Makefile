@@ -24,10 +24,28 @@ SHELL := /bin/bash
 COMPOSE := docker compose -f tools/dev/docker-compose.yml
 DEV     := $(COMPOSE) exec -T dev
 
+# The Asterisk fixture's local_net (tests/integration/docker/pjsip.conf)
+# only works when the compose network sits on this subnet, pinned via ipam
+# in tools/dev/docker-compose.yml. Docker never re-applies ipam to an
+# existing network, so a network created before the pin (or after a future
+# subnet change) silently keeps its old subnet — and Asterisk then rewrites
+# the dev container's dialog target to 127.0.0.1, sending every in-dialog
+# SIP request to the wrong host (see CLAUDE.md). Keep all three places in
+# sync if the subnet ever changes.
+FIXTURE_SUBNET := 192.168.144.0/24
+
 # ----- dev container (Linux, headless) ---------------------------------------
 
 .PHONY: up
-up: ## start dev container + Asterisk
+up: ## start dev container + Asterisk (recreates network on subnet drift)
+	@net=$$(docker network ls -q --filter label=com.docker.compose.network=compactphone-net | head -n1); \
+	if [ -n "$$net" ]; then \
+		actual=$$(docker network inspect "$$net" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'); \
+		if [ "$$actual" != "$(FIXTURE_SUBNET)" ]; then \
+			echo "compactphone-net is on $$actual, expected $(FIXTURE_SUBNET) (Asterisk fixture local_net) — recreating stack"; \
+			$(COMPOSE) down; \
+		fi; \
+	fi
 	$(COMPOSE) up -d
 
 .PHONY: down
