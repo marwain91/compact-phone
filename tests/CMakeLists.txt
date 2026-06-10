@@ -95,6 +95,7 @@ add_executable(test_integration
     integration/test_instant_message.cpp
     integration/test_call_policies.cpp
     integration/test_mute.cpp
+    integration/test_thread_stress.cpp
     integration/test_audio_playback.cpp
     integration/test_stream_stats_live.cpp
 )

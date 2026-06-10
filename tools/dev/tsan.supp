@@ -1,0 +1,44 @@
+# ThreadSanitizer suppressions for `make test-tsan` (linux-tsan preset).
+#
+# Scope: our code is instrumented; Qt, PJSIP, and the other vcpkg deps are
+# not. TSan still models their pthread-level locking, but lock-free /
+# atomic-based internals of uninstrumented libraries can surface as
+# false-positive reports attributed to their symbols. Suppress by library or
+# top frame, narrowly, and document why — a suppression here is a hole in
+# the regression gate.
+#
+# Syntax: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+#
+# Note: `make test-tsan` runs with detect_deadlocks=0. PJSIP internally
+# acquires its own mutexes in both orders across different code paths
+# (pj_mutex_lock <-> pj_mutex_lock cycles flagged on the very first
+# makeCall), and a deadlock suppression matching pj frames would also mask
+# any cycle involving CallManager's m_mutex — so lock-order discipline is
+# enforced by the contract in CallManager.h + review, while TSan's data-race
+# detector (the actual regression gate) stays fully active.
+#
+# PJSIP closes a media/RTP socket on the hangup path while its 'clock'
+# media thread is mid-sendto on the same fd — internal to pjproject's media
+# transport teardown; our code never touches these sockets directly.
+race:pj_sock_close
+
+# pjlib pool teardown (reset_pool / cpool_release_pool on the hangup path)
+# races pj_log formatting strings out of the same arena on another thread —
+# internal to pjlib's pool+logging machinery. Suppressed from both sides:
+# the pool-release leaf and the logger. Our containers never pass through
+# pj_log, so this can't mask CallManager-class races.
+race:reset_pool
+race:cpool_release_pool
+race:pj_log
+
+# pjsua updates a call's info strings (per-call pool) on the worker thread
+# under different pj locks than pjsua_call_get_info takes to copy them out —
+# internal pjsua locking inconsistency hit by any getInfo() during a state
+# transition. Our containers never go through pj_strncpy, so suppressing the
+# pj string-copy helper doesn't mask CallManager-class races.
+race:pj_strncpy
+
+# pjsua destroys a call/dialog mutex on the teardown path while another
+# PJSIP-API caller is acquiring it — internal pj lock-lifetime handling
+# during hangup.
+race:pj_mutex_destroy

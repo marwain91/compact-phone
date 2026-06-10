@@ -54,6 +54,21 @@ test-unit: build ## run unit tests only
 test-integration: build ## run integration tests only (against Asterisk)
 	$(DEV) bash -c "cd /workspace/build/linux && ctest --output-on-failure -L integration"
 
+# Scoped to ThreadStressTest for now: running the whole integration suite
+# under TSan additionally surfaces (a) the known AccountsManager callback
+# assign-vs-invoke race (backlog task #6) and (b) a mutex+condvar-inside-
+# callback pattern repeated across the older integration tests that pjsua
+# can re-enter on the registering thread (double-lock). Widen to
+# `-L integration` once both are fixed.
+.PHONY: test-tsan
+test-tsan: up ## build with ThreadSanitizer and run the thread-race gate
+	$(DEV) bash -c "cd /workspace \
+		&& cmake --preset linux-tsan \
+		&& cmake --build --preset linux-tsan \
+		&& cd build/linux-tsan \
+		&& TSAN_OPTIONS='halt_on_error=1 detect_deadlocks=0 suppressions=/workspace/tools/dev/tsan.supp' \
+		   ctest --output-on-failure -R ThreadStressTest --timeout 600"
+
 .PHONY: clean
 clean: ## remove the build/ tree
 	rm -rf build
