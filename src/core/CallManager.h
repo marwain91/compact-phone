@@ -6,9 +6,11 @@
 
 #include <QObject>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -146,6 +148,30 @@ public:
 private:
     friend class CallImpl;
 
+    // Threading contract. PJSIP callbacks arrive on the PJSUA worker thread
+    // (SipEngine uses the default uaConfig.threadCnt = 1, mainThreadOnly is
+    // not set). On that thread, adoptIncomingCall() inserts into m_calls /
+    // m_callAccount and notifyStateChange() writes m_callStates, while the
+    // main thread reads and erases the same maps — so those three maps are
+    // guarded by m_mutex, and m_nextId is atomic (makeCall on the main thread
+    // and adoptIncomingCall on the PJSIP thread both mint ids). Everything
+    // else (m_lingeringCalls, m_heldState, m_mutedState, m_transfers, the
+    // URI caches, m_players, m_recorder, m_activeCallId) is main-thread-only:
+    // CallImpl marshals every other callback to the main thread before it
+    // touches them.
+    //
+    // Lock discipline: NEVER call into PJSIP while holding m_mutex — not
+    // getInfo/hangup/reinvite/answer, and not destructors of pj::Call or
+    // pj::AudioMediaPlayer (erasing from m_calls/m_players destroys one).
+    // PJSIP holds its own lock while dispatching the callbacks that take
+    // m_mutex, so holding m_mutex across a PJSIP call is a lock-order
+    // inversion; some PJSIP calls (hangup) also re-enter onCallState
+    // synchronously on the calling thread. Pattern: look up the raw CallImpl*
+    // under the lock, release it, then talk to PJSIP. Raw pointers stay valid
+    // after unlocking on the main thread because the main thread is the only
+    // eraser of m_calls.
+    mutable std::mutex m_mutex;
+
     AccountsManager *m_am;
     std::unordered_map<CallId, std::unique_ptr<CallImpl>> m_calls;
     struct LingeringCallSnapshot {
@@ -177,7 +203,7 @@ private:
         m_players;
     std::function<void(CallState)> m_cb;
     std::function<void(CallId, CallState)> m_eventCb;
-    CallId m_nextId = 1;
+    std::atomic<CallId> m_nextId{1};
     CallId m_activeCallId = kInvalidCallId;
 
     void notifyStateChange(CallId id, CallState s);
