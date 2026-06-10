@@ -592,13 +592,18 @@ missing-TCP-transport problem ("TCP connect() error: Connection refused"
 — PJSIP switching transports while retrying against the poisoned target).
 
 Fix: the subnet is pinned via `ipam` in `tools/dev/docker-compose.yml` to
-`192.168.144.0/24`, matching the fixture's `local_net`. If you change one,
-change the other (both files carry pointer comments). HoldTest and
-MuteTest now assert real media state via `CallManager::isMediaActive()`
-(ACTIVE → LOCAL_HOLD → ACTIVE), so a fixture that swallows re-INVITEs
-fails loudly instead of vacuously passing. After pulling the compose
-change, recreate the containers (`docker compose ... up -d`) so the
-network is rebuilt on the pinned subnet.
+`192.168.144.0/24`, matching the fixture's `local_net`, and `make up`
+(which every build/test target depends on) self-heals: it compares the
+live network's subnet against `FIXTURE_SUBNET` in the Makefile and runs
+`compose down` to force recreation on drift — Docker never re-applies
+ipam to an existing network, so without the guard a pre-pin network
+silently keeps its old subnet forever. If the subnet ever changes, update
+all three places (compose ipam, pjsip.conf `local_net`, Makefile
+`FIXTURE_SUBNET`); only raw `docker compose up -d` users need a manual
+`down` first. HoldTest and MuteTest now assert real media state via
+`CallManager::isMediaActive()` (ACTIVE → LOCAL_HOLD → ACTIVE), so a
+fixture that swallows re-INVITEs fails loudly instead of vacuously
+passing.
 
 ### ThreadSanitizer gate — `make test-tsan`
 
