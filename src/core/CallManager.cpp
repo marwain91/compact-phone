@@ -51,6 +51,12 @@ public:
     void onCallMediaState(pj::OnCallMediaStateParam &prm) override
     {
         auto info = getInfo();
+        // Media (re)activates not just on call setup but on every re-INVITE —
+        // hold/unhold, peer-initiated renegotiation, codec changes. Honour
+        // the recorded mute state when wiring capture, or a re-INVITE would
+        // silently re-open the microphone on a muted call (and a mute pressed
+        // before media became active would never be applied).
+        const bool muted = m_owner->isMuted(m_localId);
         for (unsigned i = 0; i < info.media.size(); ++i) {
             if (info.media[i].type != PJMEDIA_TYPE_AUDIO) continue;
             if (info.media[i].status != PJSUA_CALL_MEDIA_ACTIVE) continue;
@@ -61,7 +67,15 @@ public:
             auto &mgr = pj::Endpoint::instance().audDevManager();
             try {
                 aud->startTransmit(mgr.getPlaybackDevMedia());
-                mgr.getCaptureDevMedia().startTransmit(*aud);
+                if (!muted) {
+                    mgr.getCaptureDevMedia().startTransmit(*aud);
+                } else {
+                    // Defensive: drop any capture link PJSIP carried across
+                    // the renegotiation.
+                    try {
+                        mgr.getCaptureDevMedia().stopTransmit(*aud);
+                    } catch (const pj::Error &) {}
+                }
             } catch (const pj::Error &e) {
                 spdlog::error("audio wiring error: {}", e.info());
             }
@@ -113,6 +127,38 @@ size_t CallManager::callCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_calls.size();
+}
+
+bool CallManager::isCaptureTransmitting(CallId id) const
+{
+    CallImpl *call = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_calls.find(id);
+        if (it == m_calls.end() || !it->second) return false;
+        call = it->second.get();
+    }
+    try {
+        const auto info = call->getInfo();
+        for (unsigned i = 0; i < info.media.size(); ++i) {
+            if (info.media[i].type != PJMEDIA_TYPE_AUDIO) continue;
+            if (info.media[i].status != PJSUA_CALL_MEDIA_ACTIVE) continue;
+            auto *aud = static_cast<pj::AudioMedia *>(call->getMedia(i));
+            if (!aud) continue;
+            const int callPort = aud->getPortId();
+            // The capture device's conference-bridge listeners are the ports
+            // it transmits to; the mic is live for this call iff the call's
+            // media port is among them.
+            const auto capInfo = pj::Endpoint::instance().audDevManager()
+                                     .getCaptureDevMedia().getPortInfo();
+            for (const int listener : capInfo.listeners) {
+                if (listener == callPort) return true;
+            }
+        }
+    } catch (const pj::Error &) {
+        // No live media — not transmitting.
+    }
+    return false;
 }
 
 CallManager::StreamStats CallManager::streamStats(CallId id) const
@@ -224,12 +270,12 @@ void CallManager::releaseCallToGrace(int callId)
             m_calls.erase(it);
         }
         m_callAccount.erase(id);
+        m_mutedState.erase(id);
     }
     // pj::Call's destructor calls into PJSIP — run it outside the lock.
     dying.reset();
 
     m_heldState.erase(id);
-    m_mutedState.erase(id);
     m_transfers.drop(id);
     m_remoteUriCache.erase(id);
     m_remoteDisplayCache.erase(id);
@@ -275,13 +321,13 @@ void CallManager::eraseCall(int callId)
         }
         m_callAccount.erase(id);
         m_callStates.erase(id);
+        m_mutedState.erase(id);
     }
     // pj::Call's destructor calls into PJSIP — run it outside the lock.
     dying.reset();
 
     m_lingeringCalls.erase(id);
     m_heldState.erase(id);
-    m_mutedState.erase(id);
     m_transfers.drop(id);
     m_remoteUriCache.erase(id);
     m_remoteDisplayCache.erase(id);
@@ -862,9 +908,33 @@ bool CallManager::setMuted(CallId id, bool muted)
         }
     }
     if (!aud) {
-        spdlog::warn("CallManager::setMuted: no active audio for call {}", id);
+        // No active audio yet — record the desired state and report success;
+        // onCallMediaState applies it when the stream (re)activates.
+        spdlog::info("CallManager::setMuted: no active audio for call {}; "
+                     "deferring to media activation", id);
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_mutedState[id] = muted;
-        return false;
+        return true;
+    }
+
+    // Record the desired state BEFORE touching the conference bridge. PJSIP
+    // dispatches onCallMediaState with the PJSUA lock held, and our transmit
+    // calls below take that same lock — so with the record published first,
+    // a media-activation callback either starts after the record (reads the
+    // new state and honours it) or is already in flight (finishes its wiring
+    // before our transmit call can acquire the lock, which then applies the
+    // new state last). Recording after applying loses exactly that race: a
+    // callback between our transmit call and the record reads the stale
+    // state and silently re-opens a just-muted microphone (Asterisk sends a
+    // re-INVITE right after answer, so this happens in practice).
+    bool previous;
+    bool hadPrevious;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto stateIt = m_mutedState.find(id);
+        hadPrevious = stateIt != m_mutedState.end();
+        previous = hadPrevious && stateIt->second;
+        m_mutedState[id] = muted;
     }
 
     auto &mgr = pj::Endpoint::instance().audDevManager();
@@ -876,14 +946,20 @@ bool CallManager::setMuted(CallId id, bool muted)
         }
     } catch (const pj::Error &e) {
         spdlog::error("CallManager::setMuted: {}", e.info());
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (hadPrevious) {
+            m_mutedState[id] = previous;
+        } else {
+            m_mutedState.erase(id);
+        }
         return false;
     }
-    m_mutedState[id] = muted;
     return true;
 }
 
 bool CallManager::isMuted(CallId id) const
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_mutedState.find(id);
     return it != m_mutedState.end() && it->second;
 }
