@@ -11,11 +11,21 @@ namespace compactphone {
 ProvisioningController::ProvisioningController(AddAccountFn addAccount,
                                               NoticeSink noticeSink,
                                               QObject *parent)
+    : ProvisioningController(std::make_unique<provisioning::Registry>(),
+                             std::move(addAccount), std::move(noticeSink),
+                             parent)
+{
+}
+
+ProvisioningController::ProvisioningController(
+    std::unique_ptr<provisioning::Registry> registry, AddAccountFn addAccount,
+    NoticeSink noticeSink, QObject *parent)
     : QObject(parent),
-      m_registry(std::make_unique<provisioning::Registry>()),
+      m_registry(std::move(registry)),
       m_addAccount(std::move(addAccount)),
       m_noticeSink(std::move(noticeSink))
 {
+    if (!m_registry) return;
     for (const auto &id : m_registry->ids()) {
         auto *p = m_registry->find(id);
         if (!p) continue;
