@@ -767,7 +767,6 @@ bool CallManager::blindTransfer(CallId id, const std::string &targetUri)
         return false;
     }
     spdlog::info("Blind transfer of call {} to {}", id, targetUri);
-    cleanupTransferredCalls(id);
     return true;
 }
 
@@ -794,13 +793,7 @@ bool CallManager::attendedTransfer(CallId activeCallId, CallId destCallId)
         return false;
     }
     spdlog::info("Attended transfer of {} to {}", activeCallId, destCallId);
-    cleanupTransferredCalls(activeCallId);
     return true;
-}
-
-void CallManager::cleanupTransferredCalls(CallId transferCallId)
-{
-    hangupTransferLegs(m_transfers.take(transferCallId));
 }
 
 void CallManager::handleTransferStatus(CallId id, int statusCode,

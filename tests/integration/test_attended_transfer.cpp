@@ -127,13 +127,23 @@ TEST_F(AttendedTransferTest, TransfersOriginalCallToConsultation)
 
     EXPECT_TRUE(cm.attendedTransfer(callB, incomingId));
 
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 15s, [&] {
-            return observed[callB] == compactphone::sip::CallState::Disconnected &&
-                   observed[incomingId] == compactphone::sip::CallState::Disconnected;
-        }));
+    // The post-transfer hangup is driven by the success NOTIFY through a
+    // queued main-thread handler, so the wait must pump the event loop —
+    // a blocking cv.wait_for would starve the very hangup it waits for.
+    bool disconnected = false;
+    const auto deadline = std::chrono::steady_clock::now() + 15s;
+    while (!disconnected && std::chrono::steady_clock::now() < deadline) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        {
+            std::lock_guard l(mtx);
+            disconnected =
+                observed[callB] == compactphone::sip::CallState::Disconnected &&
+                observed[incomingId] == compactphone::sip::CallState::Disconnected;
+        }
+        std::this_thread::sleep_for(10ms);
     }
+    ASSERT_TRUE(disconnected)
+        << "transfer legs were not hung up after the success NOTIFY";
 
     cm.hangup(callA);
     for (int i = 0; i < 30; ++i) {

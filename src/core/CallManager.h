@@ -86,11 +86,16 @@ public:
     bool stopAudioFile(CallId id);
     bool isPlayingAudioFile(CallId id) const;
 
-    // Send REFER. Original call self-disconnects on transfer success.
+    // Send REFER. The call stays up until the transfer's final NOTIFY
+    // reports the outcome: a 2xx hangs up the originating call; a failure
+    // (busy, declined, unknown target) keeps it so the user can resume
+    // talking. A server that never sends the final NOTIFY leaves the call
+    // up for the user to hang up manually.
     bool blindTransfer(CallId id, const std::string &targetUri);
 
     // Send REFER with Replaces. Triggered on the active call; targets a
-    // held call's remote. On success both calls disconnect.
+    // held call's remote. Both legs stay up until the final NOTIFY: a 2xx
+    // hangs them both up, a failure keeps them.
     bool attendedTransfer(CallId activeCallId, CallId destCallId);
 
     void hangup(CallId id);
@@ -247,7 +252,6 @@ private:
     bool isConfirmedState(CallId id) const;
     bool requestUnhold(CallId id, int retriesRemaining);
     bool wireBridge(CallId activeCallId, CallId heldCallId, int retriesRemaining);
-    void cleanupTransferredCalls(CallId transferCallId);
     // Hangs up each recorded transfer leg with 200 OK; legs that already
     // disconnected on their own are skipped. Main-thread-only.
     void hangupTransferLegs(const std::vector<CallId> &cleanupIds);
