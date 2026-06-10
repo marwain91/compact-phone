@@ -113,6 +113,10 @@ public:
     AccountId accountId() const { return m_accountId; }
 
 private:
+    // Raw pointer is safe across threads: CallManager owns this CallImpl,
+    // and pj::Call's destructor serializes against in-flight callback
+    // dispatch via the PJSUA lock — by the time CallManager's maps (and
+    // CallManager itself) are destroyed, no callback can still be running.
     CallManager *m_owner;
     CallId m_localId;
     AccountId m_accountId;
@@ -272,8 +276,14 @@ void CallManager::releaseCallToGrace(int callId)
         m_callAccount.erase(id);
         m_mutedState.erase(id);
     }
-    // pj::Call's destructor calls into PJSIP — run it outside the lock.
-    dying.reset();
+    // Do NOT destroy the CallImpl here. This method is queued from
+    // CallImpl::onCallState(DISCONNECTED), and the PJSIP thread may still be
+    // executing the tail of that very callback when we run — pj::Call's
+    // destructor does not synchronize with those derived-object reads
+    // (use-after-free, caught by TSan). Park the object for the grace
+    // period; eraseCall() destroys it 2.2s later, long after the callback
+    // has returned.
+    if (dying) m_graceCalls[id] = std::move(dying);
 
     m_heldState.erase(id);
     m_transfers.drop(id);
@@ -324,7 +334,11 @@ void CallManager::eraseCall(int callId)
         m_mutedState.erase(id);
     }
     // pj::Call's destructor calls into PJSIP — run it outside the lock.
+    // Safe to destroy here: either the call was parked by
+    // releaseCallToGrace 2.2s ago (its last callback has long returned),
+    // or it never received a DISCONNECTED callback at all.
     dying.reset();
+    m_graceCalls.erase(id);
 
     m_lingeringCalls.erase(id);
     m_heldState.erase(id);
@@ -1087,11 +1101,13 @@ std::vector<CallEntry> CallManager::snapshot() const
 
 void CallManager::setOnCallStateChanged(std::function<void(CallState)> cb)
 {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_cb = std::move(cb);
 }
 
 void CallManager::setOnCallEvent(std::function<void(CallId, CallState)> cb)
 {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_eventCb = std::move(cb);
 }
 
@@ -1102,8 +1118,11 @@ void CallManager::notifyStateChange(CallId id, CallState s)
         std::lock_guard<std::mutex> lock(m_mutex);
         m_callStates[id] = s;
     }
-    // Invoke the callbacks outside the lock — consumers queue work to the
-    // main thread and may call back into CallManager.
+    // Invoke the callbacks under m_callbackMutex (NOT m_mutex — consumers
+    // may call back into CallManager): assigning and invoking the same
+    // std::function concurrently is UB, and holding the mutex across the
+    // invocation gives setOnCallEvent({}) quiesce semantics for destructors.
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
     if (m_cb) m_cb(s);
     if (m_eventCb) m_eventCb(id, s);
 }

@@ -31,14 +31,29 @@ race:reset_pool
 race:cpool_release_pool
 race:pj_log
 
-# pjsua updates a call's info strings (per-call pool) on the worker thread
-# under different pj locks than pjsua_call_get_info takes to copy them out —
-# internal pjsua locking inconsistency hit by any getInfo() during a state
-# transition. Our containers never go through pj_strncpy, so suppressing the
-# pj string-copy helper doesn't mask CallManager-class races.
+# pjsua updates a call's info strings (per-call pool / dialog arena) on the
+# worker thread under different pj locks than pjsua_call_get_info takes to
+# copy or format them out — internal pjsua locking inconsistency hit by any
+# getInfo() during a state transition. Our data never flows through these pj
+# string helpers, so suppressing them doesn't mask CallManager-class races.
 race:pj_strncpy
+race:pjsip_url_print
 
 # pjsua destroys a call/dialog mutex on the teardown path while another
 # PJSIP-API caller is acquiring it — internal pj lock-lifetime handling
 # during hangup.
 race:pj_mutex_destroy
+
+# pjmedia copies a stream's RTCP statistics out (hangup-path call dump,
+# getStreamStat) while the media clock thread keeps updating them — pjmedia
+# does not lock stat reads against the stream thread.
+race:pjmedia_stream_common_get_stat
+
+# Qt hands cross-thread QMetaObject::invokeMethod functors through its event
+# queue, which synchronizes via QBasicMutex futexes invisible to TSan in an
+# uninstrumented QtCore — the functor's heap storage (operator new on the
+# posting thread, executed on the receiver thread) gets flagged. Suppressing
+# the posting-side helper keeps genuine races on lambda-captured data
+# visible: their writer is application code, not the invokeMethod
+# allocation.
+race:invokeMethodCallableHelper

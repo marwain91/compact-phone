@@ -196,6 +196,15 @@ private:
         bool inbound = false;
     };
     std::unordered_map<CallId, LingeringCallSnapshot> m_lingeringCalls;
+    // Parks each disconnected CallImpl from releaseCallToGrace() until the
+    // grace-period eraseCall() destroys it. Deleting the object immediately
+    // is a use-after-free window: releaseCallToGrace is queued from
+    // CallImpl::onCallState, and the PJSIP thread may still be executing
+    // the tail of that same callback when the queued call runs on the main
+    // thread — pj::Call's destructor does not synchronize with the
+    // derived-object reads in that tail (caught live by TSan).
+    // Main-thread-only.
+    std::unordered_map<CallId, std::unique_ptr<CallImpl>> m_graceCalls;
     std::unordered_map<CallId, AccountId> m_callAccount;
     std::unordered_map<CallId, CallState> m_callStates;
     std::unordered_map<CallId, bool> m_heldState;
@@ -212,6 +221,14 @@ private:
     std::unique_ptr<CallRecorder> m_recorder;
     std::unordered_map<CallId, std::unique_ptr<pj::AudioMediaPlayer>>
         m_players;
+    // Guards m_cb / m_eventCb: assigned on the main thread (controller
+    // ctors/dtors), invoked on the PJSIP thread (notifyStateChange).
+    // Invocation happens UNDER this mutex, so a setter call is a quiesce
+    // barrier — when setOnCallEvent({}) returns, no in-flight invocation of
+    // the previous callback exists and none can start. Never call a setter
+    // from inside a callback. Separate from m_mutex so callbacks may call
+    // back into CallManager.
+    mutable std::mutex m_callbackMutex;
     std::function<void(CallState)> m_cb;
     std::function<void(CallId, CallState)> m_eventCb;
     std::atomic<CallId> m_nextId{1};
