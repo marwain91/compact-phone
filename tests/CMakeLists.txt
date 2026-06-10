@@ -28,6 +28,7 @@ add_executable(test_unit
     unit/test_stream_stats.cpp
     unit/test_url_dispatcher.cpp
     unit/test_daktela_provider.cpp
+    unit/test_provisioning_controller.cpp
     unit/test_calls_model.cpp
     unit/test_autostart_memory.cpp
     unit/test_autostart_linux.cpp

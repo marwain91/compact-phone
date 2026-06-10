@@ -26,6 +26,12 @@ public:
 
     ProvisioningController(AddAccountFn addAccount, NoticeSink noticeSink,
                            QObject *parent = nullptr);
+    // Test seam: inject a Registry pre-populated (via Registry::setProviders)
+    // with fake providers instead of the built-ins. Signal wiring happens for
+    // whatever providers the registry holds at construction time.
+    ProvisioningController(std::unique_ptr<provisioning::Registry> registry,
+                           AddAccountFn addAccount, NoticeSink noticeSink,
+                           QObject *parent = nullptr);
     ~ProvisioningController() override;
 
     // {"id", "displayName", "hostPlaceholder"} per built-in provider.
