@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSaveFile>
 
 #include <array>
 #include <cstring>
@@ -157,17 +158,25 @@ bool FileKeychain::loadOrCreateMasterKey()
     }
 
     // First run: mint a random per-install key and store it owner-only.
+    // QSaveFile writes to a temp file and renames on commit(), so a failed or
+    // interrupted write can never leave a partial .key behind — a partial key
+    // would make the keychain blob permanently undecryptable.
     std::array<uint8_t, kKeySize> key{};
     if (RAND_bytes(key.data(), kKeySize) != 1) return false;
-    if (!kf.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    QSaveFile skf(keyPath);
+    if (!skf.open(QIODevice::WriteOnly)) {
         spdlog::error("FileKeychain: master key write failed");
         return false;
     }
     // Restrict to owner-only BEFORE writing the secret, so the key bytes are
     // never momentarily readable under the process umask.
-    kf.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    kf.write(reinterpret_cast<const char *>(key.data()), kKeySize);
-    kf.close();
+    skf.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    if (skf.write(reinterpret_cast<const char *>(key.data()), kKeySize)
+            != kKeySize
+        || !skf.commit()) {
+        spdlog::error("FileKeychain: master key write failed");
+        return false;
+    }
     m_masterKey.assign(reinterpret_cast<const char *>(key.data()), kKeySize);
     return true;
 }
@@ -221,14 +230,30 @@ std::optional<std::string> FileKeychain::get(const std::string &ref)
 
 bool FileKeychain::set(const std::string &ref, const std::string &password)
 {
+    // Roll back the in-memory store if the write fails, so a later unrelated
+    // persist() can't silently flush a value the caller was told was rejected.
+    const auto it = m_store.find(ref);
+    const bool existed = it != m_store.end();
+    const std::string previous = existed ? it->second : std::string();
     m_store[ref] = password;
-    return persist();
+    if (persist()) return true;
+    if (existed) {
+        m_store[ref] = previous;
+    } else {
+        m_store.erase(ref);
+    }
+    return false;
 }
 
 bool FileKeychain::erase(const std::string &ref)
 {
-    if (m_store.erase(ref) == 0) return false;
-    return persist();
+    const auto it = m_store.find(ref);
+    if (it == m_store.end()) return false;
+    const std::string previous = it->second;
+    m_store.erase(it);
+    if (persist()) return true;
+    m_store[ref] = previous;
+    return false;
 }
 
 bool FileKeychain::persist()
@@ -248,14 +273,29 @@ bool FileKeychain::persist()
     const auto ct = encrypt(key, plain, iv);
     if (ct.isEmpty()) return false;
 
-    QFile f(QString::fromStdString(m_path));
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
-    // Restrict to owner-only on the empty file, before writing ciphertext.
+    // Write-to-temp + atomic rename: the previous file is replaced only by
+    // commit(), and only after every write succeeded. A disk-full error or a
+    // crash mid-write therefore can't truncate the only copy of the store —
+    // the old truncate-in-place path here destroyed all saved passwords when
+    // a write was cut short, while still reporting success.
+    QSaveFile f(QString::fromStdString(m_path));
+    if (!f.open(QIODevice::WriteOnly)) {
+        spdlog::error("FileKeychain::persist open failed");
+        return false;
+    }
+    // Restrict to owner-only on the temp file, before writing ciphertext.
     f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    f.write(m_salt.data(), static_cast<int>(m_salt.size()));
-    f.write(iv);
-    f.write(ct);
-    f.close();
+    const auto saltLen = static_cast<qint64>(m_salt.size());
+    if (f.write(m_salt.data(), saltLen) != saltLen
+        || f.write(iv) != iv.size()
+        || f.write(ct) != ct.size()) {
+        spdlog::error("FileKeychain::persist write failed");
+        return false;
+    }
+    if (!f.commit()) {
+        spdlog::error("FileKeychain::persist commit failed");
+        return false;
+    }
     return true;
 }
 

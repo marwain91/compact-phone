@@ -3,8 +3,14 @@
 #include "core/platform/Keychain_file.h"
 #include "core/platform/Keychain_memory.h"
 
+#include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
+
+#ifdef Q_OS_UNIX
+#include <csignal>
+#include <sys/resource.h>
+#endif
 
 TEST(KeychainMemory, RoundTripStoresAndRetrievesPassword)
 {
@@ -122,6 +128,68 @@ TEST(KeychainFile, TruncatedFileFailsToOpen)
     compactphone::platform::FileKeychain kc(qpath.toStdString());
     EXPECT_FALSE(kc.open()); // too short to contain salt + iv + tag
 }
+
+#ifdef Q_OS_UNIX
+// Failure injection for persist(): cap the maximum file size this process may
+// write (RLIMIT_FSIZE) so the keychain's data writes fail mid-stream with
+// EFBIG — the same shape as a disk filling up. This reproduces the historical
+// data-loss bug: the old truncate-then-write persist() zeroed the only copy of
+// the credential store at open(), then reported success even though the write
+// was cut short, so the next open() found a truncated blob and every stored
+// SIP password was gone. An atomic temp-file + rename persist must instead
+// report failure and leave the previous file byte-for-byte intact.
+//
+// RLIMIT_FSIZE is used (rather than a chmod'd read-only directory) because it
+// also fails writes for root — the Linux dev container runs tests as root,
+// where permission-based injections are silently bypassed. SIGXFSZ must be
+// ignored for the duration or the kernel kills the process instead of failing
+// the write.
+TEST(KeychainFile, FailedPersistReturnsFalseAndPreservesPreviousContents)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const std::string path = tmp.filePath("creds.enc").toStdString();
+
+    compactphone::platform::FileKeychain kc(path);
+    ASSERT_TRUE(kc.open());
+    ASSERT_TRUE(kc.set("ref-1", "hunter2"));
+
+    struct rlimit old{};
+    ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &old), 0);
+    const auto prevHandler = std::signal(SIGXFSZ, SIG_IGN);
+    const struct rlimit capped{20, old.rlim_max}; // < salt(16)+iv(12)+tag(16)
+    ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &capped), 0);
+
+    // No ASSERTs inside the capped window — an early exit here would leave the
+    // limit applied for every later test in this process.
+    const bool setOk = kc.set("ref-2", "newpw");
+    const bool eraseOk = kc.erase("ref-1");
+
+    ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &old), 0);
+    std::signal(SIGXFSZ, prevHandler);
+
+    EXPECT_FALSE(setOk);
+    EXPECT_FALSE(eraseOk);
+    // Failed mutations must not linger in the in-memory store either, or a
+    // later unrelated set() would silently persist them.
+    EXPECT_FALSE(kc.get("ref-2").has_value());
+    EXPECT_TRUE(kc.get("ref-1").has_value());
+
+    // The on-disk store must still hold exactly the pre-failure contents.
+    compactphone::platform::FileKeychain kc2(path);
+    ASSERT_TRUE(kc2.open());
+    const auto p1 = kc2.get("ref-1");
+    ASSERT_TRUE(p1.has_value());
+    EXPECT_EQ(*p1, "hunter2");
+    EXPECT_FALSE(kc2.get("ref-2").has_value());
+
+    // The failed persists must not leave temp-file residue beside the store
+    // (only creds.enc and creds.enc.key may exist).
+    const QStringList entries = QDir(tmp.path()).entryList(
+        QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot);
+    EXPECT_EQ(entries.size(), 2) << entries.join(", ").toStdString();
+}
+#endif
 
 // Boundary case: a file exactly at the salt size (16) but still below the
 // 44-byte minimum. Proves open() returns false and does not throw when the blob
