@@ -191,6 +191,102 @@ TEST(KeychainFile, FailedPersistReturnsFalseAndPreservesPreviousContents)
 }
 #endif
 
+namespace {
+
+// Seeds a keychain at `path` with one credential and returns the resulting
+// blob bytes, so master-key-loss tests can assert the blob survives a failed
+// open() byte-for-byte.
+QByteArray seedKeychainAndReadBlob(const std::string &path)
+{
+    compactphone::platform::FileKeychain kc(path);
+    if (!kc.open() || !kc.set("ref-1", "hunter2")) return {};
+    QFile f(QString::fromStdString(path));
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    return f.readAll();
+}
+
+QByteArray readFileBytes(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return {};
+    return f.readAll();
+}
+
+} // namespace
+
+// The master key (.key sidecar) is the only way to decrypt the blob. If it
+// goes missing — wiped by a cleanup tool, lost in a partial restore — open()
+// mints a fresh key, the derived AES key no longer matches, and GCM auth must
+// fail. The contract pinned here: open() returns false (fail loudly, so the
+// UI can say "keychain unreadable" instead of showing empty accounts) and the
+// blob is left byte-for-byte intact — never replaced with an empty store,
+// which would destroy every saved SIP password the moment the user restores
+// the .key from backup.
+TEST(KeychainFile, MissingMasterKeyFailsToOpenAndPreservesBlob)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const std::string path = tmp.filePath("creds.enc").toStdString();
+    const QByteArray blobBefore = seedKeychainAndReadBlob(path);
+    ASSERT_FALSE(blobBefore.isEmpty());
+
+    ASSERT_TRUE(QFile::remove(tmp.filePath("creds.enc.key")));
+
+    compactphone::platform::FileKeychain kc(path);
+    EXPECT_FALSE(kc.open());
+    EXPECT_FALSE(kc.get("ref-1").has_value()); // nothing decrypted
+    EXPECT_EQ(readFileBytes(tmp.filePath("creds.enc")), blobBefore);
+}
+
+// A .key sidecar with the wrong length (truncated copy, disk corruption) is
+// rejected by the size guard before the blob is ever read. Same contract:
+// open() false, blob untouched.
+TEST(KeychainFile, WrongSizeMasterKeyFailsToOpenAndPreservesBlob)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const std::string path = tmp.filePath("creds.enc").toStdString();
+    const QByteArray blobBefore = seedKeychainAndReadBlob(path);
+    ASSERT_FALSE(blobBefore.isEmpty());
+
+    QFile kf(tmp.filePath("creds.enc.key"));
+    ASSERT_TRUE(kf.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    ASSERT_EQ(kf.write(QByteArray(16, 'x')), 16); // half a key
+    kf.close();
+
+    compactphone::platform::FileKeychain kc(path);
+    EXPECT_FALSE(kc.open());
+    EXPECT_EQ(readFileBytes(tmp.filePath("creds.enc")), blobBefore);
+}
+
+// A .key of the correct 32-byte length but with different bytes (bit rot,
+// restore from the wrong machine) passes the size guard and fails only at
+// GCM authentication. This isolates the decrypt-failure branch of open()
+// from the size guard the previous test exercises: it too must return false
+// and leave the blob intact, not "recover" into an empty store.
+TEST(KeychainFile, CorruptMasterKeyFailsToOpenAndPreservesBlob)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const std::string path = tmp.filePath("creds.enc").toStdString();
+    const QByteArray blobBefore = seedKeychainAndReadBlob(path);
+    ASSERT_FALSE(blobBefore.isEmpty());
+
+    const QString keyPath = tmp.filePath("creds.enc.key");
+    QByteArray key = readFileBytes(keyPath);
+    ASSERT_EQ(key.size(), 32);
+    key[0] = key[0] ^ 0x01; // a single flipped bit is a different key
+    QFile kf(keyPath);
+    ASSERT_TRUE(kf.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    ASSERT_EQ(kf.write(key), key.size());
+    kf.close();
+
+    compactphone::platform::FileKeychain kc(path);
+    EXPECT_FALSE(kc.open());
+    EXPECT_FALSE(kc.get("ref-1").has_value());
+    EXPECT_EQ(readFileBytes(tmp.filePath("creds.enc")), blobBefore);
+}
+
 // Boundary case: a file exactly at the salt size (16) but still below the
 // 44-byte minimum. Proves open() returns false and does not throw when the blob
 // carries a full salt but no iv/ciphertext (mid() past the end yields empty
