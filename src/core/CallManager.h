@@ -132,6 +132,16 @@ public:
     // Returns the number of active CallImpl entries. Test-only accessor.
     size_t callCount() const;
 
+    // Returns true if the local capture device currently transmits into this
+    // call's active audio media — i.e. the microphone is live for this call
+    // in PJSIP's conference bridge, regardless of what m_mutedState claims.
+    // Test-only accessor: lets tests pin "muted means the mic is actually
+    // disconnected", which isMuted() (bookkeeping only) cannot. Note the
+    // bridge applies connect/disconnect on the audio-clock tick, so this view
+    // can lag a startTransmit/stopTransmit call by a few milliseconds —
+    // tests must poll rather than assert immediately after a transition.
+    bool isCaptureTransmitting(CallId id) const;
+
     // Currently-active call id (the one transmitting audio). kInvalidCallId
     // if no calls are active. Updated by makeCall/accept/unhold/eraseCall.
     CallId activeCallId() const { return m_activeCallId; }
@@ -151,14 +161,15 @@ private:
     // Threading contract. PJSIP callbacks arrive on the PJSUA worker thread
     // (SipEngine uses the default uaConfig.threadCnt = 1, mainThreadOnly is
     // not set). On that thread, adoptIncomingCall() inserts into m_calls /
-    // m_callAccount and notifyStateChange() writes m_callStates, while the
-    // main thread reads and erases the same maps — so those three maps are
-    // guarded by m_mutex, and m_nextId is atomic (makeCall on the main thread
-    // and adoptIncomingCall on the PJSIP thread both mint ids). Everything
-    // else (m_lingeringCalls, m_heldState, m_mutedState, m_transfers, the
-    // URI caches, m_players, m_recorder, m_activeCallId) is main-thread-only:
-    // CallImpl marshals every other callback to the main thread before it
-    // touches them.
+    // m_callAccount, notifyStateChange() writes m_callStates, and
+    // onCallMediaState reads m_mutedState (to honour mute across media
+    // re-activation), while the main thread reads and erases the same maps —
+    // so those four maps are guarded by m_mutex, and m_nextId is atomic
+    // (makeCall on the main thread and adoptIncomingCall on the PJSIP thread
+    // both mint ids). Everything else (m_lingeringCalls, m_heldState,
+    // m_transfers, the URI caches, m_players, m_recorder, m_activeCallId) is
+    // main-thread-only: CallImpl marshals every other callback to the main
+    // thread before it touches them.
     //
     // Lock discipline: NEVER call into PJSIP while holding m_mutex — not
     // getInfo/hangup/reinvite/answer, and not destructors of pj::Call or
