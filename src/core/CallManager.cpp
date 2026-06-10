@@ -800,25 +800,7 @@ bool CallManager::attendedTransfer(CallId activeCallId, CallId destCallId)
 
 void CallManager::cleanupTransferredCalls(CallId transferCallId)
 {
-    const auto cleanupIds = m_transfers.take(transferCallId);
-    if (cleanupIds.empty()) return;
-
-    for (const auto cleanupId : cleanupIds) {
-        CallImpl *call = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            auto callIt = m_calls.find(cleanupId);
-            if (callIt != m_calls.end()) call = callIt->second.get();
-        }
-        if (!call) continue;
-        pj::CallOpParam prm;
-        prm.statusCode = PJSIP_SC_OK;
-        try {
-            call->hangup(prm);
-        } catch (const pj::Error &e) {
-            spdlog::error("CallManager::cleanupTransferredCalls: {}", e.info());
-        }
-    }
+    hangupTransferLegs(m_transfers.take(transferCallId));
 }
 
 void CallManager::handleTransferStatus(CallId id, int statusCode,
@@ -826,18 +808,24 @@ void CallManager::handleTransferStatus(CallId id, int statusCode,
                                        const std::string &reason)
 {
     // Always runs on the main thread — CallImpl::onCallTransferStatus
-    // marshals here via a queued QMetaObject::invokeMethod.
-    if (!finalNotify) return;
-
-    const auto cleanupIds = m_transfers.take(id);
-    if (cleanupIds.empty()) return;
-
-    if (statusCode < 200 || statusCode >= 300) {
-        spdlog::warn("Transfer of call {} finished with {} {}", id,
-                     statusCode, reason);
+    // marshals here via a queued QMetaObject::invokeMethod. Which legs to
+    // hang up is decided (and unit-tested) in TransferTracker; this method
+    // only performs the PJSIP hangups.
+    const bool wasPending = m_transfers.has(id);
+    const auto cleanupIds = m_transfers.takeLegsToHangup(id, statusCode,
+                                                         finalNotify);
+    if (cleanupIds.empty()) {
+        if (wasPending && finalNotify) {
+            spdlog::warn("Transfer of call {} finished with {} {}", id,
+                         statusCode, reason);
+        }
         return;
     }
+    hangupTransferLegs(cleanupIds);
+}
 
+void CallManager::hangupTransferLegs(const std::vector<CallId> &cleanupIds)
+{
     for (const auto cleanupId : cleanupIds) {
         CallImpl *call = nullptr;
         {
@@ -851,7 +839,7 @@ void CallManager::handleTransferStatus(CallId id, int statusCode,
         try {
             call->hangup(prm);
         } catch (const pj::Error &e) {
-            spdlog::error("CallManager::handleTransferStatus: {}", e.info());
+            spdlog::error("CallManager::hangupTransferLegs: {}", e.info());
         }
     }
 }

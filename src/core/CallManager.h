@@ -248,6 +248,9 @@ private:
     bool requestUnhold(CallId id, int retriesRemaining);
     bool wireBridge(CallId activeCallId, CallId heldCallId, int retriesRemaining);
     void cleanupTransferredCalls(CallId transferCallId);
+    // Hangs up each recorded transfer leg with 200 OK; legs that already
+    // disconnected on their own are skipped. Main-thread-only.
+    void hangupTransferLegs(const std::vector<CallId> &cleanupIds);
 
     // Promotes `id` to active. Auto-holds the previously active call (if any
     // and not already held), and unholds `id` if it was held.

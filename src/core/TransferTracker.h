@@ -33,6 +33,23 @@ public:
         return ids;
     }
 
+    // Resolves a transfer-progress NOTIFY into the calls to hang up, mirroring
+    // the REFER state machine:
+    // - a non-final NOTIFY decides nothing and leaves the entry pending;
+    // - a final NOTIFY consumes the entry whatever the outcome (the REFER
+    //   subscription is over, so a stray later NOTIFY must find nothing);
+    // - only a final 2xx returns the recorded legs — on failure (486 busy,
+    //   603 declined, 3xx redirect) the user keeps talking, and hanging up
+    //   the originating leg would tear down a live conversation.
+    std::vector<std::int32_t> takeLegsToHangup(std::int32_t id, int statusCode,
+                                               bool finalNotify)
+    {
+        if (!finalNotify) return {};
+        auto ids = take(id);
+        if (statusCode < 200 || statusCode >= 300) return {};
+        return ids;
+    }
+
     void drop(std::int32_t id) { m_pending.erase(id); }
 
 private:
