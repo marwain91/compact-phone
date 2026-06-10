@@ -5,10 +5,11 @@
 #include <QApplication>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QImage>
 #include <QMenu>
 #include <QPainter>
-#include <QPainterPath>
 #include <QPixmap>
+#include <QSvgRenderer>
 #include <QSystemTrayIcon>
 
 #include <spdlog/spdlog.h>
@@ -19,45 +20,42 @@ namespace compactphone {
 #if COMPACTPHONE_WITH_TRAY
 namespace {
 
-// Build a filled monochrome phone silhouette so the tray icon matches
-// the dock icon and the in-app brand mark (which both fill the same
-// Lucide path). macOS uses this as a template image — the system tints
-// the silhouette to match the menu bar's light/dark mode.
-QIcon buildPhoneIcon()
+// The exact Lucide phone path the dock icon and the in-app brand marks
+// fill (branding/*.svg, src/ui/qml/Icons.qml). Keep the d-attribute
+// verbatim — DaktelaBrandingLayout.TrayIconUsesTheBrandPhoneGlyph
+// asserts it matches Icons.qml so the tray can't drift again.
+constexpr const char *kPhoneGlyphSvg =
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'>"
+    "<path d='M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z'/>"
+    "</svg>";
+
+} // namespace
+
+QImage TrayController::phoneGlyphImage(int size)
 {
-    QPixmap pm(22, 22);
-    pm.fill(Qt::transparent);
-    QPainter p(&pm);
+    QSvgRenderer renderer{QByteArray(kPhoneGlyphSvg)};
+    QImage img(size, size, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    QPainter p(&img);
     p.setRenderHint(QPainter::Antialiasing);
-    p.setRenderHint(QPainter::SmoothPixmapTransform);
-    p.setPen(Qt::NoPen);
-    p.setBrush(QBrush(Qt::black));
-    // Lucide phone glyph, scaled to 22x22 (Lucide's natural viewBox is 24).
-    const qreal s = 22.0 / 24.0;
-    QPainterPath path;
-    path.moveTo(20 * s, 14.92 * s);
-    path.lineTo(20 * s, 17.92 * s);
-    path.cubicTo(20 * s, 19.02 * s, 19.1 * s, 19.92 * s, 17.82 * s, 19.92 * s);
-    path.cubicTo(11 * s, 19.92 * s, 4 * s, 13 * s, 4 * s, 6.18 * s);
-    path.cubicTo(4 * s, 4.9 * s, 4.9 * s, 4 * s, 6 * s, 4 * s);
-    path.lineTo(9 * s, 4 * s);
-    path.cubicTo(10 * s, 4 * s, 10.85 * s, 4.72 * s, 11 * s, 5.72 * s);
-    path.cubicTo(11.13 * s, 6.68 * s, 11.36 * s, 7.62 * s, 11.7 * s, 8.53 * s);
-    path.cubicTo(11.84 * s, 8.93 * s, 11.75 * s, 9.38 * s, 11.45 * s, 9.68 * s);
-    path.lineTo(10.09 * s, 11.04 * s);
-    path.cubicTo(11.5 * s, 13.85 * s, 13.65 * s, 16 * s, 16.46 * s, 17.41 * s);
-    path.lineTo(17.82 * s, 16.05 * s);
-    path.cubicTo(18.12 * s, 15.75 * s, 18.57 * s, 15.66 * s, 18.97 * s, 15.8 * s);
-    path.cubicTo(19.88 * s, 16.14 * s, 20.82 * s, 16.37 * s, 21.78 * s, 16.5 * s);
-    path.closeSubpath();
-    p.drawPath(path);
+    renderer.render(&p, QRectF(0, 0, size, size));
     p.end();
-    QIcon icon(pm);
+    return img;
+}
+
+// Filled monochrome phone silhouette. Black so macOS treats it as a
+// template image and tints it to match the menu bar's light/dark mode.
+// 22 px is the macOS menu bar size (44 covers Retina); 16/32 serve the
+// Windows and Linux tray sizes.
+QIcon TrayController::phoneTrayIcon()
+{
+    QIcon icon;
+    for (const int size : {16, 22, 32, 44}) {
+        icon.addPixmap(QPixmap::fromImage(phoneGlyphImage(size)));
+    }
     icon.setIsMask(true);   // macOS template
     return icon;
 }
-
-} // namespace
 #endif
 
 TrayController::TrayController(QObject *parent) : QObject(parent)
@@ -68,7 +66,7 @@ TrayController::TrayController(QObject *parent) : QObject(parent)
         return;
     }
     m_icon = std::make_unique<QSystemTrayIcon>();
-    m_icon->setIcon(buildPhoneIcon());
+    m_icon->setIcon(phoneTrayIcon());
     m_icon->setToolTip(QStringLiteral("CompactPhone"));
 
     m_menu = new QMenu;

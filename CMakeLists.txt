@@ -33,7 +33,10 @@ else()
 endif()
 set(COMPACTPHONE_WITH_TRAY OFF)
 if(COMPACTPHONE_ENABLE_TRAY)
-    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
+    # Svg renders the tray glyph from the brand SVG path. It is not in
+    # vcpkg.json because qtdeclarative already hard-depends on qtsvg —
+    # declaring it would change the vcpkg cache hash for nothing.
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Svg)
     set(COMPACTPHONE_WITH_TRAY ON)
 endif()
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
