@@ -23,10 +23,24 @@ public:
 
     void onCallState(pj::OnCallStateParam &prm) override
     {
-        auto info = getInfo();
+        // getInfo() only fails once pjsua has invalidated the call —
+        // teardown raced this callback. Fall through as DISCONNECTED:
+        // letting the pj::Error unwind through PJSIP's C frames aborts the
+        // process, and swallowing the event would leak this CallImpl in
+        // m_calls forever (no later state callback will ever come).
+        auto state = PJSIP_INV_STATE_DISCONNECTED;
+        std::string stateText = "(call already gone)";
+        try {
+            const auto info = getInfo();
+            state = info.state;
+            stateText = info.stateText;
+        } catch (const pj::Error &e) {
+            spdlog::warn("Call {} onCallState getInfo failed: {}", m_localId,
+                         e.info());
+        }
         spdlog::info("Call {} state {} -> {}", m_localId,
-                     static_cast<int>(info.state), info.stateText);
-        switch (info.state) {
+                     static_cast<int>(state), stateText);
+        switch (state) {
         case PJSIP_INV_STATE_CALLING:
         case PJSIP_INV_STATE_INCOMING:
             m_owner->notifyStateChange(m_localId, CallState::Calling); break;
@@ -39,7 +53,7 @@ public:
         default: break;
         }
 
-        if (info.state == PJSIP_INV_STATE_DISCONNECTED) {
+        if (state == PJSIP_INV_STATE_DISCONNECTED) {
             const int callId = m_localId;
             CallManager *owner = m_owner;
             QMetaObject::invokeMethod(owner, [owner, callId]() {
@@ -50,7 +64,16 @@ public:
 
     void onCallMediaState(pj::OnCallMediaStateParam &prm) override
     {
-        auto info = getInfo();
+        pj::CallInfo info;
+        try {
+            info = getInfo();
+        } catch (const pj::Error &e) {
+            // Call torn down between the media event and now — nothing to
+            // wire, and the exception must not unwind into PJSIP's C frames.
+            spdlog::warn("Call {} onCallMediaState getInfo failed: {}",
+                         m_localId, e.info());
+            return;
+        }
         // Media (re)activates not just on call setup but on every re-INVITE —
         // hold/unhold, peer-initiated renegotiation, codec changes. Honour
         // the recorded mute state when wiring capture, or a re-INVITE would
@@ -531,15 +554,23 @@ bool CallManager::decline(CallId id)
 
 namespace {
 // Returns the first ACTIVE AudioMedia* for the given call, or nullptr.
+// Swallows pj::Error: getInfo() throws once pjsua has invalidated the call
+// (teardown racing the caller), and every caller already handles "no active
+// audio" — while an exception would escape their Q_INVOKABLE / QTimer
+// context straight into the Qt event loop.
 pj::AudioMedia *firstActiveAudio(pj::Call *call)
 {
     if (!call) return nullptr;
-    auto info = call->getInfo();
-    for (unsigned i = 0; i < info.media.size(); ++i) {
-        if (info.media[i].type == PJMEDIA_TYPE_AUDIO &&
-            info.media[i].status == PJSUA_CALL_MEDIA_ACTIVE) {
-            return static_cast<pj::AudioMedia *>(call->getMedia(i));
+    try {
+        auto info = call->getInfo();
+        for (unsigned i = 0; i < info.media.size(); ++i) {
+            if (info.media[i].type == PJMEDIA_TYPE_AUDIO &&
+                info.media[i].status == PJSUA_CALL_MEDIA_ACTIVE) {
+                return static_cast<pj::AudioMedia *>(call->getMedia(i));
+            }
         }
+    } catch (const pj::Error &e) {
+        spdlog::warn("firstActiveAudio: getInfo failed: {}", e.info());
     }
     return nullptr;
 }
@@ -933,14 +964,21 @@ bool CallManager::setMuted(CallId id, bool muted)
         call = it->second.get();
     }
 
-    auto info = call->getInfo();
     pj::AudioMedia *aud = nullptr;
-    for (unsigned i = 0; i < info.media.size(); ++i) {
-        if (info.media[i].type == PJMEDIA_TYPE_AUDIO &&
-            info.media[i].status == PJSUA_CALL_MEDIA_ACTIVE) {
-            aud = static_cast<pj::AudioMedia *>(call->getMedia(i));
-            break;
+    try {
+        auto info = call->getInfo();
+        for (unsigned i = 0; i < info.media.size(); ++i) {
+            if (info.media[i].type == PJMEDIA_TYPE_AUDIO &&
+                info.media[i].status == PJSUA_CALL_MEDIA_ACTIVE) {
+                aud = static_cast<pj::AudioMedia *>(call->getMedia(i));
+                break;
+            }
         }
+    } catch (const pj::Error &e) {
+        // Call torn down between the map lookup and the PJSIP query; the
+        // exception must not escape this Q_INVOKABLE into the event loop.
+        spdlog::error("CallManager::setMuted: getInfo failed: {}", e.info());
+        return false;
     }
     if (!aud) {
         // No active audio yet — record the desired state and report success;
