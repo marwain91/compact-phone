@@ -10,6 +10,8 @@
 #ifdef Q_OS_UNIX
 #include <csignal>
 #include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #endif
 
 TEST(KeychainMemory, RoundTripStoresAndRetrievesPassword)
@@ -188,6 +190,43 @@ TEST(KeychainFile, FailedPersistReturnsFalseAndPreservesPreviousContents)
     const QStringList entries = QDir(tmp.path()).entryList(
         QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot);
     EXPECT_EQ(entries.size(), 2) << entries.join(", ").toStdString();
+}
+
+// Both keychain files hold secrets (the master key outright; the blob is
+// only as strong as an attacker's ability to read both), so they must be
+// owner-only (0600) from the moment they exist. The writers set permissions
+// explicitly on the QSaveFile before any secret byte is written; this pins
+// the result, because QSaveFile::commit() on a brand-new target otherwise
+// applies default umask-derived permissions (0666 & ~umask) — dropping or
+// reordering the setPermissions call would silently regress to world-
+// readable. The test runs under umask(0), the most permissive setting, so
+// such a regression shows up as 0666 instead of hiding behind a developer's
+// restrictive umask. stat() works the same for root, which is how the Linux
+// dev container runs tests.
+TEST(KeychainFile, StoreAndMasterKeyAreOwnerOnlyAfterCreation)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const std::string path = tmp.filePath("creds.enc").toStdString();
+
+    const mode_t prevUmask = ::umask(0);
+    // No ASSERTs inside the umask(0) window — an early exit here would leave
+    // the permissive umask applied for every later test in this process.
+    compactphone::platform::FileKeychain kc(path);
+    const bool opened = kc.open();          // creates .key and the blob
+    const bool stored = kc.set("ref-1", "hunter2"); // re-persists the blob
+    ::umask(prevUmask);
+    ASSERT_TRUE(opened);
+    ASSERT_TRUE(stored);
+
+    const auto modeOf = [](const std::string &p) -> mode_t {
+        struct stat st{};
+        if (::stat(p.c_str(), &st) != 0) return static_cast<mode_t>(~0u);
+        return st.st_mode & static_cast<mode_t>(0777);
+    };
+    EXPECT_EQ(modeOf(path), static_cast<mode_t>(0600)) << "creds.enc";
+    EXPECT_EQ(modeOf(path + ".key"), static_cast<mode_t>(0600))
+        << "creds.enc.key";
 }
 #endif
 
