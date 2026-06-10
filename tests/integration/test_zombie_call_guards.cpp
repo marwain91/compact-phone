@@ -8,14 +8,15 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
-#include <mutex>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -24,7 +25,9 @@ std::string sipServer()
     return "asterisk:5060";
 }
 
-// Registers the 1001 test account and waits for REGISTERED.
+// Registers the 1001 test account and waits for REGISTERED. Callback-free:
+// polls the manager's atomic registration state, so no lock or stack slot
+// is ever shared with PJSIP threads.
 bool registerAccount(compactphone::sip::AccountsManager &am,
                      compactphone::sip::AccountId &outId)
 {
@@ -39,22 +42,8 @@ bool registerAccount(compactphone::sip::AccountsManager &am,
     a.registerOnStartup = true;
     outId = am.add(a, "compactphone1001");
     if (outId == compactphone::sip::kInvalidAccountId) return false;
-    std::mutex mtx;
-    std::condition_variable cv;
-    auto state = compactphone::sip::RegistrationState::Unregistered;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        { std::lock_guard l(mtx); state = s; }
-        cv.notify_all();
-    });
-    bool ok = false;
-    {
-        std::unique_lock l(mtx);
-        ok = cv.wait_for(l, 10s, [&] {
-            return state == compactphone::sip::RegistrationState::Registered;
-        });
-    }
-    am.setOnRegistrationStateChanged({});
-    return ok;
+    return waitForRegState(
+        am, {outId}, compactphone::sip::RegistrationState::Registered, 10s);
 }
 } // namespace
 

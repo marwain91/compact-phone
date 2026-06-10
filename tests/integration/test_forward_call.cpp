@@ -7,16 +7,21 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
+#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
+using compactphone::testsupport::waitForRegState;
+using compactphone::testsupport::ScopedAccountCallbacks;
 
 namespace {
 std::string sipServer()
@@ -59,6 +64,13 @@ protected:
 
 TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
 {
+    // Observation state shared with PJSIP-thread callbacks: declared before
+    // the managers (outlives every delivery); the map is only ever touched
+    // under brief lock holds — never slept on through a condition_variable.
+    std::atomic<int> incomingId{-1};
+    std::mutex mtx;
+    std::unordered_map<int, compactphone::sip::CallState> observed;
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
     auto mkAccount = [&](const std::string &user, const std::string &pwd,
                          bool isDefault) {
@@ -74,67 +86,46 @@ TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
         return am.add(a, pwd);
     };
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    int registeredCount = 0;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx);
-        if (s == compactphone::sip::RegistrationState::Registered) ++registeredCount;
-        cv.notify_all();
-    });
-
     const auto id1 = mkAccount("1001", "compactphone1001", true);
     const auto id2 = mkAccount("1002", "compactphone1002", false);
     ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
     ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] { return registeredCount >= 2; }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
-    int incomingId = -1;
-    std::unordered_map<int, compactphone::sip::CallState> observed;
+    // The incoming-call lambda captures cm; the guard clears the
+    // AccountsManager callbacks before cm dies, ASSERT early-returns included.
+    ScopedAccountCallbacks guard(am);
     am.setOnIncomingCall([&](compactphone::sip::AccountId aid, int pjsipCallId) {
-        const auto localId = cm.adoptIncomingCall(aid, pjsipCallId);
-        std::lock_guard l(mtx);
-        incomingId = localId;
-        cv.notify_all();
+        incomingId.store(cm.adoptIncomingCall(aid, pjsipCallId));
     });
     cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx);
         observed[id] = s;
-        cv.notify_all();
     });
 
     // 1002 dials 1001 -> Asterisk routes -> 1001 sees INVITE.
     auto callerLeg = cm.makeCall(id2, udpTarget("1001"));
     ASSERT_NE(callerLeg, compactphone::sip::kInvalidCallId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] { return incomingId > 0; }));
-    }
+    ASSERT_TRUE(pollUntil([&] { return incomingId.load() > 0; }, 10s));
 
     // Forward the incoming dialog to extension 600 (echo) via 302.
-    EXPECT_TRUE(cm.forwardCall(incomingId, udpTarget("600")));
+    EXPECT_TRUE(cm.forwardCall(incomingId.load(), udpTarget("600")));
 
     // The receiving leg always disconnects once we hangup with 302. The
     // caller-leg fate depends on Asterisk's redirect handling in our
     // dialplan; we only assert the side we control.
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 15s, [&] {
-            return observed[incomingId] == compactphone::sip::CallState::Disconnected;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        std::lock_guard l(mtx);
+        return observed[incomingId.load()] ==
+               compactphone::sip::CallState::Disconnected;
+    }, 15s));
 
     // Best-effort cleanup of the caller leg in case Asterisk left it open
     // (our test doesn't depend on it terminating itself).
     cm.hangup(callerLeg);
-    for (int i = 0; i < 150; ++i) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        std::this_thread::sleep_for(20ms);
-    }
+    pumpUntil([&] { return cm.callCount() == 0; }, 8s);
 }
 
 TEST_F(ForwardCallTest, ForwardCallReturnsFalseForUnknownCallId)

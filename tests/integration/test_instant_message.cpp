@@ -6,15 +6,18 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
 #include <mutex>
-#include <thread>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::waitForRegState;
+using compactphone::testsupport::ScopedAccountCallbacks;
 
 namespace {
 std::string sipServer()
@@ -50,6 +53,19 @@ protected:
 
 TEST_F(InstantMessageTest, AccountToAccountRoundTripDeliversBody)
 {
+    // Observation state shared with the PJSIP-thread callback: declared
+    // before the manager (outlives every delivery); the strings are only
+    // ever touched under brief lock holds — never slept on through a
+    // condition_variable.
+    struct Received {
+        compactphone::sip::AccountId account = compactphone::sip::kInvalidAccountId;
+        std::string from;
+        std::string body;
+    };
+    std::mutex mtx;
+    Received got;
+    bool gotMessage = false;
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
     auto mkAccount = [&](const std::string &user, const std::string &pwd,
                          bool isDefault) {
@@ -65,38 +81,20 @@ TEST_F(InstantMessageTest, AccountToAccountRoundTripDeliversBody)
         return am.add(a, pwd);
     };
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    int registeredCount = 0;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx);
-        if (s == compactphone::sip::RegistrationState::Registered) ++registeredCount;
-        cv.notify_all();
-    });
-
     const auto id1 = mkAccount("1001", "compactphone1001", true);
     const auto id2 = mkAccount("1002", "compactphone1002", false);
     ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
     ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] { return registeredCount >= 2; }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    struct Received {
-        compactphone::sip::AccountId account = compactphone::sip::kInvalidAccountId;
-        std::string from;
-        std::string body;
-    };
-    Received got;
-    bool gotMessage = false;
+    ScopedAccountCallbacks guard(am);
     am.setOnInstantMessage([&](compactphone::sip::AccountId acc,
                                const std::string &from,
                                const std::string &body) {
         std::lock_guard l(mtx);
         got = {acc, from, body};
         gotMessage = true;
-        cv.notify_all();
     });
 
     // 1002 -> 1001 (Asterisk routes the out-of-dialog MESSAGE based on
@@ -105,10 +103,11 @@ TEST_F(InstantMessageTest, AccountToAccountRoundTripDeliversBody)
     const std::string body = "Hello from integration test";
     EXPECT_TRUE(am.sendInstantMessage(id2, udpTarget("1001"), body));
 
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] { return gotMessage; }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        std::lock_guard l(mtx);
+        return gotMessage;
+    }, 10s));
+    std::lock_guard l(mtx);
     EXPECT_EQ(got.account, id1);
     EXPECT_EQ(got.body, body);
     EXPECT_NE(got.from.find("1002"), std::string::npos)

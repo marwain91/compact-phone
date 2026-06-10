@@ -7,20 +7,22 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 
+#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
-#include <mutex>
-#include <thread>
 #include <vector>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -109,6 +111,9 @@ TEST_F(AudioPlaybackTest, PlaysAndStopsWavFileOnActiveCall)
     QFile::remove(wav);
     ASSERT_TRUE(writeSilenceWav(wav));
 
+    std::atomic<compactphone::sip::CallState> observed{
+        compactphone::sip::CallState::Idle};
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
     compactphone::sip::Account a;
     a.displayName = "Play";
@@ -119,45 +124,29 @@ TEST_F(AudioPlaybackTest, PlaysAndStopsWavFileOnActiveCall)
     a.enabled = true;
     a.isDefault = true;
     a.registerOnStartup = true;
-    ASSERT_NE(am.add(a, "compactphone1001"), compactphone::sip::kInvalidAccountId);
+    const auto accId = am.add(a, "compactphone1001");
+    ASSERT_NE(accId, compactphone::sip::kInvalidAccountId);
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    compactphone::sip::RegistrationState rstate =
-        compactphone::sip::RegistrationState::Unregistered;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx); rstate = s; cv.notify_all();
-    });
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return rstate == compactphone::sip::RegistrationState::Registered;
-        }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
-    compactphone::sip::CallState observed = compactphone::sip::CallState::Idle;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
-        std::lock_guard l(mtx); observed = s; cv.notify_all();
+        observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 15s, [&] {
-            return observed == compactphone::sip::CallState::Confirmed;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        return observed.load() == compactphone::sip::CallState::Confirmed;
+    }, 15s));
     ASSERT_FALSE(cm.isPlayingAudioFile(callId));
 
     // Media may need a moment after CONFIRMED before getMedia() is ACTIVE;
     // playAudioFile returns false until then, so poll the success path.
-    bool playing = false;
-    for (int i = 0; i < 50 && !playing; ++i) {
-        playing = cm.playAudioFile(callId, wav.toStdString(), /*loop=*/false);
-        if (!playing) std::this_thread::sleep_for(100ms);
-    }
+    const bool playing = pollUntil([&] {
+        return cm.playAudioFile(callId, wav.toStdString(), /*loop=*/false);
+    }, 5s, 100ms);
     EXPECT_TRUE(playing);
     EXPECT_TRUE(cm.isPlayingAudioFile(callId));
 
@@ -165,12 +154,9 @@ TEST_F(AudioPlaybackTest, PlaysAndStopsWavFileOnActiveCall)
     EXPECT_FALSE(cm.isPlayingAudioFile(callId));
 
     cm.hangup(callId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 5s, [&] {
-            return observed == compactphone::sip::CallState::Disconnected;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        return observed.load() == compactphone::sip::CallState::Disconnected;
+    }, 5s));
     QFile::remove(wav);
 }
 

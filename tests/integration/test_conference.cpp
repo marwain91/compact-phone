@@ -7,16 +7,20 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -57,6 +61,12 @@ protected:
 
 TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
 {
+    // Mutex-guarded map shared with the PJSIP-thread callback. Declared
+    // before the managers (outlives every delivery) and only ever polled
+    // under brief lock holds — never slept on through a condition_variable.
+    std::mutex mtx;
+    std::unordered_map<int, compactphone::sip::CallState> observed;
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
     compactphone::sip::Account a;
     a.displayName = "Conf";
@@ -70,24 +80,12 @@ TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
     const auto accId = am.add(a, "compactphone1001");
     ASSERT_NE(accId, compactphone::sip::kInvalidAccountId);
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    compactphone::sip::RegistrationState rstate =
-        compactphone::sip::RegistrationState::Unregistered;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx); rstate = s; cv.notify_all();
-    });
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return rstate == compactphone::sip::RegistrationState::Registered;
-        }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
-    std::unordered_map<int, compactphone::sip::CallState> observed;
     cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
-        std::lock_guard l(mtx); observed[id] = s; cv.notify_all();
+        std::lock_guard l(mtx); observed[id] = s;
     });
 
     // Two parallel echo-test calls. Asterisk's `demo-echotest` extension
@@ -96,13 +94,11 @@ TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
     auto leg2 = cm.makeCall(udpTarget("600"));
     ASSERT_NE(leg1, compactphone::sip::kInvalidCallId);
     ASSERT_NE(leg2, compactphone::sip::kInvalidCallId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 15s, [&] {
-            return observed[leg1] == compactphone::sip::CallState::Confirmed &&
-                   observed[leg2] == compactphone::sip::CallState::Confirmed;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        std::lock_guard l(mtx);
+        return observed[leg1] == compactphone::sip::CallState::Confirmed &&
+               observed[leg2] == compactphone::sip::CallState::Confirmed;
+    }, 15s));
 
     // Hold leg2 so leg1 is the "active" foreground call. mergeCalls must
     // unhold leg2 and wire the audio bridge between leg1<->leg2.
@@ -116,23 +112,23 @@ TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
     // deferred bridge-wiring runs ~400ms later so give it time.
     std::this_thread::sleep_for(1200ms);
     EXPECT_FALSE(cm.isHeld(leg2));
-    EXPECT_EQ(observed[leg1], compactphone::sip::CallState::Confirmed);
-    EXPECT_EQ(observed[leg2], compactphone::sip::CallState::Confirmed);
+    {
+        std::lock_guard l(mtx);
+        EXPECT_EQ(observed[leg1], compactphone::sip::CallState::Confirmed);
+        EXPECT_EQ(observed[leg2], compactphone::sip::CallState::Confirmed);
+    }
 
     cm.hangup(leg1);
     cm.hangup(leg2);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return observed[leg1] == compactphone::sip::CallState::Disconnected &&
-                   observed[leg2] == compactphone::sip::CallState::Disconnected;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        std::lock_guard l(mtx);
+        return observed[leg1] == compactphone::sip::CallState::Disconnected &&
+               observed[leg2] == compactphone::sip::CallState::Disconnected;
+    }, 10s));
 
-    for (int i = 0; i < 150; ++i) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        std::this_thread::sleep_for(20ms);
-    }
+    // Pump the event loop until the 2.2s post-disconnect grace timer erases
+    // both legs.
+    pumpUntil([&] { return cm.callCount() == 0; }, 8s);
     EXPECT_EQ(cm.callCount(), 0u);
 }
 

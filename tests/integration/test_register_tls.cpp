@@ -6,12 +6,15 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
+#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
-#include <mutex>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -45,13 +48,6 @@ protected:
 TEST_F(RegisterTlsTest, RegistersOverTlsWithSelfSignedCert)
 {
     compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
-    std::mutex mtx;
-    std::condition_variable cv;
-    compactphone::sip::RegistrationState observed =
-        compactphone::sip::RegistrationState::Unregistered;
-    mgr.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx); observed = s; cv.notify_all();
-    });
 
     compactphone::sip::Account a;
     a.displayName = "Test TLS";
@@ -66,12 +62,8 @@ TEST_F(RegisterTlsTest, RegistersOverTlsWithSelfSignedCert)
     const auto id = mgr.add(a, "compactphone1001");
     ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
 
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 20s, [&] {
-            return observed == compactphone::sip::RegistrationState::Registered;
-        }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        mgr, {id}, compactphone::sip::RegistrationState::Registered, 20s));
 
     mgr.remove(id);
 }
@@ -81,16 +73,22 @@ TEST_F(RegisterTlsTest, RegistersOverTlsWithSelfSignedCert)
 // This is the security regression test for the TLS-verify default.
 TEST_F(RegisterTlsTest, RejectsSelfSignedCertWhenVerificationRequired)
 {
+    // Transition history, not just current state: the test must prove
+    // Registered was NEVER reached, which a current-state poll could miss
+    // between samples. Lock-free atomics — declared before mgr so they
+    // outlive every callback delivery, including ~AccountsManager's
+    // unregister events.
+    std::atomic<bool> sawRegistered{false};
+    std::atomic<bool> sawFailed{false};
+
     compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
-    std::mutex mtx;
-    std::condition_variable cv;
-    bool sawRegistered = false;
-    bool sawFailed = false;
     mgr.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx);
-        if (s == compactphone::sip::RegistrationState::Registered) sawRegistered = true;
-        if (s == compactphone::sip::RegistrationState::Failed) sawFailed = true;
-        cv.notify_all();
+        if (s == compactphone::sip::RegistrationState::Registered) {
+            sawRegistered.store(true);
+        }
+        if (s == compactphone::sip::RegistrationState::Failed) {
+            sawFailed.store(true);
+        }
     });
 
     compactphone::sip::Account a;
@@ -106,14 +104,11 @@ TEST_F(RegisterTlsTest, RejectsSelfSignedCertWhenVerificationRequired)
     const auto id = mgr.add(a, "compactphone1001");
     ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
 
-    {
-        // The handshake should fail; wait for a Failed state and confirm we
-        // never observed a successful registration.
-        std::unique_lock l(mtx);
-        cv.wait_for(l, 20s, [&] { return sawFailed; });
-        EXPECT_TRUE(sawFailed);
-        EXPECT_FALSE(sawRegistered);
-    }
+    // The handshake should fail; wait for a Failed state and confirm we
+    // never observed a successful registration.
+    pollUntil([&] { return sawFailed.load(); }, 20s);
+    EXPECT_TRUE(sawFailed.load());
+    EXPECT_FALSE(sawRegistered.load());
 
     mgr.remove(id);
 }
@@ -134,14 +129,6 @@ TEST(RegisterTlsVerifiedTest, AcceptsTrustedCaSignedCertWithVerificationOn)
     compactphone::platform::MemoryKeychain kc;
     compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    compactphone::sip::RegistrationState observed =
-        compactphone::sip::RegistrationState::Unregistered;
-    mgr.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx); observed = s; cv.notify_all();
-    });
-
     compactphone::sip::Account a;
     a.displayName = "Test TLS verified";
     a.username = "1001";
@@ -155,12 +142,8 @@ TEST(RegisterTlsVerifiedTest, AcceptsTrustedCaSignedCertWithVerificationOn)
     const auto id = mgr.add(a, "compactphone1001");
     ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
 
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 20s, [&] {
-            return observed == compactphone::sip::RegistrationState::Registered;
-        }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        mgr, {id}, compactphone::sip::RegistrationState::Registered, 20s));
 
     mgr.remove(id);
     engine.stop();

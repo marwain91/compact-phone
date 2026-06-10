@@ -7,16 +7,22 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
+#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
+using compactphone::testsupport::waitForRegState;
+using compactphone::testsupport::ScopedAccountCallbacks;
 
 namespace {
 std::string sipServer()
@@ -53,6 +59,13 @@ protected:
 
 TEST_F(AttendedTransferTest, TransfersOriginalCallToConsultation)
 {
+    // Observation state shared with PJSIP-thread callbacks: declared before
+    // the managers (outlives every delivery); the map is only ever touched
+    // under brief lock holds — never slept on through a condition_variable.
+    std::atomic<int> incomingId{-1};
+    std::mutex mtx;
+    std::unordered_map<int, compactphone::sip::CallState> observed;
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
     auto mkAccount = [&](const std::string &user, const std::string &pwd, bool isDefault) {
         compactphone::sip::Account a;
@@ -67,87 +80,55 @@ TEST_F(AttendedTransferTest, TransfersOriginalCallToConsultation)
         return am.add(a, pwd);
     };
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    int registeredCount = 0;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx);
-        if (s == compactphone::sip::RegistrationState::Registered) ++registeredCount;
-        cv.notify_all();
-    });
-
     const auto id1 = mkAccount("1001", "compactphone1001", true);
     const auto id2 = mkAccount("1002", "compactphone1002", false);
     ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
     ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] { return registeredCount >= 2; }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
-    int incomingId = -1;
-    std::unordered_map<int, compactphone::sip::CallState> observed;
+    // The incoming-call lambda captures cm; the guard clears the
+    // AccountsManager callbacks before cm dies, ASSERT early-returns included.
+    ScopedAccountCallbacks guard(am);
     am.setOnIncomingCall([&](compactphone::sip::AccountId aid, int pjsipCallId) {
-        const auto localCallId = cm.adoptIncomingCall(aid, pjsipCallId);
-        std::lock_guard l(mtx);
-        incomingId = localCallId;
-        cv.notify_all();
+        incomingId.store(cm.adoptIncomingCall(aid, pjsipCallId));
     });
     cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx);
         observed[id] = s;
-        cv.notify_all();
     });
 
     auto callA = cm.makeCall(id2, udpTarget("1001"));
     ASSERT_NE(callA, compactphone::sip::kInvalidCallId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] { return incomingId > 0; }));
-    }
-    EXPECT_TRUE(cm.accept(incomingId));
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return observed[incomingId] == compactphone::sip::CallState::Confirmed &&
-                   observed[callA] == compactphone::sip::CallState::Confirmed;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] { return incomingId.load() > 0; }, 10s));
+    EXPECT_TRUE(cm.accept(incomingId.load()));
+    ASSERT_TRUE(pollUntil([&] {
+        std::lock_guard l(mtx);
+        return observed[incomingId.load()] == compactphone::sip::CallState::Confirmed &&
+               observed[callA] == compactphone::sip::CallState::Confirmed;
+    }, 10s));
     std::this_thread::sleep_for(500ms);
 
     auto callB = cm.makeCall(id1, udpTarget("600"));
     ASSERT_NE(callB, compactphone::sip::kInvalidCallId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return observed[callB] == compactphone::sip::CallState::Confirmed;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        std::lock_guard l(mtx);
+        return observed[callB] == compactphone::sip::CallState::Confirmed;
+    }, 10s));
 
-    EXPECT_TRUE(cm.attendedTransfer(callB, incomingId));
+    EXPECT_TRUE(cm.attendedTransfer(callB, incomingId.load()));
 
     // The post-transfer hangup is driven by the success NOTIFY through a
     // queued main-thread handler, so the wait must pump the event loop —
-    // a blocking cv.wait_for would starve the very hangup it waits for.
-    bool disconnected = false;
-    const auto deadline = std::chrono::steady_clock::now() + 15s;
-    while (!disconnected && std::chrono::steady_clock::now() < deadline) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
-        {
-            std::lock_guard l(mtx);
-            disconnected =
-                observed[callB] == compactphone::sip::CallState::Disconnected &&
-                observed[incomingId] == compactphone::sip::CallState::Disconnected;
-        }
-        std::this_thread::sleep_for(10ms);
-    }
-    ASSERT_TRUE(disconnected)
-        << "transfer legs were not hung up after the success NOTIFY";
+    // a blocking wait would starve the very hangup it waits for.
+    ASSERT_TRUE(pumpUntil([&] {
+        std::lock_guard l(mtx);
+        return observed[callB] == compactphone::sip::CallState::Disconnected &&
+               observed[incomingId.load()] ==
+                   compactphone::sip::CallState::Disconnected;
+    }, 15s)) << "transfer legs were not hung up after the success NOTIFY";
 
     cm.hangup(callA);
-    for (int i = 0; i < 30; ++i) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        std::this_thread::sleep_for(20ms);
-    }
+    pumpUntil([&] { return cm.callCount() == 0; }, 8s);
 }

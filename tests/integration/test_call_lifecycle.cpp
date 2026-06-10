@@ -7,15 +7,18 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
+#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
-#include <mutex>
-#include <thread>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -47,6 +50,12 @@ protected:
 
 TEST_F(CallLifecycleTest, MakeAndHangupTenTimes_CountReturnsToZero)
 {
+    // One atomic for all ten cycles (reset per iteration) — re-declaring it
+    // inside the loop would leave the previous iteration's slot dangling in
+    // the callback until the next setOnCallStateChanged.
+    std::atomic<compactphone::sip::CallState> observed{
+        compactphone::sip::CallState::Idle};
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
     compactphone::sip::Account a;
     a.displayName = "L"; a.username = "1001"; a.domain = sipServer();
@@ -55,50 +64,28 @@ TEST_F(CallLifecycleTest, MakeAndHangupTenTimes_CountReturnsToZero)
     const auto accId = am.add(a, "compactphone1001");
     ASSERT_NE(accId, compactphone::sip::kInvalidAccountId);
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    compactphone::sip::RegistrationState rstate =
-        compactphone::sip::RegistrationState::Unregistered;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx); rstate = s; cv.notify_all();
-    });
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return rstate == compactphone::sip::RegistrationState::Registered;
-        }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
+    cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
+        observed.store(s);
+    });
     for (int i = 0; i < 10; ++i) {
-        compactphone::sip::CallState observed = compactphone::sip::CallState::Idle;
-        cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
-            std::lock_guard l(mtx); observed = s; cv.notify_all();
-        });
+        observed.store(compactphone::sip::CallState::Idle);
         auto callId = cm.makeCall("sip:600@" + sipServer());
         ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-        {
-            std::unique_lock l(mtx);
-            ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-                return observed == compactphone::sip::CallState::Confirmed;
-            }));
-        }
+        ASSERT_TRUE(pollUntil([&] {
+            return observed.load() == compactphone::sip::CallState::Confirmed;
+        }, 10s));
         cm.hangup(callId);
-        {
-            std::unique_lock l(mtx);
-            ASSERT_TRUE(cv.wait_for(l, 5s, [&] {
-                return observed == compactphone::sip::CallState::Disconnected;
-            }));
-        }
+        ASSERT_TRUE(pollUntil([&] {
+            return observed.load() == compactphone::sip::CallState::Disconnected;
+        }, 5s));
         // CallManager defers eraseCall by 2.2s so the UI can render a
         // "Call ended" lingering state; pump the event loop until the
         // grace timer fires before moving on.
-        const auto deadline = std::chrono::steady_clock::now() + 4s;
-        while (std::chrono::steady_clock::now() < deadline
-               && cm.callCount() > 0) {
-            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-            std::this_thread::sleep_for(20ms);
-        }
+        pumpUntil([&] { return cm.callCount() == 0; }, 4s);
     }
 
     EXPECT_EQ(cm.callCount(), 0u);

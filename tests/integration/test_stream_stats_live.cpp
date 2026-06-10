@@ -7,15 +7,17 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
+#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
-#include <mutex>
-#include <thread>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -53,6 +55,9 @@ protected:
 // sampling (or wired the wrong RTCP field) leaves it at the -1 sentinel.
 TEST_F(StreamStatsLiveTest, SamplesRtpStreamForActiveCall)
 {
+    std::atomic<compactphone::sip::CallState> observed{
+        compactphone::sip::CallState::Idle};
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
     compactphone::sip::Account a;
     a.displayName = "Stats";
@@ -63,54 +68,38 @@ TEST_F(StreamStatsLiveTest, SamplesRtpStreamForActiveCall)
     a.enabled = true;
     a.isDefault = true;
     a.registerOnStartup = true;
-    ASSERT_NE(am.add(a, "compactphone1001"), compactphone::sip::kInvalidAccountId);
+    const auto accId = am.add(a, "compactphone1001");
+    ASSERT_NE(accId, compactphone::sip::kInvalidAccountId);
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    compactphone::sip::RegistrationState rstate =
-        compactphone::sip::RegistrationState::Unregistered;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx); rstate = s; cv.notify_all();
-    });
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return rstate == compactphone::sip::RegistrationState::Registered;
-        }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
-    compactphone::sip::CallState observed = compactphone::sip::CallState::Idle;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
-        std::lock_guard l(mtx); observed = s; cv.notify_all();
+        observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 15s, [&] {
-            return observed == compactphone::sip::CallState::Confirmed;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        return observed.load() == compactphone::sip::CallState::Confirmed;
+    }, 15s));
 
     // Let RTP flow, polling until the jitter stat moves off the -1 sentinel.
-    bool sampled = false;
-    for (int i = 0; i < 120 && !sampled; ++i) {
-        if (cm.streamStats(callId).jitterMs >= 0) sampled = true;
-        else std::this_thread::sleep_for(100ms);
-    }
+    // Generous deadline: under the TSan gate the instrumented media path can
+    // take several times longer to surface the first RTCP-derived sample
+    // (one burn-in run blew a 12s budget while the suite ran under load).
+    const bool sampled = pollUntil([&] {
+        return cm.streamStats(callId).jitterMs >= 0;
+    }, 45s, 100ms);
     const auto s = cm.streamStats(callId);
     EXPECT_TRUE(sampled) << "jitterMs stayed at sentinel (" << s.jitterMs << ")";
     EXPECT_GE(s.jitterMs, 0);
 
     cm.hangup(callId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 5s, [&] {
-            return observed == compactphone::sip::CallState::Disconnected;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        return observed.load() == compactphone::sip::CallState::Disconnected;
+    }, 5s));
 }
 
 // An unknown call id yields the default sentinel struct (all -1), not garbage.
