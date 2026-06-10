@@ -157,15 +157,62 @@ TEST_F(MuteTest, MutesAndUnmutesActiveCall)
     }, 5s));
 }
 
-// NOTE on the hold/unhold re-INVITE scenario: the production bug this file
-// guards against (a re-INVITE re-firing onCallMediaState and re-opening the
-// mic on a muted call) cannot be exercised end-to-end against this Asterisk
-// fixture — locally-initiated re-INVITEs (hold/unhold) never receive a final
-// response here, so media never renegotiates (see the backlog task on the
-// fixture's re-INVITE handling; HoldTest has the same blind spot but only
-// asserts bookkeeping). The handler branch is identical for first activation
-// and re-activation, so MuteBeforeMediaIsAppliedOnActivation below pins the
-// same code path: ACTIVE media event + muted state => capture stays unwired.
+// The production bug this file guards against: a hold/unhold re-INVITE
+// re-fires onCallMediaState, which re-wires capture on the renegotiated
+// media — before the record-first fix it consulted stale mute state and
+// silently re-opened the microphone on a muted call. isMediaActive() pins
+// each re-INVITE actually completing (ACTIVE -> LOCAL_HOLD -> ACTIVE), so a
+// fixture that swallows re-INVITEs fails the waits instead of letting the
+// mute assertions pass vacuously.
+TEST_F(MuteTest, MuteSurvivesHoldUnholdReinvite)
+{
+    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    ASSERT_TRUE(registerAccount(am));
+    compactphone::sip::CallManager cm(&am);
+
+    auto callId = cm.makeCall("sip:600@" + sipServer());
+    ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
+    ASSERT_TRUE(waitFor([&] {
+        return callState(cm, callId)
+               == compactphone::sip::CallState::Confirmed;
+    }, 15s));
+    ASSERT_TRUE(waitFor([&] { return cm.isCaptureTransmitting(callId); }, 5s));
+
+    ASSERT_TRUE(cm.setMuted(callId, true));
+    ASSERT_TRUE(waitFor([&] {
+        return !cm.isCaptureTransmitting(callId);
+    }, 2s));
+
+    // Hold: completed once media leaves ACTIVE (LOCAL_HOLD).
+    ASSERT_TRUE(cm.hold(callId));
+    ASSERT_TRUE(waitFor([&] { return !cm.isMediaActive(callId); }, 5s))
+        << "hold re-INVITE never completed";
+
+    // Unhold: media re-activates, onCallMediaState re-wires the call audio.
+    ASSERT_TRUE(cm.unhold(callId));
+    ASSERT_TRUE(waitFor([&] { return cm.isMediaActive(callId); }, 5s))
+        << "unhold re-INVITE never completed";
+
+    // The renegotiated media must come up with the mic still detached.
+    for (int i = 0; i < 10; ++i) {
+        ASSERT_FALSE(cm.isCaptureTransmitting(callId))
+            << "unhold re-INVITE re-opened the microphone on a muted call";
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for(100ms);
+    }
+    EXPECT_TRUE(cm.isMuted(callId));
+
+    // Unmute lights the mic promptly — proves the call's media really is
+    // live again rather than the mute checks passing against dead media.
+    EXPECT_TRUE(cm.setMuted(callId, false));
+    EXPECT_TRUE(waitFor([&] { return cm.isCaptureTransmitting(callId); }, 5s));
+
+    cm.hangup(callId);
+    EXPECT_TRUE(waitFor([&] {
+        return callState(cm, callId)
+               == compactphone::sip::CallState::Disconnected;
+    }, 5s));
+}
 
 // Mute pressed before media is active must be applied when media comes up.
 // Before the fix, setMuted recorded the desired state but returned false,
