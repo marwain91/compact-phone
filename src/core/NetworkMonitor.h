@@ -1,8 +1,43 @@
 #pragma once
 
+#include <QNetworkInformation>
 #include <QObject>
 
 namespace compactphone {
+
+// What a network event means for SIP: nothing, re-REGISTER (the source
+// IP / NAT mapping changed), or registrations are gone until the network
+// returns.
+enum class NetworkAction {
+    None,
+    EmitBack, // -> networkBack(): accounts should re-REGISTER
+    EmitLost, // -> networkLost(): connectivity dropped below Online
+};
+
+// Result of one reachabilityChanged event: the action plus the new
+// online flag (always valid — equals the previous flag when action is
+// None).
+struct ReachabilityDecision {
+    NetworkAction action = NetworkAction::None;
+    bool online = false;
+};
+
+// Pure decision logic behind NetworkMonitor's QNetworkInformation
+// lambdas, extracted so the debounce is unit-testable without a live
+// backend. A regression here silently kills re-registration after
+// wake/roam — lost inbound calls.
+
+// Only Reachability::Online counts as online (Site/Local subnets can't
+// reach the registrar). Repeats of the current state are absorbed: no
+// action unless the online flag actually flips.
+ReachabilityDecision decideReachabilityChange(
+    bool wasOnline, QNetworkInformation::Reachability r);
+
+// Transport flips (Wi-Fi -> Ethernet, switching SSIDs) invalidate the
+// SIP transport's source IP even when reachability stays Online — but
+// only matter while online; offline flips are absorbed (reachability
+// coming back will emit networkBack itself).
+NetworkAction decideTransportChange(bool online);
 
 // Watches the host network reachability and transport medium via
 // QNetworkInformation. Emits networkBack() when connectivity returns
