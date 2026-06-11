@@ -16,7 +16,6 @@
 #include <cstdlib>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
 using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 
@@ -68,7 +67,7 @@ TEST_F(CallLifecycleTest, MakeAndHangupTenTimes_CountReturnsToZero)
     ASSERT_TRUE(waitForRegState(
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
         observed.store(s);
     });
@@ -76,11 +75,11 @@ TEST_F(CallLifecycleTest, MakeAndHangupTenTimes_CountReturnsToZero)
         observed.store(compactphone::sip::CallState::Idle);
         auto callId = cm.makeCall("sip:600@" + sipServer());
         ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-        ASSERT_TRUE(pollUntil([&] {
+        ASSERT_TRUE(pumpUntil([&] {
             return observed.load() == compactphone::sip::CallState::Confirmed;
         }, 10s));
         cm.hangup(callId);
-        ASSERT_TRUE(pollUntil([&] {
+        ASSERT_TRUE(pumpUntil([&] {
             return observed.load() == compactphone::sip::CallState::Disconnected;
         }, 5s));
         // CallManager defers eraseCall by 2.2s so the UI can render a

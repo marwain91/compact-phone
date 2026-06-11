@@ -75,44 +75,10 @@ struct AccountsManager::Entry {
 // ---------------------------------------------------------------------------
 
 AccountsManager::AccountsManager(sipbackend::ISipBackend *backend,
-                                 sipbackend::PjsipBackend *pjsipBridge,
                                  persistence::Database *db,
                                  platform::IKeychain *keychain)
-    : m_backend(backend), m_pjsipBridge(pjsipBridge),
-      m_db(db), m_keychain(keychain)
+    : m_backend(backend), m_db(db), m_keychain(keychain)
 {
-    // Install the synchronous incoming-call hook BEFORE loadFromDatabase /
-    // registerAccount so any incoming call during startup isn't lost.
-    //
-    // The hook fires on the PJSIP thread. It reverse-maps the backend account
-    // id to a domain id (under m_backendIdsMutex — held BRIEFLY, no PJSIP
-    // calls inside), then invokes m_onIncoming under m_callbackMutex.
-    if (m_pjsipBridge) {
-        m_pjsipBridge->setNativeIncomingCallHook(
-            [this](sipbackend::AccountId backendAccId, int pjsipCallId) {
-                // PJSIP THREAD: reverse-map backendAccId to domain id.
-                AccountId domainId = kInvalidAccountId;
-                {
-                    std::lock_guard<std::mutex> lk(m_backendIdsMutex);
-                    for (const auto &kv : m_backendIds) {
-                        if (kv.second == backendAccId) {
-                            domainId = kv.first;
-                            break;
-                        }
-                    }
-                }
-                if (domainId == kInvalidAccountId) {
-                    spdlog::warn("AccountsManager: incoming call for unknown "
-                                 "backend account id {}", backendAccId);
-                    return;
-                }
-                spdlog::info("AccountsManager: incoming call account={} "
-                             "pjsip={}", domainId, pjsipCallId);
-                std::lock_guard<std::mutex> lk(m_callbackMutex);
-                if (m_onIncoming) m_onIncoming(domainId, pjsipCallId);
-            });
-    }
-
     loadFromDatabase();
     // NOTE: startup accounts are NOT registered here. The caller must
     // call backend->setListener(this) first so queued reg-state events
@@ -122,21 +88,12 @@ AccountsManager::AccountsManager(sipbackend::ISipBackend *backend,
 
 AccountsManager::~AccountsManager()
 {
-    // Quiesce the PJSIP incoming-call hook FIRST (while m_backendIds and
-    // m_callbackMutex are still valid). After this returns, no in-flight hook
-    // invocation can be running and no new one will start.
-    if (m_pjsipBridge) {
-        m_pjsipBridge->setNativeIncomingCallHook({});
-    }
-    // Unregister all live accounts from the backend. Collect both domain
-    // and backend ids in one locked pass so we never re-lock per entry.
+    // Unregister all live accounts from the backend. Main-thread-only — no
+    // lock needed since phase 3.
     std::vector<sipbackend::AccountId> toRemove;
-    {
-        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
-        toRemove.reserve(m_backendIds.size());
-        for (const auto &kv : m_backendIds) {
-            toRemove.push_back(kv.second);
-        }
+    toRemove.reserve(m_backendIds.size());
+    for (const auto &kv : m_backendIds) {
+        toRemove.push_back(kv.second);
     }
     for (const auto backendId : toRemove) {
         try { m_backend->removeAccount(backendId); } catch (...) {}
@@ -570,10 +527,7 @@ bool AccountsManager::registerAccount(AccountId id)
         spdlog::error("registerAccount: backend addAccount failed for id {}", id);
         return false;
     }
-    {
-        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
-        m_backendIds[id] = backendId;
-    }
+    m_backendIds[id] = backendId;
     e.registered = true;
     return true;
 }
@@ -585,7 +539,6 @@ void AccountsManager::unregisterAccount(AccountId id)
 
         sipbackend::AccountId backendId = sipbackend::kInvalidAccountId;
         {
-            std::lock_guard<std::mutex> lk(m_backendIdsMutex);
             auto it = m_backendIds.find(id);
             if (it != m_backendIds.end()) {
                 backendId = it->second;
@@ -615,15 +568,7 @@ void AccountsManager::onRegState(sipbackend::AccountId backendId,
                                  bool regActive, int sipCode,
                                  const std::string &reason)
 {
-    // Reverse-map backendId to domain id. Under m_backendIdsMutex only for
-    // the lookup; no PJSIP call, no backend call, no long hold.
-    AccountId domainId = kInvalidAccountId;
-    {
-        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
-        for (const auto &kv : m_backendIds) {
-            if (kv.second == backendId) { domainId = kv.first; break; }
-        }
-    }
+    const AccountId domainId = accountIdForBackend(backendId);
     if (domainId == kInvalidAccountId) {
         // Stale post-removal event — guaranteed to happen; ignore silently.
         spdlog::debug("AccountsManager::onRegState: unknown backend id {} "
@@ -650,14 +595,7 @@ void AccountsManager::onRegState(sipbackend::AccountId backendId,
 void AccountsManager::onMwi(sipbackend::AccountId backendId,
                             int newMessages, int oldMessages, bool active)
 {
-    // Reverse-map to domain id.
-    AccountId domainId = kInvalidAccountId;
-    {
-        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
-        for (const auto &kv : m_backendIds) {
-            if (kv.second == backendId) { domainId = kv.first; break; }
-        }
-    }
+    const AccountId domainId = accountIdForBackend(backendId);
     if (domainId == kInvalidAccountId) {
         spdlog::debug("AccountsManager::onMwi: unknown backend id {}", backendId);
         return;
@@ -669,13 +607,7 @@ void AccountsManager::onInstantMessage(sipbackend::AccountId backendId,
                                        const std::string &fromUri,
                                        const std::string &body)
 {
-    AccountId domainId = kInvalidAccountId;
-    {
-        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
-        for (const auto &kv : m_backendIds) {
-            if (kv.second == backendId) { domainId = kv.first; break; }
-        }
-    }
+    const AccountId domainId = accountIdForBackend(backendId);
     if (domainId == kInvalidAccountId) {
         spdlog::debug("AccountsManager::onInstantMessage: unknown backend id {}",
                       backendId);
@@ -725,12 +657,7 @@ bool AccountsManager::sendInstantMessage(AccountId accountId,
                                          const std::string &to,
                                          const std::string &body)
 {
-    sipbackend::AccountId backendId = sipbackend::kInvalidAccountId;
-    {
-        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
-        auto it = m_backendIds.find(accountId);
-        if (it != m_backendIds.end()) backendId = it->second;
-    }
+    const sipbackend::AccountId backendId = backendIdFor(accountId);
     if (backendId == sipbackend::kInvalidAccountId) return false;
     return m_backend->sendMessage(backendId, to, body);
 }
@@ -797,27 +724,38 @@ void AccountsManager::setOnRegistrationStateChanged(
     m_cb = std::move(cb);
 }
 
-void AccountsManager::setOnIncomingCall(std::function<void(AccountId, int)> cb)
+// ---------------------------------------------------------------------------
+// Backend-id translation (main-thread-only)
+// ---------------------------------------------------------------------------
+
+sipbackend::AccountId AccountsManager::backendIdFor(AccountId id) const
 {
-    std::lock_guard<std::mutex> lk(m_callbackMutex);
-    m_onIncoming = std::move(cb);
+    auto it = m_backendIds.find(id);
+    return it != m_backendIds.end() ? it->second
+                                    : sipbackend::kInvalidAccountId;
+}
+
+AccountId AccountsManager::accountIdForBackend(
+    sipbackend::AccountId backendId) const
+{
+    for (const auto &kv : m_backendIds) {
+        if (kv.second == backendId) return kv.first;
+    }
+    return kInvalidAccountId;
 }
 
 // ---------------------------------------------------------------------------
-// Transitional bridge — phase-3-removed
+// Presence bridge — pj::Account access for LinesManager (BLF). Removed in
+// phase 5 when presence moves behind ISipBackend.
 // ---------------------------------------------------------------------------
 
 pj::Account *AccountsManager::pjAccountFor(AccountId id)
 {
-    if (!m_pjsipBridge) return nullptr;
-    sipbackend::AccountId backendId = sipbackend::kInvalidAccountId;
-    {
-        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
-        auto it = m_backendIds.find(id);
-        if (it != m_backendIds.end()) backendId = it->second;
-    }
+    auto *pjsip = dynamic_cast<sipbackend::PjsipBackend *>(m_backend);
+    if (!pjsip) return nullptr;   // non-PJSIP backend (fake / future adapters)
+    const sipbackend::AccountId backendId = backendIdFor(id);
     if (backendId == sipbackend::kInvalidAccountId) return nullptr;
-    return m_pjsipBridge->pjAccountFor(backendId);
+    return pjsip->pjAccountFor(backendId);
 }
 
 // ---------------------------------------------------------------------------

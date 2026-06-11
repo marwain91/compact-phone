@@ -21,7 +21,6 @@
 #include <thread>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
 using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 
@@ -86,14 +85,14 @@ TEST_F(CallRecordingTest, RecordsActiveCallToWavFile)
     ASSERT_TRUE(waitForRegState(
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Confirmed;
     }, 15s));
 
@@ -120,7 +119,7 @@ TEST_F(CallRecordingTest, RecordsActiveCallToWavFile)
         << "Recording file is suspiciously small (" << fi.size() << " bytes)";
 
     cm.hangup(callId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Disconnected;
     }, 5s));
 }
@@ -147,14 +146,14 @@ TEST_F(CallRecordingTest, EraseCallCleansUpActiveRecorder)
     ASSERT_TRUE(waitForRegState(
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Confirmed;
     }, 15s));
     std::this_thread::sleep_for(500ms);
@@ -163,7 +162,7 @@ TEST_F(CallRecordingTest, EraseCallCleansUpActiveRecorder)
     std::this_thread::sleep_for(1500ms);
 
     cm.hangup(callId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Disconnected;
     }, 5s));
     // Pump the event loop so the 2.2s grace timer fires eraseCall.

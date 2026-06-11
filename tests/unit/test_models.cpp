@@ -62,7 +62,7 @@ TEST(AccountsModel, ExposesAccountRowsRolesAndFallbackLabel)
     ASSERT_TRUE(db.openInMemory());
     compactphone::platform::MemoryKeychain kc;
     compactphone::sipbackend::FakeSipBackend fake;
-    compactphone::sip::AccountsManager manager(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager manager(&fake, &db, &kc);
 
     compactphone::sip::Account account;
     account.displayName = "Work Line";
@@ -103,7 +103,7 @@ TEST(AccountsModel, RegistrationChangeEmitsDataChangedNotReset)
     ASSERT_TRUE(db.openInMemory());
     compactphone::platform::MemoryKeychain kc;
     compactphone::sipbackend::FakeSipBackend fake;
-    compactphone::sip::AccountsManager manager(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager manager(&fake, &db, &kc);
     compactphone::sip::Account account;
     account.displayName = "Work";
     account.username = "1001";
@@ -293,7 +293,7 @@ TEST(EmptyModels, AllModelsHaveRoleNamesAndReturnInvalidForOutOfRange)
     compactphone::platform::MemoryKeychain kc;
 
     compactphone::sipbackend::FakeSipBackend fake;
-    compactphone::sip::AccountsManager am(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager am(&fake, &db, &kc);
     compactphone::sip::ContactsManager cm(&db);
     compactphone::sip::HistoryManager hm(&db);
     compactphone::sip::MessagesManager mm(&db);

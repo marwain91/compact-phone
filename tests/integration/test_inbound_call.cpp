@@ -17,7 +17,6 @@
 #include <thread>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
 using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 using compactphone::testsupport::ScopedAccountCallbacks;
@@ -88,14 +87,13 @@ TEST_F(InboundCallTest, ReceivesAndAcceptsCallFromSecondAccount)
     ASSERT_TRUE(waitForRegState(
         am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
-    // The incoming-call lambda below captures cm; the guard clears every
-    // AccountsManager callback before cm dies — including on ASSERT
-    // early-returns, which skip cleanup written after the assertion.
+    auto &cm = smp.calls;
+    // The incoming-call signal fires on the main thread from a pumped queued
+    // event; the guard clears the remaining AccountsManager callbacks before
+    // the managers die — including on ASSERT early-returns.
     ScopedAccountCallbacks guard(am);
-    am.setOnIncomingCall([&](compactphone::sip::AccountId aid, int pjsipCallId) {
-        incomingCallId.store(cm.adoptIncomingCall(aid, pjsipCallId));
-    });
+    QObject::connect(&cm, &compactphone::sip::CallManager::incomingCall,
+                     [&incomingCallId](int id) { incomingCallId.store(id); });
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
         observed.store(s);
     });
@@ -104,11 +102,11 @@ TEST_F(InboundCallTest, ReceivesAndAcceptsCallFromSecondAccount)
     auto outboundCall = cm.makeCall(id2, udpTarget("1001"));
     ASSERT_NE(outboundCall, compactphone::sip::kInvalidCallId);
 
-    ASSERT_TRUE(pollUntil([&] { return incomingCallId.load() > 0; }, 10s));
+    ASSERT_TRUE(pumpUntil([&] { return incomingCallId.load() > 0; }, 10s));
 
     EXPECT_TRUE(cm.accept(incomingCallId.load()));
 
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Confirmed;
     }, 10s));
 

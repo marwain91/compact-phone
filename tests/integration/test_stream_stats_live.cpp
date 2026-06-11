@@ -16,7 +16,7 @@
 #include <cstdlib>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 
 namespace {
@@ -75,14 +75,14 @@ TEST_F(StreamStatsLiveTest, SamplesRtpStreamForActiveCall)
     ASSERT_TRUE(waitForRegState(
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Confirmed;
     }, 15s));
 
@@ -90,15 +90,15 @@ TEST_F(StreamStatsLiveTest, SamplesRtpStreamForActiveCall)
     // Generous deadline: under the TSan gate the instrumented media path can
     // take several times longer to surface the first RTCP-derived sample
     // (one burn-in run blew a 12s budget while the suite ran under load).
-    const bool sampled = pollUntil([&] {
+    const bool sampled = pumpUntil([&] {
         return cm.streamStats(callId).jitterMs >= 0;
-    }, 45s, 100ms);
+    }, 45s);
     const auto s = cm.streamStats(callId);
     EXPECT_TRUE(sampled) << "jitterMs stayed at sentinel (" << s.jitterMs << ")";
     EXPECT_GE(s.jitterMs, 0);
 
     cm.hangup(callId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Disconnected;
     }, 5s));
 }
@@ -108,7 +108,7 @@ TEST_F(StreamStatsLiveTest, UnknownCallReturnsSentinelStats)
 {
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     const auto s = cm.streamStats(9999);
     EXPECT_EQ(s.rttMs, -1);
     EXPECT_EQ(s.jitterMs, -1);

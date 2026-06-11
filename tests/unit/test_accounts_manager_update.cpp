@@ -64,7 +64,7 @@ protected:
     std::unique_ptr<compactphone::sip::AccountsManager> makeManager()
     {
         auto mgr = std::make_unique<compactphone::sip::AccountsManager>(
-            &fake, nullptr, &db, &kc);
+            &fake, &db, &kc);
         fake.setListener(mgr.get());
         return mgr;
     }
@@ -87,7 +87,7 @@ TEST_F(AccountsManagerUpdateTest, AccountSurvivesColdFileReopen)
         compactphone::persistence::Database fileDb;
         ASSERT_TRUE(fileDb.open(path));
         auto mgr = std::make_unique<compactphone::sip::AccountsManager>(
-            &fake, nullptr, &fileDb, &kc);
+            &fake, &fileDb, &kc);
         fake.setListener(mgr.get());
         compactphone::sip::Account a;
         a.displayName = "Persisted";
@@ -105,7 +105,7 @@ TEST_F(AccountsManagerUpdateTest, AccountSurvivesColdFileReopen)
         compactphone::persistence::Database fileDb;
         ASSERT_TRUE(fileDb.open(path));
         auto mgr = std::make_unique<compactphone::sip::AccountsManager>(
-            &fake, nullptr, &fileDb, &kc);
+            &fake, &fileDb, &kc);
         fake.setListener(mgr.get());
         const auto loaded = mgr->find(id);
         ASSERT_TRUE(loaded.has_value());

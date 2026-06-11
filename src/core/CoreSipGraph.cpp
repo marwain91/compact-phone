@@ -6,28 +6,33 @@
 #include "SipEngine.h"
 #include "models/AccountsModel.h"
 #include "sipbackend/ISipBackend.h"
-#include "sipbackend/pjsip/PjsipBackend.h"
+#include "sipbackend/ListenerFanout.h"
+
+#include <vector>
 
 namespace compactphone {
 
 CoreSipGraph buildCoreSipGraph(sipbackend::ISipBackend *backend,
-                               sipbackend::PjsipBackend *pjsipBridge,
                                persistence::Database *db,
                                platform::IKeychain *keychain,
                                sip::SipEngine *engine,
                                QObject *parent)
 {
     CoreSipGraph g;
-    g.accounts = std::make_unique<sip::AccountsManager>(
-        backend, pjsipBridge, db, keychain);
-    // Wire the listener AFTER construction so the manager is fully constructed
-    // when the first queued event arrives. registerStartupAccounts() is called
-    // immediately after so events from the first REGISTER response have a
-    // live listener — this closes the window where a fast registrar's first
-    // onRegState lands before anyone listens. The caller must call
-    // backend->setListener(nullptr) before the graph is torn down —
-    // see CoreSipGraph.h's wiring contract.
-    backend->setListener(g.accounts.get());
+    g.accounts = std::make_unique<sip::AccountsManager>(backend, db, keychain);
+    g.calls = std::make_unique<sip::CallManager>(backend, g.accounts.get());
+    // The fanout routes every backend event to accounts FIRST (registration
+    // bookkeeping current) then calls. Wire the listener AFTER both managers
+    // exist so the first queued event has live sinks.
+    // registerStartupAccounts() runs immediately after so events from the
+    // first REGISTER response have a live listener — this closes the window
+    // where a fast registrar's first onRegState lands before anyone listens.
+    // The caller MUST call backend->setListener(nullptr) before the graph is
+    // torn down — see CoreSipGraph.h's wiring contract.
+    g.listener = std::make_unique<sipbackend::ListenerFanout>(
+        std::vector<sipbackend::ISipBackendListener *>{
+            g.accounts.get(), g.calls.get()});   // accounts BEFORE calls
+    backend->setListener(g.listener.get());
     g.accounts->registerStartupAccounts();
     g.accountsModel =
         std::make_unique<models::AccountsModel>(g.accounts.get(), parent);
@@ -36,7 +41,6 @@ CoreSipGraph buildCoreSipGraph(sipbackend::ISipBackend *backend,
     // change. Pass nullptr only in unit tests that use a fake backend.
     g.accountsController = std::make_unique<AccountsController>(
         g.accounts.get(), g.accountsModel.get(), engine, parent);
-    g.calls = std::make_unique<sip::CallManager>(g.accounts.get());
     return g;
 }
 

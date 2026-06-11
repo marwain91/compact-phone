@@ -9,6 +9,7 @@
 #include "core/SettingsManager.h"
 #include "core/SipEngine.h"
 #include "core/platform/Keychain_memory.h"
+#include "core/sipbackend/ListenerFanout.h"
 #include "core/sipbackend/pjsip/PjsipBackend.h"
 #include "models/CallsModel.h"
 #include "models/HistoryModel.h"
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 using namespace std::chrono_literals;
 // CallsController fans state changes through QMetaObject::invokeMethod
@@ -59,6 +61,7 @@ protected:
     std::unique_ptr<compactphone::sipbackend::PjsipBackend> backend;
     std::unique_ptr<compactphone::sip::AccountsManager> am;
     std::unique_ptr<compactphone::sip::CallManager> cm;
+    std::unique_ptr<compactphone::sipbackend::ListenerFanout> fanout;
     std::unique_ptr<compactphone::models::CallsModel> callsModel;
     std::unique_ptr<compactphone::sip::HistoryManager> hm;
     std::unique_ptr<compactphone::models::HistoryModel> historyModel;
@@ -85,10 +88,15 @@ protected:
         ASSERT_TRUE(db.openInMemory());
 
         backend = std::make_unique<compactphone::sipbackend::PjsipBackend>(&engine);
-        am = std::make_unique<compactphone::sip::AccountsManager>(backend.get(), backend.get(), &db, &kc);
-        backend->setListener(am.get());
+        am = std::make_unique<compactphone::sip::AccountsManager>(backend.get(), &db, &kc);
+        cm = std::make_unique<compactphone::sip::CallManager>(backend.get(), am.get());
+        // Accounts BEFORE calls so an account's bookkeeping is current before
+        // any call event referencing it is dispatched.
+        fanout = std::make_unique<compactphone::sipbackend::ListenerFanout>(
+            std::vector<compactphone::sipbackend::ISipBackendListener *>{am.get(),
+                                                                         cm.get()});
+        backend->setListener(fanout.get());
         am->registerStartupAccounts(); // DB is empty here; call mirrors buildCoreSipGraph order
-        cm = std::make_unique<compactphone::sip::CallManager>(am.get());
         callsModel = std::make_unique<compactphone::models::CallsModel>(cm.get());
         hm = std::make_unique<compactphone::sip::HistoryManager>(&db);
         historyModel = std::make_unique<compactphone::models::HistoryModel>(hm.get());
@@ -110,9 +118,13 @@ protected:
         historyModel.reset();
         hm.reset();
         callsModel.reset();
-        cm.reset();
+        // Quiesce the listener BEFORE the fanout's sinks (cm/am) die — the
+        // fanout holds non-owning pointers to both, so a queued event must
+        // never reach a half-destroyed sink.
         backend->setListener(nullptr);
+        cm.reset();
         am.reset();
+        fanout.reset();
         backend.reset();
         engine.stop();
     }

@@ -17,7 +17,7 @@
 #include <thread>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 
 namespace {
@@ -66,14 +66,14 @@ TEST_F(DtmfTest, SendsRfc2833Digits)
     ASSERT_TRUE(waitForRegState(
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Confirmed;
     }, 15s));
 
@@ -82,7 +82,7 @@ TEST_F(DtmfTest, SendsRfc2833Digits)
     std::this_thread::sleep_for(1s);
 
     cm.hangup(callId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Disconnected;
     }, 5s));
 }
@@ -105,14 +105,14 @@ TEST_F(DtmfTest, SendsSipInfoDigits)
     ASSERT_TRUE(waitForRegState(
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Confirmed;
     }, 15s));
 
@@ -121,7 +121,7 @@ TEST_F(DtmfTest, SendsSipInfoDigits)
     std::this_thread::sleep_for(1s);
 
     cm.hangup(callId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Disconnected;
     }, 5s));
 }

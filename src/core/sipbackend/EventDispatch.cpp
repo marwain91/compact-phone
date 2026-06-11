@@ -1,6 +1,7 @@
 #include "EventDispatch.h"
 
 #include <QObject>
+#include <QTimer>
 
 // Model the happens-before that Qt's queued-connection mutex provides but
 // TSan cannot see because QtCore is uninstrumented.  The annotation is a
@@ -45,6 +46,16 @@ void EventDispatch::post(std::function<void()> fn)
                 fn();
         },
         Qt::QueuedConnection);
+}
+
+void EventDispatch::postDelayed(int delayMs, std::function<void()> fn)
+{
+    const auto epoch = m_epoch.load(std::memory_order_acquire);
+    QTimer::singleShot(delayMs, m_dispatch.get(),
+        [this, epoch, fn = std::move(fn)] {
+            if (epoch == m_epoch.load(std::memory_order_acquire))
+                fn();
+        });
 }
 
 } // namespace compactphone::sipbackend

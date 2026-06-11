@@ -19,7 +19,6 @@
 #include <unordered_map>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
 using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 using compactphone::testsupport::ScopedAccountCallbacks;
@@ -88,13 +87,13 @@ TEST_F(BlindTransferTest, TransfersOngoingCallToEchoExtension)
     ASSERT_TRUE(waitForRegState(
         am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
-    // The incoming-call lambda captures cm; the guard clears the
-    // AccountsManager callbacks before cm dies, ASSERT early-returns included.
+    auto &cm = smp.calls;
+    // The incoming-call signal fires on the main thread from a pumped queued
+    // event; the guard clears the remaining AccountsManager callbacks before
+    // the managers die, ASSERT early-returns included.
     ScopedAccountCallbacks guard(am);
-    am.setOnIncomingCall([&](compactphone::sip::AccountId aid, int pjsipCallId) {
-        incomingId.store(cm.adoptIncomingCall(aid, pjsipCallId));
-    });
+    QObject::connect(&cm, &compactphone::sip::CallManager::incomingCall,
+                     [&incomingId](int id) { incomingId.store(id); });
     cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx);
         observed[id] = s;
@@ -103,10 +102,10 @@ TEST_F(BlindTransferTest, TransfersOngoingCallToEchoExtension)
     auto outboundCall = cm.makeCall(id2, udpTarget("1001"));
     ASSERT_NE(outboundCall, compactphone::sip::kInvalidCallId);
 
-    ASSERT_TRUE(pollUntil([&] { return incomingId.load() > 0; }, 10s));
+    ASSERT_TRUE(pumpUntil([&] { return incomingId.load() > 0; }, 10s));
 
     EXPECT_TRUE(cm.accept(incomingId.load()));
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         std::lock_guard l(mtx);
         return observed[incomingId.load()] == compactphone::sip::CallState::Confirmed &&
                observed[outboundCall] == compactphone::sip::CallState::Confirmed;
@@ -160,11 +159,10 @@ TEST_F(BlindTransferTest, FailedTransferKeepsOriginalCallAlive)
     ASSERT_TRUE(waitForRegState(
         am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     ScopedAccountCallbacks guard(am);
-    am.setOnIncomingCall([&](compactphone::sip::AccountId aid, int pjsipCallId) {
-        incomingId.store(cm.adoptIncomingCall(aid, pjsipCallId));
-    });
+    QObject::connect(&cm, &compactphone::sip::CallManager::incomingCall,
+                     [&incomingId](int id) { incomingId.store(id); });
     cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx);
         observed[id] = s;
@@ -172,9 +170,9 @@ TEST_F(BlindTransferTest, FailedTransferKeepsOriginalCallAlive)
 
     auto outboundCall = cm.makeCall(id2, udpTarget("1001"));
     ASSERT_NE(outboundCall, compactphone::sip::kInvalidCallId);
-    ASSERT_TRUE(pollUntil([&] { return incomingId.load() > 0; }, 10s));
+    ASSERT_TRUE(pumpUntil([&] { return incomingId.load() > 0; }, 10s));
     EXPECT_TRUE(cm.accept(incomingId.load()));
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         std::lock_guard l(mtx);
         return observed[incomingId.load()] == compactphone::sip::CallState::Confirmed &&
                observed[outboundCall] == compactphone::sip::CallState::Confirmed;

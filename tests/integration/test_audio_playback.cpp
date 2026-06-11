@@ -21,7 +21,7 @@
 #include <vector>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 
 namespace {
@@ -131,23 +131,23 @@ TEST_F(AudioPlaybackTest, PlaysAndStopsWavFileOnActiveCall)
     ASSERT_TRUE(waitForRegState(
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Confirmed;
     }, 15s));
     ASSERT_FALSE(cm.isPlayingAudioFile(callId));
 
     // Media may need a moment after CONFIRMED before getMedia() is ACTIVE;
     // playAudioFile returns false until then, so poll the success path.
-    const bool playing = pollUntil([&] {
+    const bool playing = pumpUntil([&] {
         return cm.playAudioFile(callId, wav.toStdString(), /*loop=*/false);
-    }, 5s, 100ms);
+    }, 5s);
     EXPECT_TRUE(playing);
     EXPECT_TRUE(cm.isPlayingAudioFile(callId));
 
@@ -155,7 +155,7 @@ TEST_F(AudioPlaybackTest, PlaysAndStopsWavFileOnActiveCall)
     EXPECT_FALSE(cm.isPlayingAudioFile(callId));
 
     cm.hangup(callId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         return observed.load() == compactphone::sip::CallState::Disconnected;
     }, 5s));
     QFile::remove(wav);
@@ -167,7 +167,7 @@ TEST_F(AudioPlaybackTest, PlayRejectsUnknownCallAndStopWithoutPlayer)
 {
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     EXPECT_FALSE(cm.playAudioFile(9999, "/nonexistent.wav", false));
     EXPECT_FALSE(cm.isPlayingAudioFile(9999));
     EXPECT_FALSE(cm.stopAudioFile(9999)); // nothing to stop

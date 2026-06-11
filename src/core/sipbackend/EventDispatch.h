@@ -3,15 +3,16 @@
 // Queued main-thread event delivery shared by every backend adapter.
 //
 // post(fn) queues fn onto the Qt main thread (the thread that constructed
-// this object). Each queued lambda re-checks the epoch it was posted
-// under; invalidate() bumps the epoch so everything queued before it is
-// dropped. This implements boundary contract rules 2 and 4
+// this object). postDelayed(delayMs, fn) does the same after a timer delay.
+// Each queued lambda re-checks the epoch it was posted under; invalidate()
+// bumps the epoch so everything queued before it (via post or postDelayed)
+// is dropped. This implements boundary contract rules 2 and 4
 // (see ISipBackend.h): events are never delivered synchronously, never
 // re-entrantly, and never after stop()/setListener(nullptr).
 //
-// Destruction safety: the internal QObject is the invokeMethod context —
-// destroying it cancels undelivered lambdas. Two obligations fall on the
-// OWNING class, not on EventDispatch:
+// Destruction safety: the internal QObject is the invokeMethod/timer context —
+// destroying it cancels undelivered lambdas and pending timers. Two
+// obligations fall on the OWNING class, not on EventDispatch:
 //
 //  - Declare the EventDispatch member AFTER every data member that posted
 //    lambdas may capture, so it is destroyed first and cancels them before
@@ -26,8 +27,8 @@
 //    object goes away.
 //
 // Thread-safety: post() may be called from any thread (the PJSIP adapter
-// posts from PJSUA worker threads); invalidate() and destruction are
-// main-thread-only, matching the boundary contract.
+// posts from PJSUA worker threads); postDelayed(), invalidate(), and
+// destruction are main-thread-only, matching the boundary contract.
 
 #include <atomic>
 #include <cstdint>
@@ -50,6 +51,13 @@ public:
     // Precondition: this object is alive and not under destruction (the
     // owner quiesces posting threads first — see the class comment).
     void post(std::function<void()> fn);
+
+    // Queue fn for main-thread delivery after delayMs, under the current
+    // epoch. Cancelled by invalidate() (epoch check when the timer fires)
+    // and by destruction (the internal QObject is the timer context).
+    // Main-thread-only, like invalidate(): the PJSIP adapter uses this for
+    // grace-deferred pj::Call destruction, which is a main-thread concern.
+    void postDelayed(int delayMs, std::function<void()> fn);
 
     // Main-thread only: drop everything queued so far. Non-blocking —
     // lambdas already in the event queue are discarded when they run,

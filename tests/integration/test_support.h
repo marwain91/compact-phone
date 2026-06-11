@@ -23,13 +23,21 @@
 // before that CallManager dies — ScopedAccountCallbacks does this even on
 // an ASSERT early-return.
 //
-// Phase-2 note: integration tests construct their AccountsManager via the
-// SipManagerPair helper below which pairs it with a PjsipBackend.
-// waitForRegState uses pumpUntil (registration state arrives as a queued
-// main-thread event and only advances when the Qt event loop pumps).
+// Phase-3 note: integration tests construct their full SIP stack via the
+// SipManagerPair helper below — a PjsipBackend paired with an AccountsManager,
+// a CallManager, and the ListenerFanout that splits backend events between
+// them. Call events (incoming announcements, call-state, media, transfer) are
+// now queued main-thread deliveries through the backend's EventDispatch, just
+// like registration state: NOTHING at manager altitude advances unless the Qt
+// event loop pumps. So ALL waits on manager-visible call state must pump
+// (pumpUntil), not sleep-poll. Pumping from the main thread cannot re-enter
+// PJSIP callbacks, because those callbacks stop at the adapter's queue boundary
+// — they only enqueue an event, they never call up into a listener inline.
 
 #include "core/AccountsManager.h"
+#include "core/CallManager.h"
 #include "core/SipEngine.h"
+#include "core/sipbackend/ListenerFanout.h"
 #include "core/sipbackend/pjsip/PjsipBackend.h"
 #include "core/platform/Keychain.h"
 #include "persistence/Database.h"
@@ -39,58 +47,56 @@
 #include <chrono>
 #include <initializer_list>
 #include <thread>
+#include <vector>
 
 namespace compactphone::testsupport {
 
-// Pairs a PjsipBackend with an AccountsManager and wires the listener,
+// Pairs a PjsipBackend with the full main-thread SIP stack — an
+// AccountsManager and a CallManager — fanned out through a ListenerFanout,
 // matching the buildCoreSipGraph wiring order (setListener then
-// registerStartupAccounts). Integration tests that need a full
-// engine+accounts stack construct this helper in their fixtures or test
-// bodies instead of building the graph by hand.
+// registerStartupAccounts). Integration tests that need a full engine + call
+// stack construct this helper in their fixtures or test bodies instead of
+// building the graph by hand. Use `smp.calls` as the CallManager — a
+// privately-constructed CallManager would not be wired into the fanout and
+// would never receive an event.
 //
-// Destruction order: manager destructor runs first (quiesces the native
-// hook, removes backend accounts), then backend destructor. The backend
-// does not call engine->stop().
+// Destruction order: fanout's listener slot is cleared first (so no queued
+// event reaches a half-destroyed sink), then calls, manager, fanout, backend
+// destruct in declaration-reverse order. The backend does not call
+// engine->stop().
 struct SipManagerPair {
-    sipbackend::PjsipBackend backend;
-    sip::AccountsManager     manager;
+    sipbackend::PjsipBackend   backend;
+    sip::AccountsManager       manager;
+    sip::CallManager           calls;
+    sipbackend::ListenerFanout fanout;
 
     SipManagerPair(sip::SipEngine *engine,
                    persistence::Database *db,
                    platform::IKeychain *kc)
         : backend(engine)
-        , manager(&backend, &backend, db, kc)
+        , manager(&backend, db, kc)
+        , calls(&backend, &manager)
+        , fanout(std::vector<sipbackend::ISipBackendListener *>{&manager,
+                                                                &calls})
     {
-        // setListener first so queued reg-state events have a destination,
-        // then registerStartupAccounts() — mirrors buildCoreSipGraph order.
-        backend.setListener(&manager);
+        // setListener first so queued reg-state/call events have a
+        // destination, then registerStartupAccounts() — mirrors
+        // buildCoreSipGraph order. Accounts BEFORE calls in the fanout so an
+        // account's bookkeeping is current before any call event referencing
+        // it is handled.
+        backend.setListener(&fanout);
         manager.registerStartupAccounts();
     }
     ~SipManagerPair()
     {
-        // Quiesce listener before manager destructs.
+        // Quiesce listener before the sinks destruct.
         backend.setListener(nullptr);
     }
     SipManagerPair(const SipManagerPair &) = delete;
     SipManagerPair &operator=(const SipManagerPair &) = delete;
 };
 
-// Polls pred every `step` until it holds or `timeout` elapses. Pure sleep
-// polling — use where the original wait blocked without running the Qt
-// event loop (state arrives directly on PJSIP threads).
-template <typename Pred>
-bool pollUntil(Pred pred, std::chrono::milliseconds timeout,
-               std::chrono::milliseconds step = std::chrono::milliseconds(20))
-{
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (pred()) return true;
-        std::this_thread::sleep_for(step);
-    }
-    return pred();
-}
-
-// Like pollUntil, but pumps the Qt event loop each iteration so queued
+// Pumps the Qt event loop each iteration so queued
 // main-thread work (CallManager's invokeMethod handlers, retry timers,
 // the post-disconnect grace timer) actually runs. Requires a live
 // QCoreApplication. The 20ms sleep keeps the instrumented loop from
@@ -136,13 +142,17 @@ inline bool waitForRegState(
 // start. Declare AFTER the CallManager (and any frame-local capture) so it
 // runs first on scope exit — including gtest ASSERT early-returns, which
 // skip any cleanup written after the assertion.
+//
+// No calls-side quiesce is needed: CallManager callbacks (incomingCall and
+// friends) are main-thread-only now — they fire from pumped queued events,
+// never from a PJSIP thread — so there is no in-flight cross-thread callback
+// to barrier against on the call half.
 class ScopedAccountCallbacks {
 public:
     explicit ScopedAccountCallbacks(sip::AccountsManager &am) : m_am(am) {}
     ~ScopedAccountCallbacks()
     {
         m_am.setOnRegistrationStateChanged({});
-        m_am.setOnIncomingCall({});
         m_am.setOnInstantMessage({});
         m_am.setOnMwiChanged({});
     }

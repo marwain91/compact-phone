@@ -1,14 +1,15 @@
 #pragma once
 
-// PJSIP/PJSUA2 implementation of ISipBackend. Phase 2 scope: accounts,
-// registration, MWI, instant messages, incoming-call announcement.
-// Engine-level methods delegate to the borrowed SipEngine (engine
-// ownership migrates in a later phase); call/presence/ringtone methods
-// are explicit phase-3+ stubs that return failure.
+// PJSIP/PJSUA2 implementation of ISipBackend. Scope: accounts,
+// registration, MWI, instant messages, and the full call layer
+// (PjsipCall, hold/unhold re-INVITEs, mute bridge wiring, recording,
+// file playback, transfers, the grace-destruction dance). Presence,
+// ringtone, and log-sink remain phase-5 stubs.
 //
-// pj:: types must not appear in this header's public method signatures
-// EXCEPT the two transitional bridges at the bottom, which exist so
-// CallManager can stay PJSIP-native until phase 3 — see their comments.
+// Engine-level methods delegate to the borrowed SipEngine (engine
+// ownership migrates in a later phase).
+//
+// pj:: types must not appear in this header's public method signatures.
 
 #include "../ISipBackend.h"
 #include "../EventDispatch.h"
@@ -19,8 +20,8 @@
 #include <memory>
 #include <mutex>
 
-// Forward-declare pj::Account to keep pj headers out of the public API.
-namespace pj { class Account; }
+// Forward-declare pj:: types to keep pj headers out of the public API.
+namespace pj { class Account; class AudioMediaRecorder; class AudioMediaPlayer; }
 
 namespace compactphone::sip { class SipEngine; }
 
@@ -67,7 +68,7 @@ public:
     WatchId watch(AccountId accountId, const std::string &uri) override;
     bool unwatch(WatchId id) override;
 
-    // --- calls (phase 3 stubs) ---
+    // --- calls ---
     CallId makeCall(AccountId accountId, const std::string &uri) override;
     bool answer(CallId id) override;
     bool decline(CallId id, int sipCode) override;
@@ -90,28 +91,15 @@ public:
     bool isCaptureTransmitting(CallId id) const override;
     void releaseCall(CallId id) override;
 
-    // --- transitional bridges (NOT on ISipBackend; removed in phase 3) ---
-    // pjAccountFor: AccountsManager forwards this so CallManager can
-    // construct pj::Call against the right pj::Account.
-    //
-    // nativeCallIdFor: currently UNCONSUMED — incoming calls deliver the
-    // native PJSUA call id directly through the synchronous hook, not via
-    // this accessor. The map and accessor are retained for phase-3 call
-    // adoption (makeCall/answer paths) and removed alongside pjAccountFor.
+    // --- presence bridge (NOT on ISipBackend) ---
+    // pjAccountFor: AccountsManager forwards this so LinesManager can create
+    // pj::Buddy presence (BLF) subscriptions against the right pj::Account.
+    // Removed in phase 5 when presence moves behind ISipBackend.
     pj::Account *pjAccountFor(AccountId id);
-    int nativeCallIdFor(CallId id) const;
-
-    // Transitional synchronous incoming-call hook — phase-3-removed alongside
-    // pjAccountFor/nativeCallIdFor. The hook fires ON THE PJSIP THREAD with
-    // (backendAccountId, pjsipCallId). Invocation happens under m_hookMutex,
-    // so setNativeIncomingCallHook({}) is a quiesce barrier: once it returns,
-    // no in-flight hook invocation can still be running and no new one will
-    // start. Mirror of AccountsManager's m_callbackMutex contract. Never call
-    // setNativeIncomingCallHook from inside the hook itself.
-    void setNativeIncomingCallHook(std::function<void(AccountId, int)> hook);
 
 private:
     class PjsipAccount;   // pj::Account subclass; defined in .cpp
+    class PjsipCall;      // pj::Call subclass; defined in .cpp
 
     // Called from PjsipAccount callbacks (PJSUA worker thread).
     // Each helper marshals one event onto the Qt main thread via m_events.
@@ -124,16 +112,29 @@ private:
                             const std::string &body);
     void postMwi(AccountId id, int newMessages, int oldMessages, bool active);
 
+    // Called from PjsipCall callbacks (PJSUA worker thread). postCallState's
+    // posted lambda additionally drops the call's recorder/file player on
+    // Disconnected (main-thread, before notifying the listener) so the WAV
+    // closes promptly even if the manager defers releaseCall.
+    void postCallState(CallId id, CallState s, int sipCode);
+    void postMediaState(CallId id, bool active, bool held);
+    void postTransferStatus(CallId id, int sipCode, bool isFinal,
+                            const std::string &reason);
+
     // Called from PjsipAccount::onIncomingCall (PJSUA worker thread).
-    // Mints a backend CallId, stores the native PJSUA call id under
-    // m_nativeMutex, resolves remote info via the C API, then posts
-    // onIncomingCall to the listener.
-    //
-    // Lock discipline: m_nativeMutex is held ONLY while reading/writing
-    // m_nativeCallIds and m_nextCallId. NEVER call into PJSIP while
-    // holding m_nativeMutex (PJSIP callbacks can re-enter on the same
-    // thread and would deadlock).
-    void announceIncomingCall(AccountId accId, int pjsipCallId);
+    // Constructs the PjsipCall EAGERLY — claiming the INVITE session before
+    // the callback returns (it tears down within ~15 ms unclaimed, after
+    // which answer/decline fail with PJSIP_ESESSIONTERMINATED; this is what
+    // the phase-2 synchronous hook existed for) — then resolves remote info
+    // and posts onIncomingCall with the data pushed.
+    void wrapIncomingCall(PjsipAccount &account, AccountId accId,
+                          int pjsipCallId);
+
+    // Main-thread lookup helper: returns the raw PjsipCall* for id (or
+    // nullptr), taking and releasing m_callsMutex internally.
+    PjsipCall *liveCall(CallId id) const;
+
+    static constexpr int kGraceDestroyMs = 2200;
 
     sip::SipEngine *m_engine;
     ISipBackendListener *m_listener = nullptr;
@@ -141,9 +142,8 @@ private:
     // (e.g. confusing a backend AccountId with a domain DB row id) fail loudly
     // as out-of-range lookups rather than silently hitting the wrong record.
     AccountId m_nextAccountId = 10001;  // offset: domain DB row ids start at 1
-    // m_nextCallId is std::atomic so announceIncomingCall (PJSUA worker
-    // thread) and any future main-thread makeCall can mint ids without
-    // taking m_nativeMutex (which only guards the map itself).
+    // m_nextCallId is std::atomic so wrapIncomingCall (PJSUA worker thread)
+    // and makeCall (main thread) can mint ids without taking m_callsMutex.
     std::atomic<CallId> m_nextCallId{50001};  // offset: distinct from account id space
     std::map<AccountId, std::unique_ptr<PjsipAccount>> m_accounts;
 
@@ -155,25 +155,49 @@ private:
     WatchId m_nextWatchId = 80001;  // offset: distinct from account/call spaces
     std::map<WatchId, AccountId> m_watches;  // watchId → owning backendAccountId
 
-    // Guards m_nativeCallIds. PJSUA worker thread writes (announceIncomingCall),
-    // main thread reads (nativeCallIdFor). Never held while calling into PJSIP.
-    mutable std::mutex m_nativeMutex;
-    // Entries are pruned only by stop() clearing the map in phase 2.
-    // Phase 3's releaseCall takes over per-call pruning when it lands.
-    std::map<CallId, int> m_nativeCallIds;   // incoming announcements, phase-2 only
+    // --- call layer state -------------------------------------------------
+    //
+    // m_calls lock discipline (m_callsMutex):
+    //   - PJSUA worker thread INSERTS only (wrapIncomingCall).
+    //   - Main thread inserts (makeCall), looks up, and is the SOLE ERASER
+    //     (releaseCall, stop). Raw PjsipCall* obtained under the lock on the
+    //     main thread therefore stay valid after unlocking — the same
+    //     argument CallManager::m_mutex used one layer up.
+    //   - NEVER call into PJSIP while holding m_callsMutex — not getInfo,
+    //     not hangup/reinvite/answer, and not a pj::Call or
+    //     pj::AudioMediaPlayer/Recorder destructor. PJSIP holds its own lock
+    //     while dispatching the callbacks that take this mutex; holding it
+    //     across a PJSIP call is a lock-order inversion, and some PJSIP
+    //     calls (hangup, makeCall) re-enter onCallState synchronously on the
+    //     calling thread. Pattern: look up / swap out under the lock,
+    //     release it, then talk to PJSIP.
+    mutable std::mutex m_callsMutex;
+    std::map<CallId, std::unique_ptr<PjsipCall>> m_calls;
 
-    // Guards m_nativeIncomingHook. Declared BEFORE m_events so that the hook
-    // quiesce barrier (setNativeIncomingCallHook({})) is always usable even
-    // after m_events has been invalidated.
-    mutable std::mutex m_hookMutex;
-    std::function<void(AccountId, int)> m_nativeIncomingHook;
+    // Grace-parked calls awaiting deferred destruction — main-thread-only.
+    // releaseCall() parks here and schedules destruction via
+    // m_events.postDelayed(kGraceDestroyMs): destroying a pj::Call
+    // immediately is a use-after-free window, because the queued
+    // onCallState(Disconnected) that led the manager to releaseCall() may
+    // run while the PJSIP thread is still executing the tail of that very
+    // callback — pj::Call's destructor does not synchronize with the
+    // derived-object reads in that tail (caught live by TSan; this is the
+    // relocated CallManager m_graceCalls dance, now adapter-private).
+    std::map<CallId, std::unique_ptr<PjsipCall>> m_graceCalls;
+
+    // Per-call WAV recorders and file players — main-thread-only (commands
+    // are main-thread; teardown happens in releaseCall / the posted
+    // Disconnected lambda / stop, all main-thread). Absorbs CallRecorder
+    // and CallManager::m_players.
+    std::map<CallId, std::unique_ptr<pj::AudioMediaRecorder>> m_recorders;
+    std::map<CallId, std::unique_ptr<pj::AudioMediaPlayer>> m_filePlayers;
 
     // Declared LAST: EventDispatch's internal QObject is the invokeMethod
-    // context — destroying it cancels undelivered lambdas — so it must die
-    // before the maps and other state the lambdas may capture.
-    // PjsipAccount destructors (via m_accounts.clear()) must serialize
-    // against the pjsua lock before m_events dies — see EventDispatch.h's
-    // quiesce contract.
+    // context — destroying it cancels undelivered lambdas and pending timers —
+    // so it must die before the maps and other state the lambdas may capture.
+    // PjsipCall/PjsipAccount destructors (via m_calls/m_accounts.clear()) must
+    // serialize against the pjsua lock before m_events dies — see
+    // EventDispatch.h's quiesce contract.
     EventDispatch m_events;
 };
 

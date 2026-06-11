@@ -18,7 +18,7 @@ protected:
 
 TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
 {
-    compactphone::sip::AccountsManager manager(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager manager(&fake, &db, &kc);
     compactphone::models::AccountsModel model(&manager);
     compactphone::AccountsController controller(&manager, &model);
 
@@ -82,7 +82,7 @@ TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
 
 TEST_F(AccountsControllerTest, UpdateDefaultEnableAndRemoveRefreshModel)
 {
-    compactphone::sip::AccountsManager manager(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager manager(&fake, &db, &kc);
     compactphone::models::AccountsModel model(&manager);
     compactphone::AccountsController controller(&manager, &model);
 
