@@ -83,7 +83,8 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     m_backend = std::make_unique<sipbackend::PjsipBackend>(m_engine.get());
 
     auto core = buildCoreSipGraph(m_backend.get(), m_backend.get(),
-                                  m_db.get(), m_keychain.get(), this);
+                                  m_db.get(), m_keychain.get(),
+                                  m_engine.get(), this);
     m_accounts = std::move(core.accounts);
     m_accountsModel = std::move(core.accountsModel);
     m_accountsController = std::move(core.accountsController);

@@ -529,3 +529,48 @@ TEST_F(AccountsManagerUpdateTest, SetDefaultPersistsSingleDefaultInvariant)
     EXPECT_EQ(defaultId, idB);
     fake.setListener(nullptr);
 }
+
+// Pin the observable: lastRegErrorOf returns empty once an account is
+// unregistered (setEnabled false), even if it previously failed.
+TEST_F(AccountsManagerUpdateTest, UnregisterClearsLastRegError)
+{
+    auto mgr = makeManager();
+    compactphone::sip::Account a;
+    a.username = "1001";
+    a.domain = "pbx.example.com";
+    a.enabled = true;
+    a.registerOnStartup = true;
+    const auto id = mgr->add(a, "secret");
+    ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
+
+    // Find the backend id from the command log.
+    compactphone::sipbackend::AccountId backendId =
+        compactphone::sipbackend::kInvalidAccountId;
+    for (const auto &entry : fake.commandLog()) {
+        if (entry.rfind("addAccount:", 0) == 0) {
+            const auto first = entry.find(':', 11);
+            if (first != std::string::npos)
+                backendId = std::stoi(entry.substr(11, first - 11));
+            break;
+        }
+    }
+    ASSERT_NE(backendId, compactphone::sipbackend::kInvalidAccountId)
+        << "No addAccount entry in command log";
+
+    // Drive a registration failure through the listener path.
+    fake.simulateRegState(backendId, /*regActive=*/false, /*sipCode=*/403,
+                          "Forbidden");
+    pumpEvents();
+
+    EXPECT_EQ(mgr->stateOf(id), compactphone::sip::RegistrationState::Failed);
+    EXPECT_EQ(mgr->lastRegErrorOf(id).code, 403);
+
+    // Disabling the account should unregister it and clear the error.
+    ASSERT_TRUE(mgr->setEnabled(id, false));
+
+    EXPECT_EQ(mgr->stateOf(id), compactphone::sip::RegistrationState::Unregistered);
+    EXPECT_TRUE(mgr->lastRegErrorOf(id).empty())
+        << "lastRegErrorOf must be empty after unregister";
+
+    fake.setListener(nullptr);
+}

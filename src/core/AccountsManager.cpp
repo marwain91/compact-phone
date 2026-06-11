@@ -595,8 +595,13 @@ void AccountsManager::unregisterAccount(AccountId id)
             m_backend->removeAccount(backendId);
         }
         e->registered = false;
-        // Keep the last error readable while unregistered (matches old impl).
+        // Reset to Unregistered and clear the stored error so that a later
+        // re-register starts with a clean slate — matching the old impl where
+        // the error lived on the AccountImpl object that was destroyed on
+        // unregister, making lastRegErrorOf() return RegError{} until the
+        // next failure.
         m_regStates[id] = RegistrationState::Unregistered;
+        m_regErrors.erase(id);
         return;
     }
 }

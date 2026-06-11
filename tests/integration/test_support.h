@@ -106,8 +106,11 @@ bool pumpUntil(Pred pred, std::chrono::milliseconds timeout)
     return pred();
 }
 
-// Waits until stateOf(id) == want for every id. Callback-free: stateOf
-// reads an atomic, so nothing here can interleave with PJSIP threads.
+// Waits until stateOf(id) == want for every id. Callback-free: registration
+// state changes arrive as queued main-thread events (AccountsManager::onRegState
+// posts via the backend listener), so the wait must pump the event loop for
+// state to advance — pumpUntil is used for that in Task 6; until then
+// pollUntil is a compile-clean placeholder that may time out.
 // Tracking CURRENT state (not transition counts) also makes the wait
 // immune to registration flaps — an account that registers, drops, and
 // re-registers can satisfy a "saw Registered N times" count while another
