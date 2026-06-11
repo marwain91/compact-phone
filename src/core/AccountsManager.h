@@ -38,6 +38,25 @@ struct RegError {
     bool empty() const { return code == 0 && reason.empty(); }
 };
 
+// Result of mapping one REGISTER event: the externally visible state plus
+// the lastError value that should be stored alongside it.
+struct RegStateUpdate {
+    RegistrationState state = RegistrationState::Unregistered;
+    RegError error;
+};
+
+// Pure mapping from a REGISTER result to {state, lastError}. Inputs are
+// pj::AccountInfo::regIsActive and the status code/reason from
+// pj::OnRegStateParam (code 0 = no response yet / transport-level event).
+// Error policy: Failed stores {code, reason}; Registered clears the error;
+// Registering and Unregistered preserve `lastError` so the user can still
+// read the failure reason while a retry is in flight. Extracted from
+// AccountImpl::onRegState so the policy is unit-testable without a live
+// PJSIP registration.
+RegStateUpdate mapRegEvent(bool regIsActive, int statusCode,
+                           const std::string &reason,
+                           const RegError &lastError);
+
 // Snapshot of the message-summary state reported by the server via MWI
 // NOTIFY. newMessages == 0 with active == false means "no voicemail".
 struct MwiState {
