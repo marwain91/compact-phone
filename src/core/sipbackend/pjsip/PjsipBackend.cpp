@@ -40,15 +40,18 @@ PjsipBackend::~PjsipBackend() = default;
 
 void PjsipBackend::setListener(ISipBackendListener *listener)
 {
-    m_listener = listener;
-    // setListener(nullptr) is a quiesce barrier: invalidate the epoch so
-    // any lambdas already queued will be dropped when they run (contract
-    // rule 4: no event delivered after setListener(nullptr)).
+    // Quiesce barrier: invalidate first so lambdas queued for the previous
+    // listener no-op when they run (contract rule 4: no event delivered after
+    // setListener(nullptr)), then assign the new listener.
     m_events.invalidate();
+    m_listener = listener;
 }
 
 bool PjsipBackend::start(const EngineConfig &cfg)
 {
+    // NOTE (phase-2 dual-ownership): PhoneController may have already started
+    // SipEngine directly. SipEngine::start() no-ops returning true when already
+    // running, so cfg.sipPort is NOT applied to the live endpoint in that case.
     return m_engine->start(cfg.sipPort);
 }
 
@@ -56,6 +59,10 @@ void PjsipBackend::stop()
 {
     // Drop all accounts first (future Task 4: calls setRegistration(false)).
     m_accounts.clear();
+    // Clear the native-call-id bridge map so a restarted backend starts empty
+    // (contract rule). The id counters stay monotonic by design — they are
+    // never reset so stale numeric ids from before the stop cannot alias new ones.
+    m_nativeCallIds.clear();
     // Invalidate the event queue so nothing queued before this fires.
     m_events.invalidate();
     m_engine->stop();
@@ -75,6 +82,12 @@ void PjsipBackend::setCaTrust(const CaTrust &trust)
     // Store the CA file path. In-memory PEM resolution (Windows ROOT store)
     // happens inside SipEngine::start() — it reads m_caCertBuf there, and
     // that logic does NOT move here. We therefore only forward the file path.
+    // trust.caPem is deliberately not forwarded: SipEngine resolves the
+    // Windows ROOT store internally and owns the in-memory PEM path.
+    //
+    // Ordering note: this value only affects transports created afterwards.
+    // Call setCaTrust() before start() so the shared TLS transport picks it
+    // up; per-account transports read the setting at registration time.
     m_engine->setCaCertFile(trust.caFile);
 }
 
@@ -149,7 +162,6 @@ void PjsipBackend::setLogSink(std::function<void(int, const std::string &)> /*si
 AccountId PjsipBackend::addAccount(const AccountSettings & /*settings*/)
 {
     // Task 4: translate AccountSettings → pj::AccountConfig and register
-    spdlog::warn("PjsipBackend::addAccount: not yet implemented (Task 4)");
     return kInvalidAccountId;
 }
 

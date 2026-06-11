@@ -107,6 +107,9 @@ private:
     // Declared LAST: EventDispatch's internal QObject is the invokeMethod
     // context — destroying it cancels undelivered lambdas — so it must die
     // before the maps and other state the lambdas may capture.
+    // Task-4 note: PjsipAccount destructors (via m_accounts.clear()) must
+    // serialize against the pjsua lock before m_events dies — see
+    // EventDispatch.h's quiesce contract.
     EventDispatch m_events;
 };
 

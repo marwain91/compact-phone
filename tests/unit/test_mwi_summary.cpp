@@ -69,3 +69,13 @@ TEST(MwiSummaryTest, RealisticNotifyBody)
     EXPECT_EQ(s.oldMessages, 0);
     EXPECT_TRUE(s.active);
 }
+
+TEST(MwiSummaryTest, VoiceMessage_ClearedMailbox)
+{
+    // "Voice-Message: 0/0" is a cleared-mailbox NOTIFY: no new, no old,
+    // and active must be false (nothing waiting).
+    const MwiSummary s = parseMwiSummary("Voice-Message: 0/0");
+    EXPECT_EQ(s.newMessages, 0);
+    EXPECT_EQ(s.oldMessages, 0);
+    EXPECT_FALSE(s.active);
+}
