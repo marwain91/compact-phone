@@ -32,6 +32,7 @@ add_executable(test_unit
     unit/test_fake_sip_backend.cpp
     unit/test_fake_backend_contract.cpp
     unit/test_mwi_summary.cpp
+    unit/test_remote_info.cpp
     unit/test_url_dispatcher.cpp
     unit/test_daktela_provider.cpp
     unit/test_provisioning_controller.cpp

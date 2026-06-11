@@ -14,6 +14,7 @@
 #include "../EventDispatch.h"
 
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -96,6 +97,15 @@ public:
     pj::Account *pjAccountFor(AccountId id);
     int nativeCallIdFor(CallId id) const;
 
+    // Transitional synchronous incoming-call hook — phase-3-removed alongside
+    // pjAccountFor/nativeCallIdFor. The hook fires ON THE PJSIP THREAD with
+    // (backendAccountId, pjsipCallId). Invocation happens under m_hookMutex,
+    // so setNativeIncomingCallHook({}) is a quiesce barrier: once it returns,
+    // no in-flight hook invocation can still be running and no new one will
+    // start. Mirror of AccountsManager's m_callbackMutex contract. Never call
+    // setNativeIncomingCallHook from inside the hook itself.
+    void setNativeIncomingCallHook(std::function<void(AccountId, int)> hook);
+
 private:
     class PjsipAccount;   // pj::Account subclass; defined in .cpp
 
@@ -123,17 +133,28 @@ private:
 
     sip::SipEngine *m_engine;
     ISipBackendListener *m_listener = nullptr;
-    AccountId m_nextAccountId = 1;
+    // Backend id spaces are offset well above zero so that id-confusion bugs
+    // (e.g. confusing a backend AccountId with a domain DB row id) fail loudly
+    // as out-of-range lookups rather than silently hitting the wrong record.
+    AccountId m_nextAccountId = 10001;  // offset: domain DB row ids start at 1
     // m_nextCallId is std::atomic so announceIncomingCall (PJSUA worker
     // thread) and any future main-thread makeCall can mint ids without
     // taking m_nativeMutex (which only guards the map itself).
-    std::atomic<CallId> m_nextCallId{1};
+    std::atomic<CallId> m_nextCallId{50001};  // offset: distinct from account id space
     std::map<AccountId, std::unique_ptr<PjsipAccount>> m_accounts;
 
     // Guards m_nativeCallIds. PJSUA worker thread writes (announceIncomingCall),
     // main thread reads (nativeCallIdFor). Never held while calling into PJSIP.
     mutable std::mutex m_nativeMutex;
+    // Entries are pruned only by stop() clearing the map in phase 2.
+    // Phase 3's releaseCall takes over per-call pruning when it lands.
     std::map<CallId, int> m_nativeCallIds;   // incoming announcements, phase-2 only
+
+    // Guards m_nativeIncomingHook. Declared BEFORE m_events so that the hook
+    // quiesce barrier (setNativeIncomingCallHook({})) is always usable even
+    // after m_events has been invalidated.
+    mutable std::mutex m_hookMutex;
+    std::function<void(AccountId, int)> m_nativeIncomingHook;
 
     // Declared LAST: EventDispatch's internal QObject is the invokeMethod
     // context — destroying it cancels undelivered lambdas — so it must die

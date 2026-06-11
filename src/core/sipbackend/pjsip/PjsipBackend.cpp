@@ -1,5 +1,6 @@
 #include "PjsipBackend.h"
 #include "MwiSummary.h"
+#include "RemoteInfo.h"
 
 #include "core/SipEngine.h"
 
@@ -19,8 +20,8 @@ static_assert(!std::is_abstract_v<PjsipBackend>,
 
 // ---------------------------------------------------------------------------
 // Anonymous helpers (formerly in AccountsManager's anonymous namespace)
-// Duplicated here for one commit while AccountsManager still has its own copy.
-// Task 5 will remove AccountsManager's copy.
+// Duplicated until Task 5 rewires AccountsManager — fix translation bugs in
+// BOTH places. Task 5 removes AccountsManager's copy.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -297,41 +298,37 @@ void PjsipBackend::announceIncomingCall(AccountId accId, int pjsipCallId)
         m_nativeCallIds[callId] = pjsipCallId;
     }
 
-    // Resolve remote display info via the PJSUA C API. This is safe to call
-    // on the PJSUA worker thread (the call is in ringing state by now).
-    // If it fails, we still announce the call with empty strings rather than
-    // dropping the announcement.
+    // If a synchronous hook is registered, fire it under m_hookMutex and
+    // return immediately. The hook runs ON THE PJSIP THREAD — the caller
+    // (CallsController/CallManager) adopts the call synchronously here,
+    // which avoids the PJSIP_ESESSIONTERMINATED race that would occur if
+    // adoption were deferred to the main thread. The queued listener
+    // onIncomingCall is suppressed: the hook owner takes responsibility for
+    // the full announcement (it posts its own main-thread notification).
+    {
+        std::lock_guard<std::mutex> lk(m_hookMutex);
+        if (m_nativeIncomingHook) {
+            m_nativeIncomingHook(accId, pjsipCallId);
+            return;
+        }
+    }
+
+    // No hook — resolve remote display info via the PJSUA C API and post
+    // to the listener. This is safe to call on the PJSUA worker thread
+    // (the call is in ringing state by now). If it fails we still announce
+    // with empty strings rather than dropping the announcement.
     std::string remoteUri;
     std::string displayName;
 
     pjsua_call_info ci;
     if (pjsua_call_get_info(static_cast<pjsua_call_id>(pjsipCallId), &ci)
             == PJ_SUCCESS) {
-        // ci.remote_info has the raw SIP Address-of-Record string, which may
-        // be one of:
-        //   "Display Name" <sip:user@host>
-        //   <sip:user@host>
-        //   sip:user@host
+        // ci.remote_info has the raw SIP Address-of-Record string.
         const std::string raw(ci.remote_info.ptr,
                               static_cast<std::size_t>(ci.remote_info.slen));
-        const auto lt = raw.find('<');
-        const auto gt = raw.find('>');
-        if (lt != std::string::npos && gt != std::string::npos && gt > lt) {
-            remoteUri = raw.substr(lt + 1, gt - lt - 1);
-            // Display name is the text before '<'; strip surrounding whitespace
-            // and enclosing double-quotes.
-            std::string dn = raw.substr(0, lt);
-            // Trim trailing whitespace
-            while (!dn.empty() && (dn.back() == ' ' || dn.back() == '\t'))
-                dn.pop_back();
-            // Strip enclosing quotes
-            if (dn.size() >= 2 && dn.front() == '"' && dn.back() == '"')
-                dn = dn.substr(1, dn.size() - 2);
-            displayName = dn;
-        } else {
-            // No angle brackets — the whole string is the URI
-            remoteUri = raw;
-        }
+        const auto ri = parseRemoteInfo(raw);
+        remoteUri    = ri.uri;
+        displayName  = ri.displayName;
     } else {
         spdlog::warn("PjsipBackend::announceIncomingCall: "
                      "pjsua_call_get_info failed for pjsip call id {}",
@@ -359,6 +356,8 @@ AccountId PjsipBackend::addAccount(const AccountSettings &settings)
         return kInvalidAccountId;
     }
 
+    // NOTE: this translation block is duplicated until Task 5 rewires
+    // AccountsManager — fix translation bugs in BOTH places.
     pj::AccountConfig acfg;
     const bool tls = settings.transport == Transport::Tls;
     const std::string scheme = tls ? "sips:" : "sip:";
@@ -476,6 +475,11 @@ AccountId PjsipBackend::addAccount(const AccountSettings &settings)
 
 bool PjsipBackend::removeAccount(AccountId id)
 {
+    // Stale queued onRegState/onMwi events for the removed id are expected
+    // after this returns: setRegistration(false) fires a final reg event that
+    // may arrive on the main thread after the pj::Account is gone. Listener-
+    // side lookups (AccountsManager) must therefore tolerate unknown ids
+    // gracefully rather than treating them as errors.
     const auto it = m_accounts.find(id);
     if (it == m_accounts.end()) return false;
     try {
@@ -489,7 +493,9 @@ bool PjsipBackend::sendMessage(AccountId id, const std::string &toUri,
                                const std::string &body)
 {
     const auto it = m_accounts.find(id);
-    if (it == m_accounts.end() || !it->second) return false;
+    if (it == m_accounts.end()) return false;
+    // Every stored unique_ptr is non-null by construction (addAccount always
+    // moves a freshly created unique_ptr into the map).
 
     // PJSUA2 only exposes sendInstantMessage on Buddy/Call (i.e. inside
     // an existing dialog/subscription). For one-shot out-of-dialog
@@ -650,6 +656,12 @@ void PjsipBackend::releaseCall(CallId /*id*/)
 // ---------------------------------------------------------------------------
 // Transitional bridges — removed in phase 3
 // ---------------------------------------------------------------------------
+
+void PjsipBackend::setNativeIncomingCallHook(std::function<void(AccountId, int)> hook)
+{
+    std::lock_guard<std::mutex> lk(m_hookMutex);
+    m_nativeIncomingHook = std::move(hook);
+}
 
 pj::Account *PjsipBackend::pjAccountFor(AccountId id)
 {
