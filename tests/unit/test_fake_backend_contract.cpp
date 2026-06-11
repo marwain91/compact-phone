@@ -1,5 +1,9 @@
 // Instantiates the backend-agnostic contract suite against the fake.
 // Phases 2/3 add a PJSIP instantiation in the integration environment.
+//
+// Each instantiation TU supplies its backend's environment (e.g.
+// QCoreApplication) inside its factory lambda, before constructing the
+// backend.
 #include "sip_backend_contract.h"
 
 #include "core/sipbackend/fake/FakeSipBackend.h"
@@ -22,12 +26,11 @@ static QCoreApplication *ensureApp()
     return app;
 }
 
-// Force app construction at static-init time so it precedes any test.
-static QCoreApplication *s_app = ensureApp();
-
 INSTANTIATE_TEST_SUITE_P(
     Fake, SipBackendContract,
-    ::testing::Values(BackendFactory{
-        [] { return std::make_unique<FakeSipBackend>(); }}));
+    ::testing::Values(BackendFactory{[] -> std::unique_ptr<ISipBackend> {
+        ensureApp();
+        return std::make_unique<FakeSipBackend>();
+    }}));
 
 } // namespace compactphone::sipbackend::testing

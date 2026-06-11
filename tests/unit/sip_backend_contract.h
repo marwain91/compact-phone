@@ -8,6 +8,9 @@
 //
 // Tests here must not depend on a remote peer or on fake-only scripting;
 // they assert lifecycle, argument validation, and id-lifetime rules.
+// Include this header from exactly one TU per test binary (TEST_P emits
+// definitions); co-resident backends share that TU with multiple
+// INSTANTIATE calls.
 
 #include "core/sipbackend/ISipBackend.h"
 
@@ -75,13 +78,22 @@ TEST_P(SipBackendContract, CallOpsOnUnknownIdsAreSafeAndFalse)
     EXPECT_FALSE(backend->setMuted(bogus, true));
     EXPECT_FALSE(backend->sendDtmf(bogus, "1", DtmfMethod::Rfc2833));
     EXPECT_FALSE(backend->blindTransfer(bogus, "sip:x@y"));
+    EXPECT_FALSE(backend->redirect(bogus, "sip:x@y"));
+    EXPECT_FALSE(backend->attendedTransfer(bogus, bogus));
+    EXPECT_FALSE(backend->bridge(bogus, bogus));
     EXPECT_FALSE(backend->startRecording(bogus, "/tmp/x.wav"));
+    EXPECT_FALSE(backend->stopRecording(bogus));
+    EXPECT_FALSE(backend->playFile(bogus, "/tmp/x.wav", false));
+    EXPECT_FALSE(backend->stopFile(bogus));
     EXPECT_FALSE(backend->isMediaActive(bogus));
     EXPECT_FALSE(backend->isCaptureTransmitting(bogus));
     backend->hangup(bogus);       // must not crash
     backend->releaseCall(bogus);  // must not crash
     StreamStats s = backend->streamStats(bogus);
     EXPECT_DOUBLE_EQ(s.mos, -1.0);
+    EXPECT_DOUBLE_EQ(s.lossPct, -1.0);
+    EXPECT_EQ(s.rttMs, -1);
+    EXPECT_EQ(s.jitterMs, -1);
 }
 
 TEST_P(SipBackendContract, MakeCallRequiresKnownAccount)
@@ -113,6 +125,47 @@ TEST_P(SipBackendContract, WatchRequiresKnownAccount)
     ASSERT_NE(w, kInvalidWatchId);
     EXPECT_TRUE(backend->unwatch(w));
     EXPECT_FALSE(backend->unwatch(w));
+}
+
+TEST_P(SipBackendContract, StopWithoutStartIsSafe)
+{
+    backend->stop();   // never started: must not crash
+    EXPECT_FALSE(backend->isRunning());
+}
+
+TEST_P(SipBackendContract, MakeCallRequiresRunningEngine)
+{
+    EXPECT_EQ(backend->makeCall(1, "sip:x@y"), kInvalidCallId);
+}
+
+TEST_P(SipBackendContract, StopDropsAllState)
+{
+    // ISipBackend stop(): "drops all accounts, calls, and watches — a
+    // restarted backend starts empty."
+    backend->start(EngineConfig{});
+    const auto acc = backend->addAccount(contractAccount());
+    ASSERT_NE(acc, kInvalidAccountId);
+    backend->stop();
+    backend->start(EngineConfig{});
+    EXPECT_FALSE(backend->removeAccount(acc));
+    EXPECT_EQ(backend->watch(acc, "sip:line@x"), kInvalidWatchId);
+    EXPECT_EQ(backend->makeCall(acc, "sip:x@y"), kInvalidCallId);
+}
+
+TEST_P(SipBackendContract, AccountOpsAfterStopAreRefused)
+{
+    backend->start(EngineConfig{});
+    backend->stop();
+    EXPECT_EQ(backend->addAccount(contractAccount()), kInvalidAccountId);
+}
+
+TEST_P(SipBackendContract, WatchOnRemovedAccountIsRefused)
+{
+    backend->start(EngineConfig{});
+    const auto acc = backend->addAccount(contractAccount());
+    ASSERT_TRUE(backend->removeAccount(acc));
+    EXPECT_EQ(backend->watch(acc, "sip:line@x"), kInvalidWatchId);
+    EXPECT_FALSE(backend->sendMessage(acc, "sip:x@y", "hi"));
 }
 
 } // namespace compactphone::sipbackend::testing
