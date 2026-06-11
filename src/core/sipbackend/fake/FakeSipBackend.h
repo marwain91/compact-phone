@@ -6,22 +6,22 @@
 // contract: queued onto the Qt main thread, dropped after stop() /
 // setListener(nullptr).
 //
-// Main-thread-only, like every backend consumer. The epoch counter is
-// how queued lambdas detect they were invalidated: stop() and
-// setListener() bump it, and a lambda only fires if its captured epoch
-// still matches. Destruction safety comes from m_dispatch being the
-// invokeMethod context — destroying it cancels undelivered lambdas —
-// so it must never be replaced with an app-global context.
+// Main-thread-only, like every backend consumer. Event queuing and
+// invalidation are handled by EventDispatch (see EventDispatch.h):
+// stop() and setListener() call m_events.invalidate(), which bumps
+// the epoch so lambdas queued before it are dropped. Destruction safety
+// comes from EventDispatch::m_dispatch being the invokeMethod context —
+// destroying it cancels undelivered lambdas — so m_events is declared
+// LAST among data members so it dies first.
 
 #include "../ISipBackend.h"
+#include "../EventDispatch.h"
 
 #include <functional>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
-
-class QObject;
 
 namespace compactphone::sipbackend {
 
@@ -142,9 +142,7 @@ private:
     FakeCall *liveCall(CallId id);
 
     bool m_running = false;
-    std::uint64_t m_epoch = 0;
     ISipBackendListener *m_listener = nullptr;
-    std::unique_ptr<QObject> m_dispatch;
 
     CaTrust m_caTrust;
     std::vector<std::string> m_stunServers;
@@ -161,6 +159,11 @@ private:
     std::map<CallId, FakeCall> m_calls;
     std::map<WatchId, std::string> m_watches;
     std::vector<std::string> m_log;
+
+    // Declared LAST: EventDispatch's internal QObject is the invokeMethod
+    // context — destroying it cancels undelivered lambdas — so it must die
+    // before the maps and other state the lambdas may capture.
+    EventDispatch m_events;
 };
 
 } // namespace compactphone::sipbackend
