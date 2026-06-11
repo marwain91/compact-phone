@@ -176,7 +176,7 @@ void FakeSipBackend::simulatePresence(WatchId id, PresenceState state)
 FakeSipBackend::FakeCall *FakeSipBackend::liveCall(CallId id)
 {
     auto it = m_calls.find(id);
-    if (it == m_calls.end() || it->second.released)
+    if (it == m_calls.end())
         return nullptr;
     return &it->second;
 }
@@ -220,8 +220,7 @@ CallId FakeSipBackend::simulateIncomingCall(AccountId accountId,
 bool FakeSipBackend::answer(CallId id)
 {
     auto *c = liveCall(id);
-    if (!c || !c->inbound || c->state == CallState::Confirmed
-        || c->state == CallState::Disconnected)
+    if (!c || !c->inbound || c->state != CallState::EarlyMedia)
         return false;
     logCmd("answer:" + std::to_string(id));
     c->state = CallState::Confirmed;
@@ -249,8 +248,7 @@ void FakeSipBackend::simulateRemoteAnswer(CallId id)
 bool FakeSipBackend::decline(CallId id, int sipCode)
 {
     auto *c = liveCall(id);
-    if (!c || !c->inbound || c->state == CallState::Confirmed
-        || c->state == CallState::Disconnected)
+    if (!c || !c->inbound || c->state != CallState::EarlyMedia)
         return false;
     logCmd("decline:" + std::to_string(id) + ":" + std::to_string(sipCode));
     c->state = CallState::Disconnected;
@@ -263,8 +261,7 @@ bool FakeSipBackend::decline(CallId id, int sipCode)
 bool FakeSipBackend::redirect(CallId id, const std::string &contactUri)
 {
     auto *c = liveCall(id);
-    if (!c || !c->inbound || c->state == CallState::Confirmed
-        || c->state == CallState::Disconnected)
+    if (!c || !c->inbound || c->state != CallState::EarlyMedia)
         return false;
     logCmd("redirect:" + std::to_string(id) + ":" + contactUri);
     c->state = CallState::Disconnected;
@@ -279,11 +276,14 @@ void FakeSipBackend::hangup(CallId id)
     auto *c = liveCall(id);
     if (!c || c->state == CallState::Disconnected)
         return;
+    // 487 Request Terminated = pre-answer cancel; 200 = normal teardown of
+    // an established call. Capture before mutating state.
+    const int code = (c->state == CallState::Confirmed) ? 200 : 487;
     logCmd("hangup:" + std::to_string(id));
     c->state = CallState::Disconnected;
     c->mediaActive = false;
-    post([this, id] {
-        m_listener->onCallState(id, CallState::Disconnected, 200);
+    post([this, id, code] {
+        m_listener->onCallState(id, CallState::Disconnected, code);
     });
 }
 
@@ -358,7 +358,10 @@ bool FakeSipBackend::attendedTransfer(CallId id, CallId otherId)
 {
     auto *a = liveCall(id);
     auto *b = liveCall(otherId);
-    if (!a || !b || a->state != CallState::Confirmed)
+    // Both legs must be Confirmed: the transfer target is a held (Confirmed)
+    // call, and the transferring leg must also be active (Confirmed).
+    if (!a || !b || a->state != CallState::Confirmed
+        || b->state != CallState::Confirmed)
         return false;
     logCmd("attendedTransfer:" + std::to_string(id) + ":"
            + std::to_string(otherId));
@@ -369,6 +372,7 @@ bool FakeSipBackend::bridge(CallId id, CallId otherId)
 {
     auto *a = liveCall(id);
     auto *b = liveCall(otherId);
+    // Both legs must be Confirmed before bridging.
     if (!a || !b || a->state != CallState::Confirmed
         || b->state != CallState::Confirmed)
         return false;
@@ -379,6 +383,7 @@ bool FakeSipBackend::bridge(CallId id, CallId otherId)
 bool FakeSipBackend::startRecording(CallId id, const std::string &path)
 {
     auto *c = liveCall(id);
+    // Confirmed (not mediaActive) guard: record-arm on a held call is allowed.
     if (!c || c->state != CallState::Confirmed || c->recording)
         return false;
     logCmd("startRecording:" + std::to_string(id) + ":" + path);
@@ -400,6 +405,8 @@ bool FakeSipBackend::playFile(CallId id, const std::string &path, bool loop)
 {
     (void)loop;
     auto *c = liveCall(id);
+    // mediaActive guard (not Confirmed): playing audio requires an active
+    // media session; it is not meaningful on a held call.
     if (!c || !c->mediaActive)
         return false;
     logCmd("playFile:" + std::to_string(id) + ":" + path);
@@ -433,21 +440,19 @@ StreamStats FakeSipBackend::streamStats(CallId id) const
 bool FakeSipBackend::isMediaActive(CallId id) const
 {
     auto it = m_calls.find(id);
-    return it != m_calls.end() && !it->second.released
-        && it->second.mediaActive;
+    return it != m_calls.end() && it->second.mediaActive;
 }
 
 bool FakeSipBackend::isCaptureTransmitting(CallId id) const
 {
     auto it = m_calls.find(id);
-    return it != m_calls.end() && !it->second.released
-        && it->second.mediaActive && !it->second.muted;
+    return it != m_calls.end() && it->second.mediaActive && !it->second.muted;
 }
 
 void FakeSipBackend::releaseCall(CallId id)
 {
-    logCmd("releaseCall:" + std::to_string(id));
-    m_calls.erase(id);
+    if (m_calls.erase(id) != 0)
+        logCmd("releaseCall:" + std::to_string(id));
 }
 
 void FakeSipBackend::simulateTransferStatus(CallId id, int sipCode,

@@ -12,6 +12,9 @@
 //     until releaseCall(). Backends defer real teardown internally.
 //  4. After stop() returns no listener invocation is in flight and none
 //     will be delivered.
+//  5. Teardown emits only onCallState(Disconnected); media inactivity is
+//     implied. Backends must not emit a separate onMediaState event when
+//     a call ends.
 
 #include "Types.h"
 

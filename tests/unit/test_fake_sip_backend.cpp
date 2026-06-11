@@ -327,3 +327,55 @@ TEST_F(FakeCallTest, RemoteHangupDeliversDisconnectWithCode)
                   callEvent(id, CallState::Disconnected, 200)}));
     EXPECT_EQ(backend.callInfo(id).state, CallState::Disconnected);
 }
+
+TEST_F(FakeCallTest, CommandLogRecordsIssuedOperations)
+{
+    const auto id = backend.makeCall(account, "sip:200@example.test");
+    backend.simulateRemoteAnswer(id);   // remote-side: must NOT be logged
+    pumpEvents();
+    EXPECT_TRUE(backend.hold(id));
+    EXPECT_TRUE(backend.unhold(id));
+    EXPECT_TRUE(backend.blindTransfer(id, "sip:300@example.test"));
+    EXPECT_TRUE(backend.startRecording(id, "/tmp/rec.wav"));
+    EXPECT_TRUE(backend.stopRecording(id));
+
+    const auto &log = backend.commandLog();
+    // The account add from SetUp() is entry 0.
+    const std::vector<std::string> expected{
+        "addAccount:" + std::to_string(account) + ":100",
+        "makeCall:" + std::to_string(id) + ":sip:200@example.test",
+        "hold:" + std::to_string(id),
+        "unhold:" + std::to_string(id),
+        "blindTransfer:" + std::to_string(id) + ":sip:300@example.test",
+        "startRecording:" + std::to_string(id) + ":/tmp/rec.wav",
+        "stopRecording:" + std::to_string(id),
+    };
+    EXPECT_EQ(log, expected);
+}
+
+TEST_F(FakeCallTest, HangupBeforeAnswerReports487)
+{
+    const auto id = backend.makeCall(account, "sip:200@example.test");
+    pumpEvents();
+    listener.events.clear();
+
+    backend.hangup(id);   // pre-answer cancel
+    pumpEvents();
+    EXPECT_EQ(listener.events,
+              (std::vector<std::string>{
+                  callEvent(id, CallState::Disconnected, 487)}));
+}
+
+TEST_F(FakeCallTest, LocalHangupEmitsOnlyDisconnect)
+{
+    const auto id = backend.makeCall(account, "sip:200@example.test");
+    backend.simulateRemoteAnswer(id);
+    pumpEvents();
+    listener.events.clear();
+
+    backend.hangup(id);
+    pumpEvents();
+    EXPECT_EQ(listener.events,
+              (std::vector<std::string>{
+                  callEvent(id, CallState::Disconnected, 200)}));
+}

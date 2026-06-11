@@ -121,7 +121,6 @@ public:
         bool mediaActive = false;
         bool recording = false;
         bool playingFile = false;
-        bool released = false;
         std::string dtmfSent;
     };
     // Empty optional-like: callExists() guards lookups.
