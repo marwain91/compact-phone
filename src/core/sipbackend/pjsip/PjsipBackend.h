@@ -13,8 +13,10 @@
 #include "../ISipBackend.h"
 #include "../EventDispatch.h"
 
+#include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 
 // Forward-declare pj::Account to keep pj headers out of the public API.
 namespace pj { class Account; }
@@ -54,11 +56,11 @@ public:
     void stopRingtone() override;                          // phase 5 stub: no-op
     void setLogSink(std::function<void(int, const std::string &)> sink) override; // phase 5 stub: no-op
 
-    // --- accounts (Task 4) ---
-    AccountId addAccount(const AccountSettings &settings) override; // Task 4
-    bool removeAccount(AccountId id) override;                      // Task 4
+    // --- accounts ---
+    AccountId addAccount(const AccountSettings &settings) override;
+    bool removeAccount(AccountId id) override;
     bool sendMessage(AccountId id, const std::string &toUri,
-                     const std::string &body) override;             // Task 4
+                     const std::string &body) override;
 
     // --- presence (phase 5 stubs) ---
     WatchId watch(AccountId accountId, const std::string &uri) override;
@@ -91,25 +93,54 @@ public:
     // CallManager still constructs pj::Call against the pj::Account and
     // adopts incoming calls by native PJSUA call id. AccountsManager
     // forwards these for it. Both die when the calls path lands.
-    pj::Account *pjAccountFor(AccountId id);           // Task 4; returns nullptr for now
-    int nativeCallIdFor(CallId id) const;               // Task 4; returns -1 for now
+    pj::Account *pjAccountFor(AccountId id);
+    int nativeCallIdFor(CallId id) const;
 
 private:
-    class PjsipAccount;   // pj::Account subclass; lands in Task 4
+    class PjsipAccount;   // pj::Account subclass; defined in .cpp
+
+    // Called from PjsipAccount callbacks (PJSUA worker thread).
+    // Each helper marshals one event onto the Qt main thread via m_events.
+    // The listener null-check lives inside the posted lambda (same pattern
+    // as FakeSipBackend::post) — the listener may be cleared between the
+    // post() and the delivery.
+    void postRegState(AccountId id, bool regIsActive, int sipCode,
+                      const std::string &reason);
+    void postInstantMessage(AccountId id, const std::string &fromUri,
+                            const std::string &body);
+    void postMwi(AccountId id, int newMessages, int oldMessages, bool active);
+
+    // Called from PjsipAccount::onIncomingCall (PJSUA worker thread).
+    // Mints a backend CallId, stores the native PJSUA call id under
+    // m_nativeMutex, resolves remote info via the C API, then posts
+    // onIncomingCall to the listener.
+    //
+    // Lock discipline: m_nativeMutex is held ONLY while reading/writing
+    // m_nativeCallIds and m_nextCallId. NEVER call into PJSIP while
+    // holding m_nativeMutex (PJSIP callbacks can re-enter on the same
+    // thread and would deadlock).
+    void announceIncomingCall(AccountId accId, int pjsipCallId);
 
     sip::SipEngine *m_engine;
     ISipBackendListener *m_listener = nullptr;
     AccountId m_nextAccountId = 1;
-    CallId m_nextCallId = 1;
+    // m_nextCallId is std::atomic so announceIncomingCall (PJSUA worker
+    // thread) and any future main-thread makeCall can mint ids without
+    // taking m_nativeMutex (which only guards the map itself).
+    std::atomic<CallId> m_nextCallId{1};
     std::map<AccountId, std::unique_ptr<PjsipAccount>> m_accounts;
+
+    // Guards m_nativeCallIds. PJSUA worker thread writes (announceIncomingCall),
+    // main thread reads (nativeCallIdFor). Never held while calling into PJSIP.
+    mutable std::mutex m_nativeMutex;
     std::map<CallId, int> m_nativeCallIds;   // incoming announcements, phase-2 only
 
     // Declared LAST: EventDispatch's internal QObject is the invokeMethod
     // context — destroying it cancels undelivered lambdas — so it must die
     // before the maps and other state the lambdas may capture.
-    // Task-4 note: PjsipAccount destructors (via m_accounts.clear()) must
-    // serialize against the pjsua lock before m_events dies — see
-    // EventDispatch.h's quiesce contract.
+    // PjsipAccount destructors (via m_accounts.clear()) must serialize
+    // against the pjsua lock before m_events dies — see EventDispatch.h's
+    // quiesce contract.
     EventDispatch m_events;
 };
 
