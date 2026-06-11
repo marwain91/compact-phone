@@ -4,6 +4,7 @@
 #include "core/AccountsManager.h"
 #include "core/SipEngine.h"
 #include "core/platform/Keychain_memory.h"
+#include "core/sipbackend/pjsip/PjsipBackend.h"
 #include "persistence/Database.h"
 
 #include "test_support.h"
@@ -47,7 +48,8 @@ protected:
 
 TEST_F(RegisterTlsTest, RegistersOverTlsWithSelfSignedCert)
 {
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &mgr = smp.manager;
 
     compactphone::sip::Account a;
     a.displayName = "Test TLS";
@@ -81,7 +83,8 @@ TEST_F(RegisterTlsTest, RejectsSelfSignedCertWhenVerificationRequired)
     std::atomic<bool> sawRegistered{false};
     std::atomic<bool> sawFailed{false};
 
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &mgr = smp.manager;
     mgr.setOnRegistrationStateChanged([&](auto, auto s) {
         if (s == compactphone::sip::RegistrationState::Registered) {
             sawRegistered.store(true);
@@ -127,7 +130,9 @@ TEST(RegisterTlsVerifiedTest, AcceptsTrustedCaSignedCertWithVerificationOn)
     compactphone::persistence::Database db;
     ASSERT_TRUE(db.openInMemory());
     compactphone::platform::MemoryKeychain kc;
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::sipbackend::PjsipBackend backend(&engine);
+    compactphone::sip::AccountsManager mgr(&backend, &backend, &db, &kc);
+    backend.setListener(&mgr);
 
     compactphone::sip::Account a;
     a.displayName = "Test TLS verified";
@@ -146,5 +151,6 @@ TEST(RegisterTlsVerifiedTest, AcceptsTrustedCaSignedCertWithVerificationOn)
         mgr, {id}, compactphone::sip::RegistrationState::Registered, 20s));
 
     mgr.remove(id);
+    backend.setListener(nullptr);
     engine.stop();
 }

@@ -48,7 +48,8 @@ TEST_F(OutboundCallTest, CallsEchoExtensionAndHangsUp)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
 
     compactphone::sip::Account a;
     a.displayName = "Test 1001";

@@ -395,13 +395,14 @@ AccountId PjsipBackend::addAccount(const AccountSettings &settings)
                                        + settings.publicAddress;
     }
 
-    // Task 5: STUN opt-in moves to AccountSettings.
-    // AccountSettings has no stunServer field (Types.h is not modified in
-    // this task). STUN use for per-account scope is therefore deferred.
-    // For now, leave sipStunUse/mediaStunUse at their PJSUA defaults
-    // (PJSUA_STUN_USE_DEFAULT when a STUN server is configured engine-wide).
-    // The field will be added to AccountSettings in Task 5 when
-    // AccountsManager builds AccountSettings from Account.
+    // STUN opt-in: when AccountsManager sets useStun (from !stunServer.empty()),
+    // ask PJSIP to use the global STUN config for this account.
+    // The STUN server itself must be set at endpoint init time (SipEngine::start).
+    // Per-account dynamic STUN isn't exposed by PJSUA2 — that's a v1 enhancement.
+    if (settings.useStun) {
+        acfg.natConfig.sipStunUse = PJSUA_STUN_USE_DEFAULT;
+        acfg.natConfig.mediaStunUse = PJSUA_STUN_USE_DEFAULT;
+    }
 
     if (settings.iceEnabled) {
         acfg.natConfig.iceEnabled = true;

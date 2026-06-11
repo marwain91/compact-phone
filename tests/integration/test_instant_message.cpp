@@ -66,7 +66,8 @@ TEST_F(InstantMessageTest, AccountToAccountRoundTripDeliversBody)
     Received got;
     bool gotMessage = false;
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     auto mkAccount = [&](const std::string &user, const std::string &pwd,
                          bool isDefault) {
         compactphone::sip::Account a;
@@ -116,6 +117,7 @@ TEST_F(InstantMessageTest, AccountToAccountRoundTripDeliversBody)
 
 TEST_F(InstantMessageTest, SendFailsWhenAccountUnknown)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     EXPECT_FALSE(am.sendInstantMessage(9999, "sip:1001@x", "hi"));
 }

@@ -64,7 +64,8 @@ TEST_F(InboundCallTest, ReceivesAndAcceptsCallFromSecondAccount)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
 
     auto mkAccount = [&](const std::string &user, const std::string &pwd, bool isDefault) {
         compactphone::sip::Account a;

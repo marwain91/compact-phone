@@ -69,7 +69,8 @@ TEST_F(CallRecordingTest, RecordsActiveCallToWavFile)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::Account a;
     a.displayName = "Rec";
     a.username = "1001";
@@ -133,7 +134,8 @@ TEST_F(CallRecordingTest, EraseCallCleansUpActiveRecorder)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::Account a;
     a.displayName = "Rec";
     a.username = "1001"; a.domain = sipServer();

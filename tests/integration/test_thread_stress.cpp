@@ -67,7 +67,8 @@ protected:
 // adoption, and duplicate CallIds from an unguarded m_nextId++.
 TEST_F(ThreadStressTest, AdoptionRacesSnapshotPolling)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
 
     auto mkAccount = [&](const std::string &user, const std::string &pwd,
                          bool isDefault) {
@@ -192,7 +193,8 @@ TEST_F(ThreadStressTest, AdoptionRacesSnapshotPolling)
 // destructors safe while events are still arriving.
 TEST_F(ThreadStressTest, CallbackReassignmentRacesDelivery)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
 
     auto mkAccount = [&](const std::string &user, const std::string &pwd,
                          bool isDefault) {

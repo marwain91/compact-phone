@@ -10,7 +10,7 @@
 // too (this accounted for all 29 baseline failures when the gate widened
 // from ThreadStressTest to the full suite). Safe shapes instead:
 //
-//   - registration waits: poll AccountsManager::stateOf() (an atomic read)
+//   - registration waits: poll AccountsManager::stateOf()
 //     with no callback installed at all — waitForRegState below
 //   - scalar observations: std::atomic written in the callback, polled here
 //   - keyed observations (per-call state maps): a plain mutex held briefly
@@ -22,8 +22,18 @@
 // AccountsManager callbacks that capture a CallManager must be cleared
 // before that CallManager dies — ScopedAccountCallbacks does this even on
 // an ASSERT early-return.
+//
+// Phase-2 note: integration tests construct their AccountsManager via the
+// makeAccountsManager() factory below which pairs it with a PjsipBackend.
+// waitForRegState uses pumpUntil in Task 6 (registration state now arrives
+// as a queued main-thread event); for now the suite is compile-clean but
+// registration waits may time-out until Task 6 pumps the event loop.
 
 #include "core/AccountsManager.h"
+#include "core/SipEngine.h"
+#include "core/sipbackend/pjsip/PjsipBackend.h"
+#include "core/platform/Keychain.h"
+#include "persistence/Database.h"
 
 #include <QCoreApplication>
 
@@ -32,6 +42,37 @@
 #include <thread>
 
 namespace compactphone::testsupport {
+
+// Phase-2 transitional helper: pairs a PjsipBackend with an AccountsManager
+// and wires the listener, so integration tests can switch away from the old
+// AccountsManager(engine, db, kc) three-arg constructor in a single-line
+// change. Task 6 will inline this wiring into the fixture classes; for now
+// it keeps the "DO NOT touch integration" goal limited to the semantic
+// changes (pumpUntil registration waits).
+//
+// Destruction order: manager destructor runs first (quiesces the native
+// hook, removes backend accounts), then backend destructor. The backend
+// does not call engine->stop().
+struct SipManagerPair {
+    sipbackend::PjsipBackend backend;
+    sip::AccountsManager     manager;
+
+    SipManagerPair(sip::SipEngine *engine,
+                   persistence::Database *db,
+                   platform::IKeychain *kc)
+        : backend(engine)
+        , manager(&backend, &backend, db, kc)
+    {
+        backend.setListener(&manager);
+    }
+    ~SipManagerPair()
+    {
+        // Quiesce listener before manager destructs.
+        backend.setListener(nullptr);
+    }
+    SipManagerPair(const SipManagerPair &) = delete;
+    SipManagerPair &operator=(const SipManagerPair &) = delete;
+};
 
 // Polls pred every `step` until it holds or `timeout` elapses. Pure sleep
 // polling — use where the original wait blocked without running the Qt

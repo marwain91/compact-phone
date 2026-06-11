@@ -39,7 +39,8 @@ protected:
 
 TEST_F(RegisterUdpTest, RegistersExtension1001)
 {
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &mgr = smp.manager;
 
     compactphone::sip::Account a;
     a.displayName = "Test 1001";
@@ -61,7 +62,8 @@ TEST_F(RegisterUdpTest, RegistersExtension1001)
 
 TEST_F(RegisterUdpTest, RejectsInvalidPassword)
 {
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &mgr = smp.manager;
 
     compactphone::sip::Account a;
     a.displayName = "Bad Password";

@@ -30,6 +30,7 @@
 #include "models/LinesModel.h"
 #include "persistence/Database.h"
 #include "platform/Keychain_factory.h"
+#include "sipbackend/pjsip/PjsipBackend.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -76,8 +77,13 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     if (!m_engine->start(0)) {
         spdlog::error("PhoneController: SipEngine failed to start");
     }
+    // PjsipBackend borrows the already-started SipEngine. Declared AFTER
+    // engine (construction order), destroyed BEFORE engine (stack order via
+    // unique_ptr destructors — see member order in PhoneController.h).
+    m_backend = std::make_unique<sipbackend::PjsipBackend>(m_engine.get());
 
-    auto core = buildCoreSipGraph(m_engine.get(), m_db.get(), m_keychain.get(), this);
+    auto core = buildCoreSipGraph(m_backend.get(), m_backend.get(),
+                                  m_db.get(), m_keychain.get(), this);
     m_accounts = std::move(core.accounts);
     m_accountsModel = std::move(core.accountsModel);
     m_accountsController = std::move(core.accountsController);
@@ -347,15 +353,21 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 
 PhoneController::~PhoneController()
 {
-    // Quiesce the PJSIP-thread callbacks we registered before tearing down
-    // the objects they capture. The manager callback setters block until
-    // any in-flight invocation completes (see m_callbackMutex in the
-    // managers), so after these return the PJSIP thread can no longer enter
-    // our lambdas. Controller destructors below do the same for theirs. The
-    // teardown order itself is load-bearing: controllers (clear callbacks)
-    // -> managers (pj::Account / pj::Call destructors serialize against
-    // in-flight dispatch via the PJSUA lock) -> engine->stop() last,
-    // because libDestroy must run after every pjsua2 object is gone.
+    // Quiesce the backend listener FIRST so no queued events are delivered
+    // to AccountsManager after it begins tearing down its state. This must
+    // run before any managers are reset (see CoreSipGraph.h wiring contract).
+    // AccountsManager's destructor also quiesces the native incoming-call hook
+    // (setNativeIncomingCallHook({})) — no explicit hook clear needed here.
+    if (m_backend) m_backend->setListener(nullptr);
+
+    // Quiesce the remaining PJSIP-thread callbacks we registered before
+    // tearing down the objects they capture. The manager callback setters
+    // block until any in-flight invocation completes (see m_callbackMutex in
+    // the managers), so after these return the PJSIP thread can no longer
+    // enter our lambdas. Controller destructors below do the same for theirs.
+    // Teardown order: controllers (clear callbacks) -> managers (pj::Account /
+    // pj::Call destructors serialize against in-flight dispatch via the PJSUA
+    // lock) -> engine->stop() last (libDestroy after all pjsua2 objects gone).
     if (m_accounts) {
         m_accounts->setOnMwiChanged({});
         m_accounts->setOnInstantMessage({});
@@ -385,6 +397,14 @@ PhoneController::~PhoneController()
     m_calls.reset();
     m_accountsModel.reset();
     m_accounts.reset();
+    // The PjsipBackend's internal PjsipAccount map must be cleared while the
+    // engine is still running (pj::Account destructors call into pjsua). Reset
+    // m_backend (which calls stop() indirectly via the member map's dtors)
+    // AFTER m_accounts (which already removed accounts via removeAccount) but
+    // BEFORE m_engine->stop() — at this point m_accounts has already removed
+    // every backend account, so the backend's m_accounts map is empty and the
+    // reset is a no-op for PJSIP.
+    m_backend.reset();
     if (m_engine) m_engine->stop();
     m_engine.reset();
     m_keychain.reset();

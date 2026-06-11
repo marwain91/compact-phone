@@ -67,7 +67,8 @@ TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
     std::mutex mtx;
     std::unordered_map<int, compactphone::sip::CallState> observed;
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::Account a;
     a.displayName = "Conf";
     a.username = "1001";
@@ -134,7 +135,8 @@ TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
 
 TEST_F(ConferenceTest, MergeRejectsNonConfirmedCalls)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::CallManager cm(&am);
     // No calls exist — both ids are bogus.
     EXPECT_FALSE(cm.mergeCalls(1, 2));

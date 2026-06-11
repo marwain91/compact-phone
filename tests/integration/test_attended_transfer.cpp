@@ -66,7 +66,8 @@ TEST_F(AttendedTransferTest, TransfersOriginalCallToConsultation)
     std::mutex mtx;
     std::unordered_map<int, compactphone::sip::CallState> observed;
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     auto mkAccount = [&](const std::string &user, const std::string &pwd, bool isDefault) {
         compactphone::sip::Account a;
         a.displayName = user;

@@ -56,7 +56,8 @@ TEST_F(CallLifecycleTest, MakeAndHangupTenTimes_CountReturnsToZero)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::Account a;
     a.displayName = "L"; a.username = "1001"; a.domain = sipServer();
     a.authUser = "1001"; a.transport = compactphone::sip::Transport::Udp;
