@@ -46,6 +46,34 @@ std::string newPasswordRef()
 using persistence::bindText;
 using persistence::readText;
 
+RegStateUpdate mapRegEvent(bool regIsActive, int statusCode,
+                           const std::string &reason,
+                           const RegError &lastError)
+{
+    // Branch order matters: an active registration with a 2xx wins, then a
+    // code of 0 means PJSIP is reporting progress (REGISTER sent, no final
+    // response yet) regardless of the active flag, then a 2xx on an
+    // inactive registration is a confirmed unregister. Everything else —
+    // including a non-2xx final response while the old binding is still
+    // nominally active (e.g. a 401/403 on refresh) — is a failure.
+    RegStateUpdate upd;
+    if (regIsActive && statusCode / 100 == 2) {
+        upd.state = RegistrationState::Registered;
+        upd.error = {}; // cleared on success
+    } else if (statusCode == 0) {
+        upd.state = RegistrationState::Registering;
+        upd.error = lastError; // preserved while the attempt is in flight
+    } else if (!regIsActive && statusCode / 100 == 2) {
+        upd.state = RegistrationState::Unregistered;
+        upd.error = lastError; // preserved so the reason stays readable
+    } else {
+        upd.state = RegistrationState::Failed;
+        upd.error.code = statusCode;
+        upd.error.reason = reason;
+    }
+    return upd;
+}
+
 class AccountsManager::AccountImpl : public pj::Account {
 public:
     AccountId id = kInvalidAccountId;
@@ -78,25 +106,13 @@ public:
                      id, info.regIsActive, static_cast<int>(prm.code),
                      prm.reason);
         RegistrationState s;
-        if (info.regIsActive && prm.code / 100 == 2) {
-            s = RegistrationState::Registered;
-        } else if (prm.code == 0) {
-            s = RegistrationState::Registering;
-        } else if (!info.regIsActive && prm.code / 100 == 2) {
-            s = RegistrationState::Unregistered;
-        } else {
-            s = RegistrationState::Failed;
-        }
         {
             std::lock_guard<std::mutex> lk(errMutex);
-            if (s == RegistrationState::Failed) {
-                lastError.code = static_cast<int>(prm.code);
-                lastError.reason = prm.reason;
-            } else if (s == RegistrationState::Registered) {
-                lastError = {};
-            }
-            // Registering / Unregistered preserve the previous error so the
-            // user can still read the reason while a retry is in flight.
+            const auto upd = mapRegEvent(info.regIsActive,
+                                         static_cast<int>(prm.code),
+                                         prm.reason, lastError);
+            lastError = upd.error;
+            s = upd.state;
         }
         state.store(s);
         // Invoke under the callback mutex: the main thread reassigns these
