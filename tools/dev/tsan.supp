@@ -70,4 +70,3 @@ race:pjmedia_wsola_save
 # frames inside the executed functor, not in the invokeMethod allocation.
 race:invokeMethodCallableHelper
 race:QMetaObject::invokeMethodImpl
-

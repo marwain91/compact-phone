@@ -220,15 +220,21 @@ private:
     // by registerAccount/unregisterAccount; read on the PJSIP thread by the
     // incoming-call hook. Guarded by m_backendIdsMutex.
     //
-    // THREE-LOCK ORDERING (must be observed everywhere, no exceptions):
-    //   PjsipBackend::m_hookMutex → m_callbackMutex → m_backendIdsMutex
-    //
-    // The incoming-call path nests them in this order: PjsipBackend fires
-    // the hook under m_hookMutex; the hook acquires m_backendIdsMutex for
-    // the reverse-map lookup, then releases it before acquiring
-    // m_callbackMutex to invoke m_onIncoming.  Never acquire these mutexes
-    // in any other relative order, and never hold m_backendIdsMutex across
-    // a callback invocation.
+    // LOCK DISCIPLINE (incoming-call path):
+    //   m_hookMutex (PjsipBackend) is the outer lock — it is never taken
+    //   while either of these mutexes is already held.
+    //   Inside the hook, the two manager mutexes are taken SEQUENTIALLY,
+    //   never nested:
+    //     1. m_backendIdsMutex — held briefly for the reverse-map lookup,
+    //        then released.
+    //     2. m_callbackMutex — acquired next, after (1) is fully released,
+    //        to invoke m_onIncoming.
+    //   Neither mutex is ever held while the other is also held.
+    //   If a future change must acquire both, the ONLY permissible order is
+    //   m_backendIdsMutex-inside-m_callbackMutex is FORBIDDEN — callback
+    //   handlers may re-enter manager getters that take m_backendIdsMutex,
+    //   so callbackMutex must always be the innermost (or the two must
+    //   remain strictly sequential as today).
     //
     // m_backendIdsMutex discipline:
     //   - Hold BRIEFLY (map read/write only).

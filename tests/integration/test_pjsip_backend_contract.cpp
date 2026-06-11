@@ -2,11 +2,11 @@
 // PJSIP adapter. Runs in the integration environment where a live
 // pjsua endpoint can start, bind a UDP transport, and complete the
 // full libCreate/libInit/libStart/libDestroy lifecycle — once per test
-// (18 cycles total — slow but legal for contract verification).
+// (12 tests total — slow but legal for contract verification).
 //
 // Init-order note: OwningPjsipBackend inherits PjsipBackend and holds
 // a SipEngine member. Base classes initialise before members in C++,
-// so PjsipBackend(&m_engine) in the init-list passes a pointer to a
+// so PjsipBackend(&engine) in the init-list passes a pointer to a
 // not-yet-constructed SipEngine. This is safe here because
 // PjsipBackend's constructor only stores the pointer (m_engine(engine)
 // in the .cpp) — it does NOT dereference it. The engine is fully
@@ -14,10 +14,10 @@
 // dereference.
 //
 // Port strategy: EngineConfig{} uses port 5060 (the contract default).
-// Tests run sequentially in-process; stop() clears the PJSUA state so
-// the UDP socket is released before the next test binds. UDP has no
-// TIME_WAIT, so the port is immediately reusable. Asterisk lives in a
-// separate container and does not compete for the dev-container's
+// gtest_discover_tests runs each test as its own ctest process, which
+// guarantees the PJSUA endpoint is fully torn down and the UDP socket
+// is released before the next test process binds it. Asterisk lives in
+// a separate container and does not compete for the dev-container's
 // 0.0.0.0:5060 bind.
 
 #include "unit/sip_backend_contract.h"
@@ -35,12 +35,15 @@ namespace compactphone::sipbackend::testing {
 struct OwningPjsipBackend : PjsipBackend {
     // Member declared before usage in start() / after base ctor stores ptr.
     // See the init-order note in the file header.
-    sip::SipEngine m_engine;
+    // Named 'engine' (not m_engine) to avoid shadowing PjsipBackend's
+    // private m_engine pointer, which would silently compile but confuse
+    // any reader expecting the base field.
+    sip::SipEngine engine;
 
     OwningPjsipBackend()
-        // PjsipBackend only stores the pointer — safe to pass &m_engine
-        // before m_engine is fully constructed (see file header).
-        : PjsipBackend(&m_engine)
+        // PjsipBackend only stores the pointer — safe to pass &engine
+        // before engine is fully constructed (see file header).
+        : PjsipBackend(&engine)
     {}
 
     ~OwningPjsipBackend()
@@ -49,7 +52,7 @@ struct OwningPjsipBackend : PjsipBackend {
         // the contract fixture may skip TearDown on ASSERT failures in SetUp.
         // Calling stop() a second time when already stopped is safe (SipEngine
         // guard: "if (!m_running) return").
-        if (m_engine.isRunning())
+        if (engine.isRunning())
             PjsipBackend::stop();
     }
 };

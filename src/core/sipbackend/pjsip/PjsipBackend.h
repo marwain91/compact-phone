@@ -63,7 +63,7 @@ public:
     bool sendMessage(AccountId id, const std::string &toUri,
                      const std::string &body) override;
 
-    // --- presence (phase 5 stubs) ---
+    // --- presence — bookkeeping only; SIP SUBSCRIBE/pj::Buddy land in phase 5 ---
     WatchId watch(AccountId accountId, const std::string &uri) override;
     bool unwatch(WatchId id) override;
 
@@ -91,9 +91,13 @@ public:
     void releaseCall(CallId id) override;
 
     // --- transitional bridges (NOT on ISipBackend; removed in phase 3) ---
-    // CallManager still constructs pj::Call against the pj::Account and
-    // adopts incoming calls by native PJSUA call id. AccountsManager
-    // forwards these for it. Both die when the calls path lands.
+    // pjAccountFor: AccountsManager forwards this so CallManager can
+    // construct pj::Call against the right pj::Account.
+    //
+    // nativeCallIdFor: currently UNCONSUMED — incoming calls deliver the
+    // native PJSUA call id directly through the synchronous hook, not via
+    // this accessor. The map and accessor are retained for phase-3 call
+    // adoption (makeCall/answer paths) and removed alongside pjAccountFor.
     pj::Account *pjAccountFor(AccountId id);
     int nativeCallIdFor(CallId id) const;
 

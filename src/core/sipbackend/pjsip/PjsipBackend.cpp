@@ -19,9 +19,8 @@ static_assert(!std::is_abstract_v<PjsipBackend>,
               "PjsipBackend is still abstract — a pure virtual is missing");
 
 // ---------------------------------------------------------------------------
-// Anonymous helpers (formerly in AccountsManager's anonymous namespace)
-// Duplicated until Task 5 rewires AccountsManager — fix translation bugs in
-// BOTH places. Task 5 removes AccountsManager's copy.
+// Anonymous helpers — moved from AccountsManager's anonymous namespace in
+// phase 2. AccountsManager's copy was removed in the same phase.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -361,8 +360,7 @@ AccountId PjsipBackend::addAccount(const AccountSettings &settings)
         return kInvalidAccountId;
     }
 
-    // NOTE: this translation block is duplicated until Task 5 rewires
-    // AccountsManager — fix translation bugs in BOTH places.
+    // Moved from AccountsManager::registerAccount in phase 2.
     pj::AccountConfig acfg;
     const bool tls = settings.transport == Transport::Tls;
     const std::string scheme = tls ? "sips:" : "sip:";
@@ -520,7 +518,7 @@ bool PjsipBackend::sendMessage(AccountId id, const std::string &toUri,
 }
 
 // ---------------------------------------------------------------------------
-// Presence — phase 5 stubs
+// Presence — bookkeeping only; SIP SUBSCRIBE/pj::Buddy land in phase 5
 // ---------------------------------------------------------------------------
 
 WatchId PjsipBackend::watch(AccountId accountId, const std::string & /*uri*/)

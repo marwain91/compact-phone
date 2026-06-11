@@ -5,8 +5,7 @@
 
 namespace compactphone::sipbackend {
 
-// Parsing logic moved verbatim (bug-for-bug) from AccountImpl::onMwiInfo
-// in AccountsManager.cpp:152-169. Do NOT modify AccountsManager yet.
+// Parsing logic extracted verbatim from the old AccountImpl::onMwiInfo.
 MwiSummary parseMwiSummary(const std::string &body)
 {
     MwiSummary result;
