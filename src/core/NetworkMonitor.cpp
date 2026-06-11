@@ -6,6 +6,22 @@
 
 namespace compactphone {
 
+ReachabilityDecision decideReachabilityChange(
+    bool wasOnline, QNetworkInformation::Reachability r)
+{
+    const bool nowOnline = r == QNetworkInformation::Reachability::Online;
+    if (nowOnline == wasOnline) {
+        return {NetworkAction::None, wasOnline};
+    }
+    return {nowOnline ? NetworkAction::EmitBack : NetworkAction::EmitLost,
+            nowOnline};
+}
+
+NetworkAction decideTransportChange(bool online)
+{
+    return online ? NetworkAction::EmitBack : NetworkAction::None;
+}
+
 NetworkMonitor::NetworkMonitor(QObject *parent)
     : QObject(parent)
 {
@@ -21,27 +37,25 @@ NetworkMonitor::NetworkMonitor(QObject *parent)
 
     connect(info, &QNetworkInformation::reachabilityChanged, this,
             [this](QNetworkInformation::Reachability r) {
-        const bool nowOnline = r == QNetworkInformation::Reachability::Online;
-        if (nowOnline == m_online) return;
-        m_online = nowOnline;
-        if (m_online) {
+        const auto d = decideReachabilityChange(m_online, r);
+        m_online = d.online;
+        if (d.action == NetworkAction::EmitBack) {
             spdlog::info("NetworkMonitor: network back");
             emit networkBack();
-        } else {
+        } else if (d.action == NetworkAction::EmitLost) {
             spdlog::info("NetworkMonitor: network lost (reachability={})",
                          static_cast<int>(r));
             emit networkLost();
         }
     });
 
-    // Transport flips (Wi-Fi -> Ethernet, switching SSIDs) also invalidate
-    // the SIP transport's source IP even when reachability stays Online.
     connect(info, &QNetworkInformation::transportMediumChanged, this,
             [this](QNetworkInformation::TransportMedium m) {
-        if (!m_online) return;
-        spdlog::info("NetworkMonitor: transport medium changed to {}",
-                     static_cast<int>(m));
-        emit networkBack();
+        if (decideTransportChange(m_online) == NetworkAction::EmitBack) {
+            spdlog::info("NetworkMonitor: transport medium changed to {}",
+                         static_cast<int>(m));
+            emit networkBack();
+        }
     });
 }
 
