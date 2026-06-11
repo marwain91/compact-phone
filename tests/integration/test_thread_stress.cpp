@@ -11,7 +11,6 @@
 #include "test_support.h"
 
 #include <QCoreApplication>
-#include <QMetaObject>
 
 #include <atomic>
 #include <chrono>
@@ -19,7 +18,42 @@
 #include <thread>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
+
+// ThreadSanitizer gate for the adapter's concurrency surface.
+//
+// The old gate stressed PJSIP-thread adoptIncomingCall racing main-thread
+// snapshot() over CallManager's maps. That surface is GONE: CallManager is
+// main-thread-only and snapshot() touches no shared state. The old
+// CallbackReassignmentRacesDelivery test is also gone — its raced pair
+// (std::function assign on the main thread vs invoke on the PJSIP thread) no
+// longer exists either, because every callback invocation is a queued
+// main-thread listener event since phase 3. Do not reintroduce it for a ghost.
+//
+// The reliably red-provable cross-thread surface now is PjsipBackend::m_calls
+// under m_callsMutex: wrapIncomingCall inserts on the PJSUA worker thread while
+// liveCall() lookups / releaseCall() erase on the main thread.
+// EagerWrapRacesBackendQueries (Test 1) is the one-line red-proof — delete the
+// lock_guard in wrapIncomingCall's insert block and TSan halts on the map node
+// (liveCall -> _Rb_tree::find at PjsipBackend.cpp vs the worker's node
+// allocate). RED-PROVEN during implementation: 3/3 runs halted. The trick that
+// makes it reliable is probing DEAD ids (above the live call-id space): a
+// dead-id query is a pure m_calls.find with NO getInfo(), so it never takes
+// the PJSUA lock — a live-id query WOULD take it and that lock (which
+// wrapIncomingCall also holds) would create a happens-before edge masking the
+// race. See hammerQueries below.
+//
+// PjsipCall::m_muted (read in onCallMediaState on the PJSUA thread vs written
+// in setMuted on the main thread) is deliberately NOT a separate red-proof:
+// every onCallMediaState read AND every setMuted write runs under the PJSUA
+// lock (setMuted reaches it through getInfo()), so the two are serialized by
+// pjsua in practice and demoting the atomic does NOT make TSan halt. The
+// atomic remains the documented contract; MuteTogglesRaceMediaReactivation
+// (Test 2) is a concurrency WORKLOAD that churns setMuted vs hold/unhold
+// re-INVITE renegotiation (the onCallMediaState mute-honouring + bridge-rewire
+// path) under instrumentation — it catches crashes / use-after-free / deadlock
+// in that path, not a one-line lock removal.
 
 namespace {
 std::string sipServer()
@@ -52,225 +86,177 @@ protected:
         ASSERT_TRUE(db.openInMemory());
     }
     void TearDown() override { engine.stop(); }
+
+    static compactphone::sip::AccountId mkAccount(
+        compactphone::sip::AccountsManager &am, const std::string &user,
+        const std::string &pwd, bool isDefault)
+    {
+        compactphone::sip::Account a;
+        a.displayName = user;
+        a.username = user;
+        a.domain = sipServer();
+        a.authUser = user;
+        a.transport = compactphone::sip::Transport::Udp;
+        a.enabled = true;
+        a.isDefault = isDefault;
+        a.registerOnStartup = true;
+        return am.add(a, pwd);
+    }
 };
 
-// Regression gate for the CallManager cross-thread races (PJSIP worker
-// thread vs main thread). Incoming-call adoption runs synchronously on the
-// PJSIP worker thread (inserting into CallManager's maps and minting ids)
-// while the main thread hammers the read paths — snapshot(), callCount(),
-// isHeld()/isMuted() — through several call setup/teardown cycles.
-//
-// Under a plain build this is a smoke test. Under `make test-tsan`
-// (linux-tsan preset) ThreadSanitizer turns every unsynchronized map access
-// into a hard failure — this exact workload is what crashed before
-// CallManager got its mutex: concurrent unordered_map read/write during
-// adoption, and duplicate CallIds from an unguarded m_nextId++.
-TEST_F(ThreadStressTest, AdoptionRacesSnapshotPolling)
+// Test 1 — the PJSIP-thread eager wrap (adapter map insert under m_callsMutex)
+// races the main thread hammering the adapter's query paths through
+// CallManager: snapshot(), isMediaActive(), isCaptureTransmitting(),
+// streamStats(), callCount() — every one a liveCall() lookup that takes
+// m_callsMutex against the worker-thread insert, and a getInfo() against
+// teardown.
+TEST_F(ThreadStressTest, EagerWrapRacesBackendQueries)
 {
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
+    auto &cm = smp.calls;
 
-    auto mkAccount = [&](const std::string &user, const std::string &pwd,
-                         bool isDefault) {
-        compactphone::sip::Account a;
-        a.displayName = user;
-        a.username = user;
-        a.domain = sipServer();
-        a.authUser = user;
-        a.transport = compactphone::sip::Transport::Udp;
-        a.enabled = true;
-        a.isDefault = isDefault;
-        a.registerOnStartup = true;
-        return am.add(a, pwd);
-    };
-
-    const auto id1 = mkAccount("1001", "compactphone1001", true);
-    const auto id2 = mkAccount("1002", "compactphone1002", false);
-    ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
-    ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
+    const auto id1 = mkAccount(am, "1001", "compactphone1001", true);
+    const auto id2 = mkAccount(am, "1002", "compactphone1002", false);
+    ASSERT_NE(id1, compactphone::sip::kInvalidCallId);
+    ASSERT_NE(id2, compactphone::sip::kInvalidCallId);
     ASSERT_TRUE(waitForRegState(
         am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    // Incoming calls are wrapped on the PJSIP thread and announced via the
+    // queued signal on the main thread; accept() is already main-thread here.
+    std::atomic<int> announced{0};
+    QObject::connect(&cm, &compactphone::sip::CallManager::incomingCall,
+                     [&](int id) {
+                         announced.fetch_add(1);
+                         cm.accept(id);
+                     });
 
-    // Adoption stays on the PJSIP thread (as in production); accepting is
-    // main-thread work, so queue it — the polling loop below pumps events.
-    std::atomic<int> adopted{0};
-    am.setOnIncomingCall(
-        [&](compactphone::sip::AccountId aid, int pjsipCallId) {
-            const auto localId = cm.adoptIncomingCall(aid, pjsipCallId);
-            if (localId == compactphone::sip::kInvalidCallId) return;
-            adopted.fetch_add(1);
-            QMetaObject::invokeMethod(&cm, [&cm, localId]() {
-                cm.accept(localId);
-            }, Qt::QueuedConnection);
-        });
-
-    // Tears down every live call and drains the disconnect callbacks +
-    // grace queue while still polling the cross-thread read paths.
+    // Tears down every live call and drains the disconnect + grace queue
+    // while still pumping the cross-thread query paths.
     const auto drainCalls = [&]() {
         for (const auto &e : cm.snapshot()) cm.hangup(e.id);
-        const auto drainDeadline = std::chrono::steady_clock::now() + 10s;
-        while (cm.callCount() > 0 &&
-               std::chrono::steady_clock::now() < drainDeadline) {
-            (void)cm.snapshot();
-            QCoreApplication::processEvents();
-            std::this_thread::sleep_for(10ms);
-        }
-        return cm.callCount() == 0;
+        return pumpUntil([&] { return cm.callCount() == 0; }, 10s);
     };
 
-    constexpr int kCycles = 3;
-    // A dial can flake without reaching us at all (Asterisk transiently
-    // rejecting while its contact state settles, especially right after a
-    // previous test process unregistered). Retry dials and assert on the
-    // overall adoption count at the end — the gate's job is exercising
-    // adoption concurrency under TSan, not pinning fixture routing.
-    constexpr int kAttemptsPerCycle = 3;
-    int successfulCycles = 0;
-    for (int cycle = 0; cycle < kCycles; ++cycle) {
-        bool cycleOk = false;
-        for (int attempt = 0; attempt < kAttemptsPerCycle && !cycleOk;
-             ++attempt) {
-            const int adoptedBefore = adopted.load();
-            // 1002 dials extension 1001 — Asterisk routes it back to account
-            // 1001, so adoption fires on the PJSIP worker thread mid-loop.
+    // Probe a band of ids ABOVE the backend's live call-id space (50001+).
+    // isMediaActive() on a dead id is a pure liveCall() lookup: it takes
+    // m_callsMutex, reads the m_calls map, finds nothing, and returns —
+    // WITHOUT calling getInfo() (no live call), so it never touches the PJSUA
+    // lock. That matters: the PJSIP worker thread runs wrapIncomingCall (the
+    // m_calls insert) while holding the PJSUA lock, so a main-thread query
+    // that ALSO took the PJSUA lock (getInfo on a live id) would be ordered
+    // against the insert by that lock and the race would be masked. Pure
+    // dead-id finds share no lock with the worker except m_callsMutex itself —
+    // exactly the lock whose removal this test must catch. The burst keeps the
+    // main thread inside m_calls.find() for a large fraction of each iteration
+    // so the worker's lock-free insert reliably overlaps a read; the periodic
+    // processEvents()/sleep still yields to the worker so the instrumented
+    // loop can't livelock it under TSan.
+    const auto hammerQueries = [&] {
+        for (int rep = 0; rep < 400; ++rep) {
+            for (compactphone::sip::CallId probe = 90001; probe <= 90016;
+                 ++probe) {
+                (void)cm.isMediaActive(probe);
+                (void)cm.isCaptureTransmitting(probe);
+            }
+        }
+        (void)cm.callCount();
+    };
+
+    // Dial repeatedly. Each 1002->1001 dial is routed back to account 1001 by
+    // Asterisk, so the eager wrap fires on the PJSIP worker thread (inserting
+    // into m_calls) while hammerQueries() reads that map on the main thread.
+    // Many wraps over a long window, with no early break, so the overlap is
+    // hit reliably rather than depending on a single insert landing in a
+    // single read.
+    constexpr int kTargetWraps = 6;
+    const auto deadline = std::chrono::steady_clock::now() + 40s;
+    while (announced.load() < kTargetWraps
+           && std::chrono::steady_clock::now() < deadline) {
+        if (cm.callCount() == 0) {
             const auto outbound = cm.makeCall(id2, udpTarget("1001"));
             ASSERT_NE(outbound, compactphone::sip::kInvalidCallId);
-
-            // Hammer the cross-thread read paths while the INVITE, adoption,
-            // accept, and media activation are all in flight. Deadlines are
-            // generous: under TSan everything is several times slower.
-            const auto deadline = std::chrono::steady_clock::now() + 15s;
-            bool confirmed = false;
-            while (std::chrono::steady_clock::now() < deadline) {
-                const auto snap = cm.snapshot();
-                (void)cm.callCount();
-                for (const auto &e : snap) {
-                    (void)cm.isHeld(e.id);
-                    (void)cm.isMuted(e.id);
-                    (void)cm.isRecording(e.id);
-                    if (e.state == compactphone::sip::CallState::Confirmed) {
-                        confirmed = true;
-                    }
-                }
-                QCoreApplication::processEvents();
-                if (confirmed && adopted.load() > adoptedBefore &&
-                    cm.callCount() >= 2) {
-                    break;
-                }
-                // Throttle just enough that the instrumented polling loop
-                // can't monopolize the PJSUA lock under TSan and livelock
-                // the worker thread — still thousands of overlapping
-                // accesses per cycle.
-                std::this_thread::sleep_for(1ms);
-            }
-            cycleOk = confirmed && adopted.load() > adoptedBefore;
-            ASSERT_TRUE(drainCalls()) << "cycle " << cycle
-                                      << ": calls did not drain";
         }
-        if (cycleOk) ++successfulCycles;
+        // Hammer the map-reading query paths while the INVITE + eager wrap +
+        // accept + media activation are in flight.
+        const auto callDeadline = std::chrono::steady_clock::now() + 6s;
+        while (std::chrono::steady_clock::now() < callDeadline) {
+            hammerQueries();
+            QCoreApplication::processEvents();
+            if (cm.callCount() >= 2) break;   // both legs up — tear down + redial
+            std::this_thread::sleep_for(1ms);
+        }
+        ASSERT_TRUE(drainCalls()) << "calls did not drain";
     }
-    // At least two cycles must have reached an adopted, confirmed call for
-    // the cross-thread workload to count as exercised; a single flaky cycle
-    // (fixture routing transients) does not fail the gate.
-    EXPECT_GE(successfulCycles, 2)
-        << "adoption workload was not exercised (" << adopted.load()
-        << " adoptions across " << kCycles << "x" << kAttemptsPerCycle
-        << " dials)";
+    EXPECT_GE(announced.load(), 2)
+        << "wrap/query workload was not exercised (" << announced.load()
+        << " announcements)";
 }
 
-// Regression gate for the callback-slot assign-vs-invoke race: the main
-// thread reassigns the manager callbacks (what controllers do in their
-// constructors and destructors) while the PJSIP worker thread is delivering
-// registration and call-state events through the very same std::function
-// objects. Concurrent swap vs. invoke on a std::function is UB — before the
-// callback slots were mutex-guarded, TSan flagged this exact pair
-// (AccountsManager::setOnRegistrationStateChanged vs AccountImpl::onRegState)
-// twelve times across the integration suite. The slot mutex also gives
-// setOnX({}) quiesce semantics: once it returns, no in-flight invocation of
-// the previous callback exists, which is what makes the controller
-// destructors safe while events are still arriving.
-TEST_F(ThreadStressTest, CallbackReassignmentRacesDelivery)
+// Test 2 — concurrency WORKLOAD for the mute-across-renegotiation path. Each
+// hold/unhold pair forces a re-INVITE renegotiation, which dispatches
+// onCallMediaState on the PJSIP worker thread — reading PjsipCall::m_muted and
+// rewiring the conference bridge — while the main thread keeps flipping the
+// same flag through setMuted. Both ends run under the PJSUA lock, so this is
+// not a one-line lock red-proof (see the file header); it exercises the path
+// under instrumentation to catch crashes / use-after-free / deadlock there.
+TEST_F(ThreadStressTest, MuteTogglesRaceMediaReactivation)
 {
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
+    auto &cm = smp.calls;
 
-    auto mkAccount = [&](const std::string &user, const std::string &pwd,
-                         bool isDefault) {
-        compactphone::sip::Account a;
-        a.displayName = user;
-        a.username = user;
-        a.domain = sipServer();
-        a.authUser = user;
-        a.transport = compactphone::sip::Transport::Udp;
-        a.enabled = true;
-        a.isDefault = isDefault;
-        a.registerOnStartup = true;
-        return am.add(a, pwd);
-    };
-
-    const auto id1 = mkAccount("1001", "compactphone1001", true);
-    const auto id2 = mkAccount("1002", "compactphone1002", false);
-    ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
-    ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
+    const auto id1 = mkAccount(am, "1001", "compactphone1001", true);
+    const auto id2 = mkAccount(am, "1002", "compactphone1002", false);
+    ASSERT_NE(id1, compactphone::sip::kInvalidCallId);
+    ASSERT_NE(id2, compactphone::sip::kInvalidCallId);
     ASSERT_TRUE(waitForRegState(
         am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
-    std::atomic<int> adopted{0};
-    am.setOnIncomingCall(
-        [&](compactphone::sip::AccountId aid, int pjsipCallId) {
-            const auto localId = cm.adoptIncomingCall(aid, pjsipCallId);
-            if (localId == compactphone::sip::kInvalidCallId) return;
-            adopted.fetch_add(1);
-            QMetaObject::invokeMethod(&cm, [&cm, localId]() {
-                cm.accept(localId);
-            }, Qt::QueuedConnection);
-        });
+    std::atomic<int> inboundId{-1};
+    QObject::connect(&cm, &compactphone::sip::CallManager::incomingCall,
+                     [&](int id) { inboundId.store(id); cm.accept(id); });
 
-    std::atomic<int> invocations{0};
-
-    // Keep a call cycle and periodic re-registrations in flight so the
-    // PJSIP thread continuously delivers reg-state and call-state events,
-    // while the main thread reassigns the receiving callbacks every
-    // iteration.
-    (void)cm.makeCall(id2, udpTarget("1001"));
-    const auto deadline = std::chrono::steady_clock::now() + 8s;
-    int iteration = 0;
-    while (std::chrono::steady_clock::now() < deadline) {
-        am.setOnRegistrationStateChanged(
-            [&](auto, auto) { invocations.fetch_add(1); });
-        cm.setOnCallEvent(
-            [&](auto, auto) { invocations.fetch_add(1); });
-        cm.setOnCallStateChanged([&](auto) { invocations.fetch_add(1); });
-        if (++iteration % 100 == 0) {
-            // Refresh registrations to keep reg-state events flowing, and
-            // cycle the call so call-state events keep firing too.
-            am.reregisterAllEnabled();
+    // Retry the dial: a dial can flake without establishing a media session
+    // at all (Asterisk transiently rejecting while contact state settles,
+    // especially right after a previous test process unregistered). The gate's
+    // job is exercising the mute-vs-renegotiation path, not pinning routing.
+    auto inboundReady = [&] {
+        return inboundId.load() > 0 && cm.isMediaActive(inboundId.load());
+    };
+    bool established = false;
+    for (int attempt = 0; attempt < 4 && !established; ++attempt) {
+        inboundId.store(-1);
+        const auto outbound = cm.makeCall(id2, udpTarget("1001"));
+        ASSERT_NE(outbound, compactphone::sip::kInvalidCallId);
+        established = pumpUntil(inboundReady, 15s);
+        if (!established) {
             for (const auto &e : cm.snapshot()) cm.hangup(e.id);
-            (void)cm.makeCall(id2, udpTarget("1001"));
+            ASSERT_TRUE(pumpUntil([&] { return cm.callCount() == 0; }, 10s));
         }
-        QCoreApplication::processEvents();
-        std::this_thread::sleep_for(1ms);
     }
+    ASSERT_TRUE(established) << "no inbound call established media after retries";
+    const auto id = inboundId.load();
 
-    // Quiesce barrier: after these return, no in-flight invocation of any
-    // previous callback may exist.
-    am.setOnRegistrationStateChanged({});
-    am.setOnIncomingCall({});
-    cm.setOnCallEvent({});
-    cm.setOnCallStateChanged({});
+    bool muted = false;
+    const auto deadline = std::chrono::steady_clock::now() + 8s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        muted = !muted;
+        (void)cm.setMuted(id, muted);
+        (void)cm.hold(id);
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for(5ms);
+        (void)cm.unhold(id);
+        QCoreApplication::processEvents();
+        std::this_thread::sleep_for(5ms);
+    }
+    // Settle unmuted + unheld and verify the workload left a sane call.
+    (void)cm.setMuted(id, false);
+    (void)cm.unhold(id);
+    EXPECT_TRUE(pumpUntil([&] { return cm.isMediaActive(id); }, 10s));
 
-    // Drain whatever the last cycle left behind.
+    // Drain.
     for (const auto &e : cm.snapshot()) cm.hangup(e.id);
-    const auto drainDeadline = std::chrono::steady_clock::now() + 10s;
-    while (cm.callCount() > 0 &&
-           std::chrono::steady_clock::now() < drainDeadline) {
-        QCoreApplication::processEvents();
-        std::this_thread::sleep_for(10ms);
-    }
-    // The workload must have actually delivered events into the reassigned
-    // callbacks for the race window to have been exercised.
-    EXPECT_GT(invocations.load(), 0);
+    EXPECT_TRUE(pumpUntil([&] { return cm.callCount() == 0; }, 10s));
 }

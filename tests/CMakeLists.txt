@@ -107,7 +107,7 @@ add_executable(test_integration
     integration/test_instant_message.cpp
     integration/test_call_policies.cpp
     integration/test_mute.cpp
-    # integration/test_thread_stress.cpp  # re-added with the redesign in Task 7
+    integration/test_thread_stress.cpp
     integration/test_audio_playback.cpp
     integration/test_stream_stats_live.cpp
     integration/test_zombie_call_guards.cpp
