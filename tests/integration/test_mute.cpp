@@ -8,16 +8,18 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
 #include <functional>
-#include <mutex>
 #include <thread>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pumpUntil;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -26,20 +28,13 @@ std::string sipServer()
     return "asterisk:5060";
 }
 
-// Polls cond every 100ms until it holds or timeout elapses. Pumps the Qt
-// event loop each iteration so CallManager's queued invocations and retry
-// timers (e.g. requestUnhold's deferred re-INVITE) actually run.
+// Polls cond until it holds or timeout elapses, pumping the Qt event loop so
+// CallManager's queued invocations and retry timers (e.g. requestUnhold's
+// deferred re-INVITE) actually run.
 bool waitFor(const std::function<bool()> &cond,
              std::chrono::milliseconds timeout)
 {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (!cond()) {
-        if (std::chrono::steady_clock::now() >= deadline) return false;
-        QCoreApplication::processEvents();
-        std::this_thread::sleep_for(100ms);
-        QCoreApplication::processEvents();
-    }
-    return true;
+    return pumpUntil(cond, timeout);
 }
 
 // Reads the call's live state through snapshot() (which queries PJSIP
@@ -65,27 +60,12 @@ bool registerAccount(compactphone::sip::AccountsManager &am)
     a.enabled = true;
     a.isDefault = true;
     a.registerOnStartup = true;
-    if (am.add(a, "compactphone1001") == compactphone::sip::kInvalidAccountId) {
-        return false;
-    }
-    std::mutex mtx;
-    std::condition_variable cv;
-    auto state = compactphone::sip::RegistrationState::Unregistered;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        { std::lock_guard l(mtx); state = s; }
-        cv.notify_all();
-    });
-    bool ok = false;
-    {
-        std::unique_lock l(mtx);
-        ok = cv.wait_for(l, 10s, [&] {
-            return state == compactphone::sip::RegistrationState::Registered;
-        });
-    }
-    // Drop the callback before mtx/cv go out of scope — a registration
-    // refresh could fire it later against dangling captures.
-    am.setOnRegistrationStateChanged({});
-    return ok;
+    const auto id = am.add(a, "compactphone1001");
+    if (id == compactphone::sip::kInvalidAccountId) return false;
+    // Callback-free wait: polls the manager's atomic registration state, so
+    // no lock or stack slot is ever shared with PJSIP threads.
+    return waitForRegState(
+        am, {id}, compactphone::sip::RegistrationState::Registered, 10s);
 }
 } // namespace
 

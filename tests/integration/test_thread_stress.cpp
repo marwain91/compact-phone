@@ -8,17 +8,18 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 #include <QMetaObject>
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
-#include <mutex>
 #include <thread>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -82,29 +83,12 @@ TEST_F(ThreadStressTest, AdoptionRacesSnapshotPolling)
         return am.add(a, pwd);
     };
 
-    // Lock-free on purpose: PJSIP may dispatch the registration callback
-    // re-entrantly on the thread that is registering, so a mutex shared
-    // between the callback and the waiting thread is a double-lock (TSan
-    // flagged exactly that with the usual mutex+condvar pattern here).
-    std::atomic<int> registeredCount{0};
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        if (s == compactphone::sip::RegistrationState::Registered) {
-            registeredCount.fetch_add(1);
-        }
-    });
-
     const auto id1 = mkAccount("1001", "compactphone1001", true);
     const auto id2 = mkAccount("1002", "compactphone1002", false);
     ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
     ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
-    {
-        const auto regDeadline = std::chrono::steady_clock::now() + 10s;
-        while (registeredCount.load() < 2 &&
-               std::chrono::steady_clock::now() < regDeadline) {
-            std::this_thread::sleep_for(50ms);
-        }
-        ASSERT_GE(registeredCount.load(), 2);
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
 
@@ -224,24 +208,12 @@ TEST_F(ThreadStressTest, CallbackReassignmentRacesDelivery)
         return am.add(a, pwd);
     };
 
-    std::atomic<int> registeredEvents{0};
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        if (s == compactphone::sip::RegistrationState::Registered) {
-            registeredEvents.fetch_add(1);
-        }
-    });
     const auto id1 = mkAccount("1001", "compactphone1001", true);
     const auto id2 = mkAccount("1002", "compactphone1002", false);
     ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
     ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
-    {
-        const auto regDeadline = std::chrono::steady_clock::now() + 10s;
-        while (registeredEvents.load() < 2 &&
-               std::chrono::steady_clock::now() < regDeadline) {
-            std::this_thread::sleep_for(50ms);
-        }
-        ASSERT_GE(registeredEvents.load(), 2);
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
     std::atomic<int> adopted{0};

@@ -610,9 +610,10 @@ passing.
 The `linux-tsan` CMake preset builds our code with `-fsanitize=thread`
 into `build/linux-tsan` (own `vcpkg_installed`, restored from the binary
 cache; deps stay uninstrumented — TSan still sees their pthread-level
-locking). `make test-tsan` runs the `ThreadStressTest` integration test
-under it: PJSIP-thread call adoption hammered against main-thread
-`snapshot()`/`callCount()` polling. Red-proven: removing a CallManager
+locking). `make test-tsan` runs the **full integration suite** under it
+(`-L integration`); `ThreadStressTest` remains the dedicated stressor
+(PJSIP-thread call adoption hammered against main-thread
+`snapshot()`/`callCount()` polling). Red-proven: removing a CallManager
 lock makes TSan halt with the exact file:line.
 
 Gotchas, in the order they will bite you:
@@ -637,11 +638,19 @@ Gotchas, in the order they will bite you:
   call-info string copy). Keep suppressions leaf-function-narrow;
   broad `pj*` globs would mask our own races, whose PJSIP-thread
   stacks always contain pjsua frames.
-- The gate is scoped to `ThreadStressTest` until backlog task #6
-  (callback assign-vs-invoke race, 12 live TSan reports) and the
-  older tests' mutex+cv-inside-callback pattern (14 double-lock
-  reports — pjsua can deliver `onRegState` re-entrantly on the
-  registering thread) are fixed; then widen to `-L integration`.
+- **Never wait on a condition_variable whose mutex a PJSIP-delivered
+  callback also locks.** pjsua can deliver `onRegState` re-entrantly on
+  the registering/waiting thread; TSan reports it as a double lock of
+  the test mutex, and once a mutex is flagged every later access through
+  it reads as a data race too (this was all 29 failures when the gate
+  first widened from `ThreadStressTest` to `-L integration`). Safe
+  shapes live in `tests/integration/test_support.h`: `waitForRegState`
+  (callback-free `stateOf()` polling), atomics for scalar observations,
+  and brief-lock polling (`pollUntil`/`pumpUntil`) for mutex-guarded
+  maps. Observation state is declared before the managers, and
+  `ScopedAccountCallbacks` quiesces AccountsManager callbacks before a
+  captured CallManager dies. New integration tests must follow these
+  patterns or the gate halts on them.
 
 ## Branch + PR conventions
 

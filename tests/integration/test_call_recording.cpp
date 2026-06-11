@@ -7,19 +7,23 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
-#include <mutex>
 #include <thread>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -62,6 +66,9 @@ protected:
 
 TEST_F(CallRecordingTest, RecordsActiveCallToWavFile)
 {
+    std::atomic<compactphone::sip::CallState> observed{
+        compactphone::sip::CallState::Idle};
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
     compactphone::sip::Account a;
     a.displayName = "Rec";
@@ -72,36 +79,22 @@ TEST_F(CallRecordingTest, RecordsActiveCallToWavFile)
     a.enabled = true;
     a.isDefault = true;
     a.registerOnStartup = true;
-    ASSERT_NE(am.add(a, "compactphone1001"), compactphone::sip::kInvalidAccountId);
+    const auto accId = am.add(a, "compactphone1001");
+    ASSERT_NE(accId, compactphone::sip::kInvalidAccountId);
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    compactphone::sip::RegistrationState rstate =
-        compactphone::sip::RegistrationState::Unregistered;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx); rstate = s; cv.notify_all();
-    });
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return rstate == compactphone::sip::RegistrationState::Registered;
-        }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
-    compactphone::sip::CallState observed = compactphone::sip::CallState::Idle;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
-        std::lock_guard l(mtx); observed = s; cv.notify_all();
+        observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 15s, [&] {
-            return observed == compactphone::sip::CallState::Confirmed;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        return observed.load() == compactphone::sip::CallState::Confirmed;
+    }, 15s));
 
     // PJSIP's media state can lag the Confirmed signalling state by a
     // round-trip. Give it a moment so firstActiveAudio resolves cleanly.
@@ -126,12 +119,9 @@ TEST_F(CallRecordingTest, RecordsActiveCallToWavFile)
         << "Recording file is suspiciously small (" << fi.size() << " bytes)";
 
     cm.hangup(callId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 5s, [&] {
-            return observed == compactphone::sip::CallState::Disconnected;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        return observed.load() == compactphone::sip::CallState::Disconnected;
+    }, 5s));
 }
 
 TEST_F(CallRecordingTest, EraseCallCleansUpActiveRecorder)
@@ -140,59 +130,42 @@ TEST_F(CallRecordingTest, EraseCallCleansUpActiveRecorder)
     // recorder destructor flushes the WAV). Verify the file is closed
     // (size > 0) and isRecording returns false even though stopRecording
     // was never called explicitly.
+    std::atomic<compactphone::sip::CallState> observed{
+        compactphone::sip::CallState::Idle};
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
     compactphone::sip::Account a;
     a.displayName = "Rec";
     a.username = "1001"; a.domain = sipServer();
     a.authUser = "1001"; a.transport = compactphone::sip::Transport::Udp;
     a.enabled = true; a.isDefault = true; a.registerOnStartup = true;
-    ASSERT_NE(am.add(a, "compactphone1001"), compactphone::sip::kInvalidAccountId);
+    const auto accId = am.add(a, "compactphone1001");
+    ASSERT_NE(accId, compactphone::sip::kInvalidAccountId);
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    compactphone::sip::RegistrationState rstate =
-        compactphone::sip::RegistrationState::Unregistered;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx); rstate = s; cv.notify_all();
-    });
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return rstate == compactphone::sip::RegistrationState::Registered;
-        }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
-    compactphone::sip::CallState observed = compactphone::sip::CallState::Idle;
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
-        std::lock_guard l(mtx); observed = s; cv.notify_all();
+        observed.store(s);
     });
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 15s, [&] {
-            return observed == compactphone::sip::CallState::Confirmed;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        return observed.load() == compactphone::sip::CallState::Confirmed;
+    }, 15s));
     std::this_thread::sleep_for(500ms);
 
     EXPECT_TRUE(cm.startRecording(callId, recordingPath.toStdString()));
     std::this_thread::sleep_for(1500ms);
 
     cm.hangup(callId);
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 5s, [&] {
-            return observed == compactphone::sip::CallState::Disconnected;
-        }));
-    }
-    // Pump event loop so the 2.2s grace timer fires eraseCall.
-    for (int i = 0; i < 150; ++i) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        std::this_thread::sleep_for(20ms);
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        return observed.load() == compactphone::sip::CallState::Disconnected;
+    }, 5s));
+    // Pump the event loop so the 2.2s grace timer fires eraseCall.
+    pumpUntil([&] { return cm.callCount() == 0; }, 8s);
 
     EXPECT_FALSE(cm.isRecording(callId));
     QFileInfo fi(recordingPath);

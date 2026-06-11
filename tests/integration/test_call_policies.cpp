@@ -13,16 +13,22 @@
 #include "models/HistoryModel.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
 
 using namespace std::chrono_literals;
+// CallsController fans state changes through QMetaObject::invokeMethod
+// with QueuedConnection, so the policies (DND / auto-answer / forward)
+// only fire while the Qt event loop is running. Plain blocking waits would
+// starve the loop; pumpUntil polls the predicate while pumping events.
+using compactphone::testsupport::pumpUntil;
+using compactphone::testsupport::waitForRegState;
 
 namespace {
 std::string sipServer()
@@ -33,22 +39,6 @@ std::string sipServer()
 std::string udpTarget(const std::string &extension)
 {
     return "sip:" + extension + "@" + sipServer() + ";transport=udp";
-}
-
-// CallsController fans state changes through QMetaObject::invokeMethod
-// with QueuedConnection, so the policies (DND / auto-answer / forward)
-// only fire while the Qt event loop is running. Plain cv.wait_for would
-// block the loop; this helper polls the predicate while pumping events.
-template <typename Pred>
-bool pumpUntil(Pred pred, std::chrono::milliseconds timeout)
-{
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (std::chrono::steady_clock::now() < deadline) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 25);
-        if (pred()) return true;
-        std::this_thread::sleep_for(20ms);
-    }
-    return pred();
 }
 } // namespace
 
@@ -122,26 +112,18 @@ protected:
 
     // Register both 1001 and 1002 and block until both are registered.
     //
-    // The wait tracks each account's CURRENT registration state, not a count
-    // of transitions: counting "saw Registered twice" lets a single account
-    // that flaps (register -> drop -> re-register, common right after the
-    // Asterisk fixture restarts) satisfy the wait while the other account is
-    // still unregistered. The tests then INVITE an endpoint Asterisk has no
-    // contact for and get 480 — the caller leg goes Disconnected, which the
-    // DND test would treat as a (vacuous) pass and the auto-answer/forward
-    // tests as a spurious failure.
+    // waitForRegState polls each account's CURRENT registration state (an
+    // atomic read, no callback at all), which keeps the wait immune to
+    // registration flaps: counting "saw Registered twice" would let a single
+    // account that flaps (register -> drop -> re-register, common right
+    // after the Asterisk fixture restarts) satisfy the wait while the other
+    // account is still unregistered. The tests then INVITE an endpoint
+    // Asterisk has no contact for and get 480 — the caller leg goes
+    // Disconnected, which the DND test would treat as a (vacuous) pass and
+    // the auto-answer/forward tests as a spurious failure.
     void registerBothAccounts(compactphone::sip::AccountId &id1,
                               compactphone::sip::AccountId &id2)
     {
-        std::mutex regMtx;
-        std::condition_variable cv;
-        std::unordered_map<compactphone::sip::AccountId,
-                           compactphone::sip::RegistrationState> regState;
-        am->setOnRegistrationStateChanged([&](auto accountId, auto s) {
-            std::lock_guard l(regMtx);
-            regState[accountId] = s;
-            cv.notify_all();
-        });
         auto mk = [&](const std::string &u, const std::string &p, bool def) {
             compactphone::sip::Account a;
             a.displayName = u; a.username = u; a.domain = sipServer();
@@ -153,25 +135,11 @@ protected:
         id2 = mk("1002", "compactphone1002", false);
         ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
         ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
-        const auto bothRegistered = [&] {
-            return regState[id1] == compactphone::sip::RegistrationState::Registered &&
-                   regState[id2] == compactphone::sip::RegistrationState::Registered;
-        };
-        bool ok = false;
-        {
-            std::unique_lock l(regMtx);
-            ok = cv.wait_for(l, 10s, bothRegistered);
-        }
-        // The lambda above captures this function's stack locals by
-        // reference. Clearing the callback is a quiesce barrier (the setter
-        // and the PJSIP-thread invocation share m_callbackMutex), so after
-        // this line no late registration event — a mid-test flap or
-        // TearDown's unregister — can write through the dead stack frame.
-        // Must happen BEFORE the ASSERT, which returns early on failure.
-        am->setOnRegistrationStateChanged({});
-        ASSERT_TRUE(ok)
-            << "1001 state=" << static_cast<int>(regState[id1])
-            << " 1002 state=" << static_cast<int>(regState[id2]);
+        ASSERT_TRUE(waitForRegState(
+            *am, {id1, id2},
+            compactphone::sip::RegistrationState::Registered, 10s))
+            << "1001 state=" << static_cast<int>(am->stateOf(id1))
+            << " 1002 state=" << static_cast<int>(am->stateOf(id2));
     }
 };
 

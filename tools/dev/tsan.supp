@@ -60,8 +60,13 @@ race:pjmedia_wsola_save
 # Qt hands cross-thread QMetaObject::invokeMethod functors through its event
 # queue, which synchronizes via QBasicMutex futexes invisible to TSan in an
 # uninstrumented QtCore — the functor's heap storage (operator new on the
-# posting thread, executed on the receiver thread) gets flagged. Suppressing
-# the posting-side helper keeps genuine races on lambda-captured data
-# visible: their writer is application code, not the invokeMethod
-# allocation.
+# posting thread, freed by sendPostedEvents on the receiver thread) gets
+# flagged. Two posting-side frames cover the two entry shapes: the helper
+# template (instrumented, when our code posts directly) and invokeMethodImpl
+# itself (when the post happens under an uninstrumented pjsua2 callback
+# frame, e.g. on_call_transfer_status -> CallManager's queued transfer-status
+# decision, so the intermediate instrumented frame is elided). Genuine races
+# on lambda-captured data stay visible: their accesses sit in application
+# frames inside the executed functor, not in the invokeMethod allocation.
 race:invokeMethodCallableHelper
+race:QMetaObject::invokeMethodImpl

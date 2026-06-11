@@ -7,15 +7,20 @@
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
+#include "test_support.h"
+
 #include <QCoreApplication>
 
+#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
-#include <mutex>
 #include <thread>
 
 using namespace std::chrono_literals;
+using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
+using compactphone::testsupport::waitForRegState;
+using compactphone::testsupport::ScopedAccountCallbacks;
 
 namespace {
 std::string sipServer()
@@ -52,6 +57,13 @@ protected:
 
 TEST_F(InboundCallTest, ReceivesAndAcceptsCallFromSecondAccount)
 {
+    // Lock-free observation state, declared before the managers so a late
+    // PJSIP event delivered during their teardown can never write through a
+    // dead stack slot.
+    std::atomic<int> incomingCallId{-1};
+    std::atomic<compactphone::sip::CallState> observed{
+        compactphone::sip::CallState::Idle};
+
     compactphone::sip::AccountsManager am(&engine, &db, &kc);
 
     auto mkAccount = [&](const std::string &user, const std::string &pwd, bool isDefault) {
@@ -67,62 +79,42 @@ TEST_F(InboundCallTest, ReceivesAndAcceptsCallFromSecondAccount)
         return am.add(a, pwd);
     };
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    int registeredCount = 0;
-    am.setOnRegistrationStateChanged([&](auto, auto s) {
-        std::lock_guard l(mtx);
-        if (s == compactphone::sip::RegistrationState::Registered) ++registeredCount;
-        cv.notify_all();
-    });
-
     const auto id1 = mkAccount("1001", "compactphone1001", true);
     const auto id2 = mkAccount("1002", "compactphone1002", false);
     ASSERT_NE(id1, compactphone::sip::kInvalidAccountId);
     ASSERT_NE(id2, compactphone::sip::kInvalidAccountId);
 
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] { return registeredCount >= 2; }));
-    }
+    ASSERT_TRUE(waitForRegState(
+        am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
     compactphone::sip::CallManager cm(&am);
-    int incomingCallId = -1;
-    compactphone::sip::CallState observed = compactphone::sip::CallState::Idle;
+    // The incoming-call lambda below captures cm; the guard clears every
+    // AccountsManager callback before cm dies — including on ASSERT
+    // early-returns, which skip cleanup written after the assertion.
+    ScopedAccountCallbacks guard(am);
     am.setOnIncomingCall([&](compactphone::sip::AccountId aid, int pjsipCallId) {
-        const auto localCallId = cm.adoptIncomingCall(aid, pjsipCallId);
-        std::lock_guard l(mtx);
-        incomingCallId = localCallId;
-        cv.notify_all();
+        incomingCallId.store(cm.adoptIncomingCall(aid, pjsipCallId));
     });
     cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
-        std::lock_guard l(mtx); observed = s; cv.notify_all();
+        observed.store(s);
     });
 
     // 1002 dials 1001 — Asterisk routes via dialplan to PJSIP/1001.
     auto outboundCall = cm.makeCall(id2, udpTarget("1001"));
     ASSERT_NE(outboundCall, compactphone::sip::kInvalidCallId);
 
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] { return incomingCallId > 0; }));
-    }
+    ASSERT_TRUE(pollUntil([&] { return incomingCallId.load() > 0; }, 10s));
 
-    EXPECT_TRUE(cm.accept(incomingCallId));
+    EXPECT_TRUE(cm.accept(incomingCallId.load()));
 
-    {
-        std::unique_lock l(mtx);
-        ASSERT_TRUE(cv.wait_for(l, 10s, [&] {
-            return observed == compactphone::sip::CallState::Confirmed;
-        }));
-    }
+    ASSERT_TRUE(pollUntil([&] {
+        return observed.load() == compactphone::sip::CallState::Confirmed;
+    }, 10s));
 
     std::this_thread::sleep_for(1s);
-    cm.hangup(incomingCallId);
+    cm.hangup(incomingCallId.load());
     cm.hangup(outboundCall);
 
-    for (int i = 0; i < 30; ++i) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        std::this_thread::sleep_for(20ms);
-    }
+    // Drain the disconnects and the post-disconnect grace timer.
+    pumpUntil([&] { return cm.callCount() == 0; }, 8s);
 }
