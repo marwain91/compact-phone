@@ -4,6 +4,8 @@
 // backend-agnostic semantics live in the contract suite.
 #include "core/sipbackend/fake/FakeSipBackend.h"
 
+#include <memory>
+
 #include <QCoreApplication>
 #include <QThread>
 
@@ -53,10 +55,15 @@ AccountSettings testAccount()
 }
 
 class FakeBackendTest : public ::testing::Test {
+public:
+    // m_app must be the first data member so QCoreApplication exists before
+    // the FakeSipBackend QObject is constructed (members initialize in
+    // declaration order).
+    QCoreApplication *m_app = ensureApp();
+
 protected:
     void SetUp() override
     {
-        ensureApp();
         backend.setListener(&listener);
     }
 
@@ -110,5 +117,37 @@ TEST_F(FakeBackendTest, ClearingListenerDropsPendingEvents)
 
     backend.setListener(nullptr);   // quiesce barrier
     pumpEvents();
+    EXPECT_TRUE(listener.events.empty());
+}
+
+TEST_F(FakeBackendTest, DestructionCancelsQueuedEvents)
+{
+    auto local = std::make_unique<FakeSipBackend>();
+    local->setListener(&listener);
+    local->start(EngineConfig{});
+    const auto id = local->addAccount(testAccount());
+    local->simulateRegState(id, true, 200, "OK");
+
+    local.reset();   // must cancel the queued delivery, not crash
+    pumpEvents();
+    EXPECT_TRUE(listener.events.empty());
+}
+
+TEST_F(FakeBackendTest, SwappingListenerDropsEventsQueuedForPrevious)
+{
+    backend.start(EngineConfig{});
+    const auto id = backend.addAccount(testAccount());
+    backend.simulateRegState(id, true, 200, "OK");
+
+    RecordingListener replacement;
+    backend.setListener(&replacement);   // quiesce barrier
+    pumpEvents();
+    EXPECT_TRUE(listener.events.empty());
+    EXPECT_TRUE(replacement.events.empty());
+
+    // New events flow to the replacement.
+    backend.simulateRegState(id, false, 503, "Service Unavailable");
+    pumpEvents();
+    ASSERT_EQ(replacement.events.size(), 1u);
     EXPECT_TRUE(listener.events.empty());
 }

@@ -54,6 +54,8 @@ public:
     // event is delivered to the previous listener.
     virtual void setListener(ISipBackendListener *listener) = 0;
     virtual bool start(const EngineConfig &cfg) = 0;
+    // stop() drops all accounts, calls, and watches — a restarted backend
+    // starts empty.
     virtual void stop() = 0;
     virtual bool isRunning() const = 0;
 

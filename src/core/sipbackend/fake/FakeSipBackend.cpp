@@ -1,6 +1,5 @@
 #include "FakeSipBackend.h"
 
-#include <QCoreApplication>
 #include <QObject>
 
 namespace compactphone::sipbackend {
@@ -35,6 +34,11 @@ void FakeSipBackend::stop()
     // Contract rule 4: nothing queued before stop() may fire after it.
     ++m_epoch;
     m_running = false;
+    // Per ISipBackend contract: a restarted backend starts empty.
+    m_accounts.clear();
+    m_calls.clear();
+    m_watches.clear();
+    m_ringtonePath.clear();
 }
 
 void FakeSipBackend::post(std::function<void()> fn)
@@ -64,18 +68,26 @@ std::vector<AudioDevice> FakeSipBackend::audioDevices() const
 
 bool FakeSipBackend::setCaptureDevice(int id)
 {
-    if (id != 0 && id != 1)
-        return false;
-    m_captureDevice = id;
-    return true;
+    const auto devs = audioDevices();
+    for (const auto &d : devs) {
+        if (d.id == id && d.inputCount > 0) {
+            m_captureDevice = id;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool FakeSipBackend::setPlaybackDevice(int id)
 {
-    if (id != 0 && id != 1)
-        return false;
-    m_playbackDevice = id;
-    return true;
+    const auto devs = audioDevices();
+    for (const auto &d : devs) {
+        if (d.id == id && d.outputCount > 0) {
+            m_playbackDevice = id;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool FakeSipBackend::playRingtone(const std::string &path)
@@ -98,8 +110,10 @@ AccountId FakeSipBackend::addAccount(const AccountSettings &settings)
 
 bool FakeSipBackend::removeAccount(AccountId id)
 {
+    if (m_accounts.erase(id) == 0)
+        return false;
     logCmd("removeAccount:" + std::to_string(id));
-    return m_accounts.erase(id) != 0;
+    return true;
 }
 
 bool FakeSipBackend::sendMessage(AccountId id, const std::string &toUri,
@@ -123,8 +137,10 @@ WatchId FakeSipBackend::watch(AccountId accountId, const std::string &uri)
 
 bool FakeSipBackend::unwatch(WatchId id)
 {
+    if (m_watches.erase(id) == 0)
+        return false;
     logCmd("unwatch:" + std::to_string(id));
-    return m_watches.erase(id) != 0;
+    return true;
 }
 
 void FakeSipBackend::simulateRegState(AccountId id, bool regActive,

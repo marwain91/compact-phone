@@ -9,7 +9,9 @@
 // Main-thread-only, like every backend consumer. The epoch counter is
 // how queued lambdas detect they were invalidated: stop() and
 // setListener() bump it, and a lambda only fires if its captured epoch
-// still matches.
+// still matches. Destruction safety comes from m_dispatch being the
+// invokeMethod context — destroying it cancels undelivered lambdas —
+// so it must never be replaced with an app-global context.
 
 #include "../ISipBackend.h"
 
