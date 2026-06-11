@@ -161,10 +161,26 @@ TEST_F(CallPoliciesTest, DndDeclinesIncomingCallAndOriginatorDisconnects)
     auto callerLeg = cm->makeCall(id1, udpTarget("1002"));
     ASSERT_NE(callerLeg, compactphone::sip::kInvalidCallId);
 
-    EXPECT_TRUE(pumpUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         std::lock_guard l(mtx);
         return observed[callerLeg] == compactphone::sip::CallState::Disconnected;
     }, 10s)) << "caller leg never went Disconnected";
+
+    // Disconnected alone is not enough: a fixture mishap (e.g. Asterisk
+    // returning 480 because 1002's contact wasn't registered yet) also ends
+    // the call and would pass vacuously. The caller leg's final disposition
+    // must be the decline family. Our policy declines the callee leg with
+    // 603; Asterisk maps an incoming 603 to hangup cause 21 (Call Rejected)
+    // and relays cause 21 to the caller as 403 Forbidden — so 403 is the
+    // expected code through this fixture, with 486/600/603 accepted for
+    // Asterisk builds that pass the decline through. 480 (no contact),
+    // 408 (timeout) and 5xx still fail loudly.
+    // Read promptly after Disconnected: the entry is dropped by the
+    // post-disconnect grace eraseCall().
+    const int code = cm->lastStatusCode(callerLeg);
+    EXPECT_TRUE(code == 403 || code == 486 || code == 600 || code == 603)
+        << "caller leg ended with status " << code
+        << ", not a decline";
 }
 
 TEST_F(CallPoliciesTest, AutoAnswerAcceptsIncomingCallWithoutManualAccept)

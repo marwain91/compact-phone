@@ -30,10 +30,12 @@ public:
         // m_calls forever (no later state callback will ever come).
         auto state = PJSIP_INV_STATE_DISCONNECTED;
         std::string stateText = "(call already gone)";
+        int lastCode = 0;
         try {
             const auto info = getInfo();
             state = info.state;
             stateText = info.stateText;
+            lastCode = static_cast<int>(info.lastStatusCode);
         } catch (const pj::Error &e) {
             spdlog::warn("Call {} onCallState getInfo failed: {}", m_localId,
                          e.info());
@@ -49,6 +51,9 @@ public:
         case PJSIP_INV_STATE_CONFIRMED:
             m_owner->notifyStateChange(m_localId, CallState::Confirmed); break;
         case PJSIP_INV_STATE_DISCONNECTED:
+            // Record before notifying so an observer that sees Disconnected
+            // can immediately read lastStatusCode().
+            m_owner->recordDisconnectCode(m_localId, lastCode);
             m_owner->notifyStateChange(m_localId, CallState::Disconnected); break;
         default: break;
         }
@@ -375,6 +380,7 @@ void CallManager::eraseCall(int callId)
         }
         m_callAccount.erase(id);
         m_callStates.erase(id);
+        m_lastStatusCodes.erase(id);
         m_mutedState.erase(id);
     }
     // pj::Call's destructor calls into PJSIP — run it outside the lock.
@@ -1149,6 +1155,19 @@ void CallManager::setOnCallEvent(std::function<void(CallId, CallState)> cb)
 {
     std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_eventCb = std::move(cb);
+}
+
+void CallManager::recordDisconnectCode(CallId id, int statusCode)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_lastStatusCodes[id] = statusCode;
+}
+
+int CallManager::lastStatusCode(CallId id) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_lastStatusCodes.find(id);
+    return it != m_lastStatusCodes.end() ? it->second : 0;
 }
 
 void CallManager::notifyStateChange(CallId id, CallState s)

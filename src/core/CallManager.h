@@ -154,6 +154,16 @@ public:
     // which isHeld() (bookkeeping only) cannot show.
     bool isMediaActive(CallId id) const;
 
+    // SIP status code of the call's final disposition (pj::CallInfo's
+    // lastStatusCode, captured when the DISCONNECTED state was dispatched)
+    // — e.g. 603 for a decline, 486 busy, 200 for a normal BYE. Returns 0
+    // while the call is still up, if the id is unknown, or once the
+    // post-disconnect grace eraseCall() has dropped the entry — read it
+    // promptly after observing Disconnected. Test-only accessor: lets
+    // tests assert WHY a call ended (a DND decline vs. any other
+    // teardown), which CallState::Disconnected alone cannot show.
+    int lastStatusCode(CallId id) const;
+
     // Currently-active call id (the one transmitting audio). kInvalidCallId
     // if no calls are active. Updated by makeCall/accept/unhold/eraseCall.
     CallId activeCallId() const { return m_activeCallId; }
@@ -173,10 +183,11 @@ private:
     // Threading contract. PJSIP callbacks arrive on the PJSUA worker thread
     // (SipEngine uses the default uaConfig.threadCnt = 1, mainThreadOnly is
     // not set). On that thread, adoptIncomingCall() inserts into m_calls /
-    // m_callAccount, notifyStateChange() writes m_callStates, and
+    // m_callAccount, notifyStateChange() writes m_callStates,
+    // recordDisconnectCode() writes m_lastStatusCodes, and
     // onCallMediaState reads m_mutedState (to honour mute across media
     // re-activation), while the main thread reads and erases the same maps —
-    // so those four maps are guarded by m_mutex, and m_nextId is atomic
+    // so those five maps are guarded by m_mutex, and m_nextId is atomic
     // (makeCall on the main thread and adoptIncomingCall on the PJSIP thread
     // both mint ids). Everything else (m_lingeringCalls, m_heldState,
     // m_transfers, the URI caches, m_players, m_recorder, m_activeCallId) is
@@ -219,6 +230,9 @@ private:
     std::unordered_map<CallId, std::unique_ptr<CallImpl>> m_graceCalls;
     std::unordered_map<CallId, AccountId> m_callAccount;
     std::unordered_map<CallId, CallState> m_callStates;
+    // Final-disposition SIP code per call, written when DISCONNECTED is
+    // dispatched; erased with the rest of the bookkeeping in eraseCall().
+    std::unordered_map<CallId, int> m_lastStatusCodes;
     std::unordered_map<CallId, bool> m_heldState;
     std::unordered_map<CallId, bool> m_mutedState;
     // Tracks calls to hang up once a REFER/transfer completes.
@@ -247,6 +261,11 @@ private:
     CallId m_activeCallId = kInvalidCallId;
 
     void notifyStateChange(CallId id, CallState s);
+    // Records the final-disposition SIP code for a call. Runs on the PJSIP
+    // worker thread from CallImpl::onCallState, BEFORE the Disconnected
+    // notification — so an observer that sees Disconnected can immediately
+    // read the code via lastStatusCode().
+    void recordDisconnectCode(CallId id, int statusCode);
     void handleTransferStatus(CallId id, int statusCode, bool finalNotify,
                               const std::string &reason);
     bool isConfirmedState(CallId id) const;
