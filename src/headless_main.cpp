@@ -5,6 +5,7 @@
 #include "core/CoreSipGraph.h"
 #include "core/SipEngine.h"
 #include "core/platform/Keychain_memory.h"
+#include "core/sipbackend/ListenerFanout.h"
 #include "core/sipbackend/pjsip/PjsipBackend.h"
 #include "models/AccountsModel.h"
 #include "persistence/Database.h"
@@ -63,9 +64,11 @@ public:
         // events are delivered to AccountsManager during teardown.
         // (See CoreSipGraph.h wiring contract.)
         if (m_backend) m_backend->setListener(nullptr);
-        // m_accounts, m_calls, m_accountsController, m_accountsModel,
-        // m_backend all destruct via unique_ptr in reverse declaration order
-        // after this function returns. m_engine.stop() is not called
+        // m_listener, m_accounts, m_calls, m_accountsController,
+        // m_accountsModel, m_backend all destruct via unique_ptr in reverse
+        // declaration order after this function returns (the fanout's sinks
+        // are already severed by setListener(nullptr) above, so its order
+        // relative to the managers is harmless). m_engine.stop() is not called
         // explicitly — the engine stays alive while pj::Account destructors
         // run inside m_accounts (via AccountsManager::~AccountsManager /
         // PjsipBackend::removeAccount). The engine stops when m_engine goes
@@ -96,11 +99,12 @@ public:
         m_backend = std::make_unique<compactphone::sipbackend::PjsipBackend>(&m_engine);
 
         auto core = compactphone::buildCoreSipGraph(
-            m_backend.get(), m_backend.get(), &m_db, &m_keychain, &m_engine);
+            m_backend.get(), &m_db, &m_keychain, &m_engine);
         m_accounts = std::move(core.accounts);
         m_accountsModel = std::move(core.accountsModel);
         m_accountsController = std::move(core.accountsController);
         m_calls = std::move(core.calls);
+        m_listener = std::move(core.listener);
 
         m_autoAnswer =
             m_cfg.headlessAutoAnswer.value_or(m_cfg.autoAnswer.value_or(false));
@@ -141,6 +145,9 @@ private:
     // from the backend inside AccountsManager's destructor before m_backend
     // is reset. The destructor above handles the explicit teardown ordering.
     std::unique_ptr<compactphone::sipbackend::PjsipBackend> m_backend;
+    // Routes backend events to accounts then calls; kept alive for the
+    // backend's listener pointer, quiesced via setListener(nullptr) in dtor.
+    std::unique_ptr<compactphone::sipbackend::ListenerFanout> m_listener;
     std::unique_ptr<compactphone::sip::AccountsManager> m_accounts;
     std::unique_ptr<compactphone::models::AccountsModel> m_accountsModel;
     std::unique_ptr<compactphone::AccountsController> m_accountsController;
@@ -162,12 +169,11 @@ private:
                 }, Qt::QueuedConnection);
             });
 
-        m_accounts->setOnIncomingCall(
-            [this](compactphone::sip::AccountId accountId, int pjsipCallId) {
-                QMetaObject::invokeMethod(this, [this, accountId, pjsipCallId] {
-                    onIncomingCall(accountId, pjsipCallId);
-                }, Qt::QueuedConnection);
-            });
+        // The adapter wraps incoming calls eagerly inside the PJSIP callback;
+        // CallManager records them and emits incomingCall on the main thread.
+        QObject::connect(m_calls.get(),
+                         &compactphone::sip::CallManager::incomingCall,
+                         this, [this](int callId) { onIncomingCall(callId); });
 
         m_calls->setOnCallEvent(
             [this](compactphone::sip::CallId id,
@@ -251,13 +257,11 @@ private:
         spdlog::info("headless: calling {}", m_cfg.headlessCallUri->toStdString());
     }
 
-    void onIncomingCall(compactphone::sip::AccountId accountId, int pjsipCallId)
+    void onIncomingCall(int callId)
     {
-        const auto id = m_calls->adoptIncomingCall(accountId, pjsipCallId);
-        if (id == compactphone::sip::kInvalidCallId) {
-            spdlog::warn("headless: incoming call could not be adopted");
-            return;
-        }
+        // The backend wrapped the call eagerly and CallManager recorded it
+        // before emitting this signal — accept() is valid immediately.
+        const auto id = static_cast<compactphone::sip::CallId>(callId);
         m_activeCallId = id;
         m_sawCall = true;
         spdlog::info("headless: incoming call {}", id);

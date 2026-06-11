@@ -68,7 +68,7 @@ public:
     WatchId watch(AccountId accountId, const std::string &uri) override;
     bool unwatch(WatchId id) override;
 
-    // --- calls (phase 3 stubs) ---
+    // --- calls ---
     CallId makeCall(AccountId accountId, const std::string &uri) override;
     bool answer(CallId id) override;
     bool decline(CallId id, int sipCode) override;
@@ -91,25 +91,11 @@ public:
     bool isCaptureTransmitting(CallId id) const override;
     void releaseCall(CallId id) override;
 
-    // --- transitional bridges (NOT on ISipBackend; removed in phase 3) ---
-    // pjAccountFor: AccountsManager forwards this so CallManager can
-    // construct pj::Call against the right pj::Account.
-    //
-    // nativeCallIdFor: currently UNCONSUMED — incoming calls deliver the
-    // native PJSUA call id directly through the synchronous hook, not via
-    // this accessor. The map and accessor are retained for phase-3 call
-    // adoption (makeCall/answer paths) and removed alongside pjAccountFor.
+    // --- presence bridge (NOT on ISipBackend) ---
+    // pjAccountFor: AccountsManager forwards this so LinesManager can create
+    // pj::Buddy presence (BLF) subscriptions against the right pj::Account.
+    // Removed in phase 5 when presence moves behind ISipBackend.
     pj::Account *pjAccountFor(AccountId id);
-    int nativeCallIdFor(CallId id) const;
-
-    // Transitional synchronous incoming-call hook — phase-3-removed alongside
-    // pjAccountFor/nativeCallIdFor. The hook fires ON THE PJSIP THREAD with
-    // (backendAccountId, pjsipCallId). Invocation happens under m_hookMutex,
-    // so setNativeIncomingCallHook({}) is a quiesce barrier: once it returns,
-    // no in-flight hook invocation can still be running and no new one will
-    // start. Mirror of AccountsManager's m_callbackMutex contract. Never call
-    // setNativeIncomingCallHook from inside the hook itself.
-    void setNativeIncomingCallHook(std::function<void(AccountId, int)> hook);
 
 private:
     class PjsipAccount;   // pj::Account subclass; defined in .cpp
@@ -126,10 +112,6 @@ private:
                             const std::string &body);
     void postMwi(AccountId id, int newMessages, int oldMessages, bool active);
 
-    // Superseded by wrapIncomingCall (deleted in Task 4). Kept so this TU
-    // still compiles for one commit; no longer called.
-    void announceIncomingCall(AccountId accId, int pjsipCallId);
-
     // Called from PjsipCall callbacks (PJSUA worker thread). postCallState's
     // posted lambda additionally drops the call's recorder/file player on
     // Disconnected (main-thread, before notifying the listener) so the WAV
@@ -145,11 +127,6 @@ private:
     // which answer/decline fail with PJSIP_ESESSIONTERMINATED; this is what
     // the phase-2 synchronous hook existed for) — then resolves remote info
     // and posts onIncomingCall with the data pushed.
-    //
-    // Transitional (deleted in the CallManager-rewire commit): while the
-    // phase-2 hook is installed, the old synchronous-adoption path runs and
-    // the eager wrap is skipped — two pj::Call wrappers for one pjsua call
-    // id would corrupt pjsua2's call map.
     void wrapIncomingCall(PjsipAccount &account, AccountId accId,
                           int pjsipCallId);
 
@@ -214,17 +191,6 @@ private:
     // and CallManager::m_players.
     std::map<CallId, std::unique_ptr<pj::AudioMediaRecorder>> m_recorders;
     std::map<CallId, std::unique_ptr<pj::AudioMediaPlayer>> m_filePlayers;
-
-    // Guards m_nativeCallIds — phase-2 only, deleted in Task 4 with the
-    // bridges. Never held while calling into PJSIP.
-    mutable std::mutex m_nativeMutex;
-    std::map<CallId, int> m_nativeCallIds;   // incoming announcements, phase-2 only
-
-    // Guards m_nativeIncomingHook. Declared BEFORE m_events so that the hook
-    // quiesce barrier (setNativeIncomingCallHook({})) is always usable even
-    // after m_events has been invalidated.
-    mutable std::mutex m_hookMutex;
-    std::function<void(AccountId, int)> m_nativeIncomingHook;
 
     // Declared LAST: EventDispatch's internal QObject is the invokeMethod
     // context — destroying it cancels undelivered lambdas and pending timers —

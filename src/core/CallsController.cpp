@@ -103,20 +103,13 @@ CallsController::CallsController(sip::AccountsManager *accounts,
       m_activeAccountProvider(std::move(activeAccountProvider)),
       m_noticeSink(std::move(noticeSink))
 {
-    if (m_accounts) {
-        m_accounts->setOnIncomingCall(
-            [this](sip::AccountId aid, int pjsipCallId) {
-                // Adoption MUST happen synchronously on the PJSIP thread.
-                // If we defer it to the main thread, PJSIP's INVITE
-                // session is gone by the time we wrap the call object
-                // (it tears down within ~15ms when nothing claims it),
-                // so subsequent accept/decline calls fail with
-                // PJSIP_ESESSIONTERMINATED.
-                if (!m_calls) return;
-                const auto callId = m_calls->adoptIncomingCall(aid, pjsipCallId);
-                if (callId == sip::kInvalidCallId) return;
-
-                QMetaObject::invokeMethod(this, [this, callId] {
+    if (m_calls) {
+        // The backend wraps incoming calls eagerly inside the PJSIP callback
+        // (retaining the INVITE session) and CallManager records them before
+        // emitting this signal on the main thread — the old synchronous-
+        // adoption constraint is gone (see PjsipBackend::wrapIncomingCall).
+        connect(m_calls, &sip::CallManager::incomingCall,
+                this, [this](int callId) {
                     if (!m_calls) return;
                     refreshCallsModel();
                     {
@@ -175,11 +168,8 @@ CallsController::CallsController(sip::AccountsManager *accounts,
                         }
                     }
                     publishRingingState();
-                }, Qt::QueuedConnection);
-            });
-    }
+                });
 
-    if (m_calls) {
         connect(m_calls, &sip::CallManager::callsChanged,
                 this, [this] {
                     refreshCallsModel();
@@ -237,7 +227,8 @@ CallsController::CallsController(sip::AccountsManager *accounts,
 
 CallsController::~CallsController()
 {
-    if (m_accounts) m_accounts->setOnIncomingCall({});
+    // The incomingCall connection is severed automatically (this is the
+    // context object). Only the std::function slot needs explicit quiesce.
     if (m_calls) m_calls->setOnCallEvent({});
 }
 

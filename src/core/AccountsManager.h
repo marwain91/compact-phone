@@ -12,13 +12,13 @@
 #include <unordered_map>
 #include <vector>
 
-// pj::Account is still needed by pjAccountFor() (transitional bridge until
-// phase 3 when CallManager migrates off direct pj::Account access).
+// pj::Account is still needed by pjAccountFor(), which LinesManager uses to
+// drive presence (BLF) pj::Buddy subscriptions. Presence moves behind the
+// backend in phase 5; pjAccountFor and this forward declaration die then.
 namespace pj { class Account; }
 
 namespace compactphone::persistence { class Database; }
 namespace compactphone::platform { class IKeychain; }
-namespace compactphone::sipbackend { class PjsipBackend; }
 
 namespace compactphone::sip {
 
@@ -73,22 +73,17 @@ struct MwiState {
 // ALL domain logic: DB CRUD, keychain, password cache, default-account
 // policy, enable/update orchestration, and mapRegEvent application.
 //
-// Listener-side state (m_backendIds, m_regStates, m_regErrors) is
-// MAIN-THREAD-ONLY: events arrive queued by the backend's EventDispatch, so
-// no new mutex is needed for those maps. m_callbackMutex guards the four
-// callback slots + m_mwi (phase 4 removes it when CallManager also rides
-// the listener). m_backendIdsMutex guards m_backendIds only for the benefit
-// of the incoming-call hook, which fires on the PJSIP thread.
+// MAIN-THREAD-ONLY since phase 3 (the PJSIP-thread incoming-call hook is
+// gone): all listener-side state (m_backendIds, m_regStates, m_regErrors)
+// is read and written on the main thread, so no mutex guards them.
+// m_callbackMutex still guards the callback slots + m_mwi (phase 4 removes
+// it when those slots become listener events).
 class AccountsManager : public sipbackend::ISipBackendListener {
 public:
-    // pjsipBridge may be null (fake-backed tests and future non-PJSIP
-    // backends). It exists solely for pjAccountFor() (phase-3-removed) and
-    // for installing the native incoming-call hook (phase-2-only). The caller
-    // (buildCoreSipGraph) must call backend->setListener(this) AFTER
-    // construction and must call backend->setListener(nullptr) BEFORE
+    // The caller (buildCoreSipGraph) must call backend->setListener(this)
+    // AFTER construction and must call backend->setListener(nullptr) BEFORE
     // teardown — see CoreSipGraph.cpp.
     AccountsManager(sipbackend::ISipBackend *backend,
-                    sipbackend::PjsipBackend *pjsipBridge,
                     persistence::Database *db,
                     platform::IKeychain *keychain);
     ~AccountsManager() override;
@@ -165,14 +160,18 @@ public:
     void setOnRegistrationStateChanged(
         std::function<void(AccountId, RegistrationState)> cb);
 
-    // Callback fired from a PJSIP thread (via native hook) when an inbound
-    // call arrives. `pjsipCallId` is the native PJSUA call id, which
-    // CallManager wraps via adoptIncomingCall.
-    void setOnIncomingCall(std::function<void(AccountId, int)> cb);
+    // Backend id for a registered domain account (kInvalidAccountId if not
+    // registered). Main-thread-only. Used by CallManager::makeCall.
+    sipbackend::AccountId backendIdFor(AccountId id) const;
+    // Reverse mapping for backend events that carry a backend account id.
+    // Main-thread-only.
+    AccountId accountIdForBackend(sipbackend::AccountId backendId) const;
 
-    // For CallManager: returns the underlying pj::Account for the given id,
-    // or nullptr if not registered. Phase-3-removed (CallManager migrates
-    // onto the backend call API). Lifetime tied to AccountsManager.
+    // For LinesManager presence (BLF): returns the underlying pj::Account for
+    // the given id, or nullptr if not registered or the backend is not the
+    // PJSIP adapter. Resolved via a dynamic_cast on the backend. Removed in
+    // phase 5 when presence moves behind ISipBackend. Lifetime tied to
+    // AccountsManager.
     pj::Account *pjAccountFor(AccountId id);
 
     // Test hook: returns the keychain reference used for an account's
@@ -187,8 +186,8 @@ public:
     void onInstantMessage(sipbackend::AccountId backendId,
                           const std::string &fromUri,
                           const std::string &body) override;
-    // Call-related listener events: empty in phase 2 (calls ride the native
-    // hook; CallManager still uses pj::Account directly until phase 3).
+    // Call-related listener events: AccountsManager handles only the account
+    // half; the ListenerFanout forwards these to CallManager, which owns them.
     void onIncomingCall(sipbackend::AccountId, sipbackend::CallId,
                         const std::string &, const std::string &) override {}
     void onCallState(sipbackend::CallId, sipbackend::CallState,
@@ -202,10 +201,6 @@ private:
     struct Entry;
 
     sipbackend::ISipBackend *m_backend;
-    // Nullable: non-null only for PjsipBackend-backed instances. Holds the
-    // PJSIP-specific transitional bridges (pjAccountFor, incoming hook).
-    // Phase-3-removed alongside pjAccountFor.
-    sipbackend::PjsipBackend *m_pjsipBridge;
     persistence::Database *m_db;
     platform::IKeychain *m_keychain;
 
@@ -216,32 +211,11 @@ private:
     // prompted by macOS Keychain Services more than once per session.
     std::unordered_map<std::string, std::string> m_passwordCache;
 
-    // Maps domain AccountId → backend AccountId. Written on the main thread
-    // by registerAccount/unregisterAccount; read on the PJSIP thread by the
-    // incoming-call hook. Guarded by m_backendIdsMutex.
-    //
-    // LOCK DISCIPLINE (incoming-call path):
-    //   m_hookMutex (PjsipBackend) is the outer lock — it is never taken
-    //   while either of these mutexes is already held.
-    //   Inside the hook, the two manager mutexes are taken SEQUENTIALLY,
-    //   never nested:
-    //     1. m_backendIdsMutex — held briefly for the reverse-map lookup,
-    //        then released.
-    //     2. m_callbackMutex — acquired next, after (1) is fully released,
-    //        to invoke m_onIncoming.
-    //   Neither mutex is ever held while the other is also held.
-    //   If a future change must acquire both, the ONLY permissible order is
-    //   m_backendIdsMutex-inside-m_callbackMutex is FORBIDDEN — callback
-    //   handlers may re-enter manager getters that take m_backendIdsMutex,
-    //   so callbackMutex must always be the innermost (or the two must
-    //   remain strictly sequential as today).
-    //
-    // m_backendIdsMutex discipline:
-    //   - Hold BRIEFLY (map read/write only).
-    //   - NEVER call into PJSIP or the backend while holding it.
-    //   - The incoming-call hook holds it only long enough to do a
-    //     reverse-map lookup, then releases before calling m_callbackMutex.
-    mutable std::mutex m_backendIdsMutex;
+    // Maps domain AccountId → backend AccountId. Main-thread-only since
+    // phase 3 (the PJSIP-thread incoming hook that needed a mutex is gone):
+    // written by registerAccount/unregisterAccount and read by
+    // backendIdFor/accountIdForBackend/sendInstantMessage/pjAccountFor, all
+    // on the main thread.
     std::map<AccountId, sipbackend::AccountId> m_backendIds;
 
     // Main-thread-only: updated from the queued onRegState listener event.
@@ -249,20 +223,18 @@ private:
     std::map<AccountId, RegistrationState> m_regStates;
     std::map<AccountId, RegError>          m_regErrors;
 
-    // Guards the four callback slots below plus m_mwi: assigned/read on the
-    // main thread (controller ctors/dtors, mwiStateOf), invoked from various
-    // threads (PJSIP hook for incoming calls; main thread for reg/MWI/IM
-    // events). Invocation happens UNDER this mutex, so a setter call is a
-    // quiesce barrier — when setOnX({}) returns, no in-flight invocation of
-    // the previous callback exists and none can start.
+    // Guards the callback slots below plus m_mwi. PHASE-4 REMOVAL CANDIDATE:
+    // since phase 3 every invocation (reg/MWI/IM events) is a queued
+    // main-thread listener event, so this mutex no longer guards any
+    // cross-thread access. It survives only so the controllers' quiesce
+    // idiom (setOnX({}) in destructors) keeps its documented contract until
+    // phase 4 replaces the slots outright.
     // FORBIDDEN from inside a callback: any setter (deadlock via self-lock)
     // AND any getter that takes this same mutex — mwiStateOf() in particular
     // acquires m_callbackMutex and will deadlock if called from a callback
-    // handler that already holds it. Phase 4 removes this mutex when all
-    // callbacks become main-thread-only listener events.
+    // handler that already holds it.
     mutable std::mutex m_callbackMutex;
     std::function<void(AccountId, RegistrationState)> m_cb;
-    std::function<void(AccountId, int)> m_onIncoming;
     std::function<void(AccountId, MwiState)> m_onMwi;
     std::unordered_map<AccountId, MwiState> m_mwi;
     std::function<void(AccountId, const std::string &, const std::string &)>

@@ -68,7 +68,7 @@ protected:
 
 TEST_F(AccountsManagerPasswordTest, AddStoresPasswordUnderAccountRef)
 {
-    compactphone::sip::AccountsManager mgr(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager mgr(&fake, &db, &kc);
     fake.setListener(&mgr);
 
     const auto id = mgr.add(makeAccount(), "first-secret");
@@ -82,7 +82,7 @@ TEST_F(AccountsManagerPasswordTest, AddStoresPasswordUnderAccountRef)
 
 TEST_F(AccountsManagerPasswordTest, SetPasswordReplacesKeychainValue)
 {
-    compactphone::sip::AccountsManager mgr(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager mgr(&fake, &db, &kc);
     fake.setListener(&mgr);
 
     const auto id = mgr.add(makeAccount(), "first-secret");
@@ -100,7 +100,7 @@ TEST_F(AccountsManagerPasswordTest, SetPasswordKeepsTheSameKeychainRef)
 {
     // The ref is reused on purpose so in-flight backend credentials and the DB
     // row don't need rewriting; pin that invariant.
-    compactphone::sip::AccountsManager mgr(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager mgr(&fake, &db, &kc);
     fake.setListener(&mgr);
 
     const auto id = mgr.add(makeAccount(), "first-secret");
@@ -114,7 +114,7 @@ TEST_F(AccountsManagerPasswordTest, SetPasswordKeepsTheSameKeychainRef)
 
 TEST_F(AccountsManagerPasswordTest, SetPasswordOnUnknownIdReturnsFalse)
 {
-    compactphone::sip::AccountsManager mgr(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager mgr(&fake, &db, &kc);
     fake.setListener(&mgr);
 
     EXPECT_FALSE(mgr.setPassword(424242, "whatever"));
@@ -126,7 +126,7 @@ TEST_F(AccountsManagerPasswordTest, AddStoresEmptyPasswordRatherThanRejectingIt)
 {
     // An empty password is a legitimate (if unusual) state — it must be
     // stored as "" under the ref, distinct from "no entry".
-    compactphone::sip::AccountsManager mgr(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager mgr(&fake, &db, &kc);
     fake.setListener(&mgr);
 
     const auto id = mgr.add(makeAccount(), "");
@@ -140,7 +140,7 @@ TEST_F(AccountsManagerPasswordTest, AddStoresEmptyPasswordRatherThanRejectingIt)
 
 TEST_F(AccountsManagerPasswordTest, RemoveErasesTheStoredPassword)
 {
-    compactphone::sip::AccountsManager mgr(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager mgr(&fake, &db, &kc);
     fake.setListener(&mgr);
 
     const auto id = mgr.add(makeAccount(), "first-secret");
@@ -159,7 +159,7 @@ TEST_F(AccountsManagerPasswordTest, RemoveErasesTheStoredPassword)
 
 TEST_F(AccountsManagerPasswordTest, RemoveOnUnknownIdReturnsFalse)
 {
-    compactphone::sip::AccountsManager mgr(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager mgr(&fake, &db, &kc);
     fake.setListener(&mgr);
 
     EXPECT_FALSE(mgr.remove(424242));
@@ -174,7 +174,7 @@ TEST_F(AccountsManagerPasswordTest, SetPasswordPersistsForAReloadedManager)
     compactphone::sip::AccountId id = compactphone::sip::kInvalidAccountId;
     std::string originalRef;
     {
-        compactphone::sip::AccountsManager mgr(&fake, nullptr, &db, &kc);
+        compactphone::sip::AccountsManager mgr(&fake, &db, &kc);
         fake.setListener(&mgr);
         id = mgr.add(makeAccount(), "first-secret");
         ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
@@ -184,7 +184,7 @@ TEST_F(AccountsManagerPasswordTest, SetPasswordPersistsForAReloadedManager)
         fake.setListener(nullptr);
     }
 
-    compactphone::sip::AccountsManager reloaded(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager reloaded(&fake, &db, &kc);
     fake.setListener(&reloaded);
     const auto accounts = reloaded.list();
     ASSERT_EQ(accounts.size(), 1u);
@@ -202,7 +202,7 @@ TEST_F(AccountsManagerPasswordTest, SetPasswordPersistsForAReloadedManager)
 // removeAccount + addAccount pair (re-registration with new credentials).
 TEST_F(AccountsManagerPasswordTest, SetPasswordOnEnabledAccountReregisters)
 {
-    compactphone::sip::AccountsManager mgr(&fake, nullptr, &db, &kc);
+    compactphone::sip::AccountsManager mgr(&fake, &db, &kc);
     fake.setListener(&mgr);
 
     compactphone::sip::Account a = makeAccount();

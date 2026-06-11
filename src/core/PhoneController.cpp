@@ -11,6 +11,7 @@
 #include "CallsController.h"
 #include "CallEntry.h"
 #include "CallManager.h"
+#include "sipbackend/ListenerFanout.h"
 #include "ContactsManager.h"
 #include "CoreSipGraph.h"
 #include "CrashReporting.h"
@@ -82,13 +83,14 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     // unique_ptr destructors — see member order in PhoneController.h).
     m_backend = std::make_unique<sipbackend::PjsipBackend>(m_engine.get());
 
-    auto core = buildCoreSipGraph(m_backend.get(), m_backend.get(),
+    auto core = buildCoreSipGraph(m_backend.get(),
                                   m_db.get(), m_keychain.get(),
                                   m_engine.get(), this);
     m_accounts = std::move(core.accounts);
     m_accountsModel = std::move(core.accountsModel);
     m_accountsController = std::move(core.accountsController);
     m_calls = std::move(core.calls);
+    m_listener = std::move(core.listener);
     m_callsModel = std::make_unique<models::CallsModel>(m_calls.get(), this);
 
     m_contacts = std::make_unique<sip::ContactsManager>(m_db.get());
@@ -355,17 +357,17 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
 PhoneController::~PhoneController()
 {
     // Quiesce the backend listener FIRST so no queued events are delivered
-    // to AccountsManager after it begins tearing down its state. This must
-    // run before any managers are reset (see CoreSipGraph.h wiring contract).
-    // AccountsManager's destructor also quiesces the native incoming-call hook
-    // (setNativeIncomingCallHook({})) — no explicit hook clear needed here.
+    // to the AccountsManager/CallManager fanout after they begin tearing
+    // down. This must run before any managers are reset (see CoreSipGraph.h
+    // wiring contract). The only PJSIP-thread → manager path left is the
+    // adapter's queued event dispatch, severed here by setListener(nullptr).
     if (m_backend) m_backend->setListener(nullptr);
 
-    // Quiesce the remaining PJSIP-thread callbacks we registered before
-    // tearing down the objects they capture. The manager callback setters
-    // block until any in-flight invocation completes (see m_callbackMutex in
-    // the managers), so after these return the PJSIP thread can no longer
-    // enter our lambdas. Controller destructors below do the same for theirs.
+    // Quiesce the remaining callback slots we assigned before tearing down
+    // the objects they capture. The manager callback setters block until any
+    // in-flight invocation completes (see m_callbackMutex in the managers),
+    // so after these return no lambda can re-enter. Controller destructors
+    // below do the same for theirs.
     // Teardown order: controllers (clear callbacks) -> managers (pj::Account /
     // pj::Call destructors serialize against in-flight dispatch via the PJSUA
     // lock) -> engine->stop() last (libDestroy after all pjsua2 objects gone).

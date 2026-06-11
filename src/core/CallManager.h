@@ -3,49 +3,60 @@
 #include "Account.h"
 #include "CallSnapshotSource.h"
 #include "TransferTracker.h"
+#include "sipbackend/ISipBackend.h"
 
 #include <QObject>
 
-#include <atomic>
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-namespace pj {
-class AudioMediaPlayer;
-}
-
 namespace compactphone::sip {
 
 class AccountsManager;
-class CallImpl;
-class CallRecorder;
 struct CallEntry;
 
 using CallId = std::int32_t;
 constexpr CallId kInvalidCallId = -1;
 
-enum class CallState {
-    Idle,
-    Calling,
-    EarlyMedia,
-    Confirmed,
-    Disconnected,
-};
+enum class CallState { Idle, Calling, EarlyMedia, Confirmed, Disconnected };
 
-class CallManager : public QObject, public CallSnapshotSource {
+// CallManager is the stack-neutral call POLICY layer: active-call
+// auto-hold, 486 decline semantics, transfer-NOTIFY outcome handling
+// (TransferTracker), unhold/bridge retries, and the post-disconnect UI
+// linger. All media/protocol MECHANICS live behind ISipBackend.
+//
+// THREADING: main-thread-only. Commands go to the backend on the main
+// thread (boundary rule 1); events arrive queued on the main thread
+// (boundary rule 2). There is no cross-thread state left and no mutex —
+// the locking discipline that used to live here moved into the PJSIP
+// adapter, where it is private. m_callbackMutex below is the one
+// exception, kept for phase-4 removal (see its comment).
+//
+// CallId values are the backend-minted ids — CallManager performs no id
+// translation. An id is live from makeCall()/onIncomingCall until the
+// manager calls m_backend->releaseCall(id) while handling Disconnected.
+class CallManager : public QObject,
+                    public CallSnapshotSource,
+                    public sipbackend::ISipBackendListener {
     Q_OBJECT
 signals:
     // Emitted whenever the set or state of calls changes (added, removed,
     // hold/mute toggled). PhoneController listens to refresh its model.
     void callsChanged();
+    // Emitted on the main thread when an incoming call has been recorded
+    // (replaces AccountsManager::setOnIncomingCall + adoptIncomingCall:
+    // the adapter wraps the call eagerly inside the PJSIP callback, so by
+    // the time this fires, accept()/decline() are valid on the id).
+    void incomingCall(int callId);
+
 public:
-    explicit CallManager(AccountsManager *am, QObject *parent = nullptr);
-    ~CallManager();
+    CallManager(sipbackend::ISipBackend *backend, AccountsManager *am,
+                QObject *parent = nullptr);
+    ~CallManager() override;
 
     CallManager(const CallManager &) = delete;
     CallManager &operator=(const CallManager &) = delete;
@@ -55,12 +66,6 @@ public:
 
     // Explicit account selection.
     CallId makeCall(AccountId accountId, const std::string &uri);
-
-    // Bind a PJSIP-native incoming call (id from OnIncomingCallParam) into
-    // CallManager's bookkeeping. Auto-declines with 486 Busy Here if any
-    // call is already active. Returns the local CallId, or kInvalidCallId
-    // if the call was declined or could not be adopted.
-    CallId adoptIncomingCall(AccountId accountId, int pjsipCallId);
 
     bool accept(CallId id);
 
@@ -116,21 +121,22 @@ public:
     bool isHeld(CallId id) const;
 
     // Mute or unmute the local mic for this call. Returns false if no such call
-    // or PJSIP rejected the request (e.g., no active audio media).
+    // or the backend rejected the request.
     bool setMuted(CallId id, bool muted);
     bool isMuted(CallId id) const;
 
     // Send DTMF digits ("0-9", "*", "#", "A-D"). Uses the DTMF method
     // configured on the originating account (RFC 2833 default, SIP INFO
     // if the account is set to DtmfMethod::Info). Returns false if no
-    // such call or PJSIP rejects the request.
+    // such call or the backend rejects the request.
     bool sendDtmf(CallId id, const std::string &digits);
 
     void setOnCallStateChanged(std::function<void(CallState)> cb);
     void setOnCallEvent(std::function<void(CallId, CallState)> cb);
 
-    // Real-time media stats sampled from PJSIP's RTCP report. All fields
-    // are -1 when the call has no active stream or stats are not populated.
+    // Real-time media stats sampled from the backend's RTCP report. All
+    // fields are -1 when the call has no active stream or stats are not
+    // populated.
     struct StreamStats {
         double mos = -1.0;       // estimated MOS 1.0–5.0
         double lossPct = -1.0;   // 0–100 (combined Rx+Tx)
@@ -139,17 +145,17 @@ public:
     };
     StreamStats streamStats(CallId id) const;
 
-    // Returns the number of active CallImpl entries. Test-only accessor.
+    // Returns the number of live call records. Test-only accessor.
     size_t callCount() const;
 
     // Returns true if the local capture device currently transmits into this
     // call's active audio media — i.e. the microphone is live for this call
-    // in PJSIP's conference bridge, regardless of what m_mutedState claims.
+    // in the backend's conference bridge, regardless of what isMuted() claims.
     // Test-only accessor: lets tests pin "muted means the mic is actually
     // disconnected", which isMuted() (bookkeeping only) cannot. Note the
     // bridge applies connect/disconnect on the audio-clock tick, so this view
-    // can lag a startTransmit/stopTransmit call by a few milliseconds —
-    // tests must poll rather than assert immediately after a transition.
+    // can lag a setMuted() call by a few milliseconds — tests must poll rather
+    // than assert immediately after a transition.
     bool isCaptureTransmitting(CallId id) const;
 
     // Returns true if any of the call's audio media is in the ACTIVE state.
@@ -159,125 +165,91 @@ public:
     // which isHeld() (bookkeeping only) cannot show.
     bool isMediaActive(CallId id) const;
 
-    // SIP status code of the call's final disposition (pj::CallInfo's
-    // lastStatusCode, captured when the DISCONNECTED state was dispatched)
-    // — e.g. 486 for a decline/busy, 200 for a normal BYE. Returns 0
-    // while the call is still up, if the id is unknown, or once the
-    // post-disconnect grace eraseCall() has dropped the entry — read it
-    // promptly after observing Disconnected. Test-only accessor: lets
-    // tests assert WHY a call ended (a DND decline vs. any other
-    // teardown), which CallState::Disconnected alone cannot show.
+    // SIP status code of the call's final disposition — e.g. 486 for a
+    // decline/busy, 200 for a normal BYE. Returns 0 while the call is still
+    // up or if the id is unknown. The code rides the Disconnected event, so
+    // it is readable the moment Disconnected is observed and stays readable
+    // through the post-disconnect linger window. Test-only accessor: lets
+    // tests assert WHY a call ended (a DND decline vs. any other teardown),
+    // which CallState::Disconnected alone cannot show.
     int lastStatusCode(CallId id) const;
 
     // Currently-active call id (the one transmitting audio). kInvalidCallId
-    // if no calls are active. Updated by makeCall/accept/unhold/eraseCall.
+    // if no calls are active. Updated by makeCall/accept/unhold/disconnect.
     CallId activeCallId() const { return m_activeCallId; }
 
     // Returns a copy of every active call's current state, for QML.
     // Implements CallSnapshotSource so CallsModel can be driven by a fake.
     std::vector<CallEntry> snapshot() const override;
 
-    // Erases the call entry with this id. Called via QMetaObject::invokeMethod
-    // on the Qt main thread from CallImpl after DISCONNECTED is dispatched.
-    Q_INVOKABLE void eraseCall(int callId);
-    Q_INVOKABLE void releaseCallToGrace(int callId);
+    // Test seam: shortens the post-disconnect UI linger (default 2200 ms)
+    // so unit tests don't sleep through the production grace window.
+    void setLingerMsForTest(int ms) { m_lingerMs = ms; }
+
+    // --- ISipBackendListener (call half; account events left defaulted) ---
+    void onIncomingCall(sipbackend::AccountId backendAccId,
+                        sipbackend::CallId callId,
+                        const std::string &remoteUri,
+                        const std::string &displayName) override;
+    void onCallState(sipbackend::CallId id, sipbackend::CallState s,
+                     int sipCode) override;
+    // Deliberately unused in phase 3: held/muted UI state is command-driven
+    // bookkeeping, and media-truth assertions use the synchronous
+    // isMediaActive()/isCaptureTransmitting() pulls. Kept as an explicit
+    // empty override so the omission reads as a decision, not an accident.
+    void onMediaState(sipbackend::CallId, bool, bool) override {}
+    void onTransferStatus(sipbackend::CallId id, int sipCode, bool isFinal,
+                          const std::string &reason) override;
 
 private:
-    friend class CallImpl;
-
-    // Threading contract. PJSIP callbacks arrive on the PJSUA worker thread
-    // (SipEngine uses the default uaConfig.threadCnt = 1, mainThreadOnly is
-    // not set). On that thread, adoptIncomingCall() inserts into m_calls /
-    // m_callAccount, notifyStateChange() writes m_callStates,
-    // recordDisconnectCode() writes m_lastStatusCodes, and
-    // onCallMediaState reads m_mutedState (to honour mute across media
-    // re-activation), while the main thread reads and erases the same maps —
-    // so those five maps are guarded by m_mutex, and m_nextId is atomic
-    // (makeCall on the main thread and adoptIncomingCall on the PJSIP thread
-    // both mint ids). Everything else (m_lingeringCalls, m_heldState,
-    // m_transfers, the URI caches, m_players, m_recorder, m_activeCallId) is
-    // main-thread-only: CallImpl marshals every other callback to the main
-    // thread before it touches them.
-    //
-    // Lock discipline: NEVER call into PJSIP while holding m_mutex — not
-    // getInfo/hangup/reinvite/answer, and not destructors of pj::Call or
-    // pj::AudioMediaPlayer (erasing from m_calls/m_players destroys one).
-    // PJSIP holds its own lock while dispatching the callbacks that take
-    // m_mutex, so holding m_mutex across a PJSIP call is a lock-order
-    // inversion; some PJSIP calls (hangup) also re-enter onCallState
-    // synchronously on the calling thread. Pattern: look up the raw CallImpl*
-    // under the lock, release it, then talk to PJSIP. Raw pointers stay valid
-    // after unlocking on the main thread because the main thread is the only
-    // eraser of m_calls.
-    mutable std::mutex m_mutex;
-
-    AccountsManager *m_am;
-    std::unordered_map<CallId, std::unique_ptr<CallImpl>> m_calls;
-    struct LingeringCallSnapshot {
-        AccountId accountId = kInvalidAccountId;
-        std::string remoteUri;
-        std::string remoteDisplayName;
-        CallState state = CallState::Disconnected;
+    struct CallRecord {
+        AccountId accountId = kInvalidAccountId;   // domain account id
+        std::string remoteUri;          // dialed target (outbound) /
+                                        // pushed remote URI (inbound)
+        std::string remoteDisplayName;  // pushed (inbound); empty outbound
+        CallState state = CallState::Calling;
+        int lastStatusCode = 0;         // final disposition, set on Disconnected
+        bool inbound = false;
         bool held = false;
         bool muted = false;
         bool recording = false;
-        bool inbound = false;
+        bool playingFile = false;
     };
-    std::unordered_map<CallId, LingeringCallSnapshot> m_lingeringCalls;
-    // Parks each disconnected CallImpl from releaseCallToGrace() until the
-    // grace-period eraseCall() destroys it. Deleting the object immediately
-    // is a use-after-free window: releaseCallToGrace is queued from
-    // CallImpl::onCallState, and the PJSIP thread may still be executing
-    // the tail of that same callback when the queued call runs on the main
-    // thread — pj::Call's destructor does not synchronize with the
-    // derived-object reads in that tail (caught live by TSan).
-    // Main-thread-only.
-    std::unordered_map<CallId, std::unique_ptr<CallImpl>> m_graceCalls;
-    std::unordered_map<CallId, AccountId> m_callAccount;
-    std::unordered_map<CallId, CallState> m_callStates;
-    // Final-disposition SIP code per call, written when DISCONNECTED is
-    // dispatched; erased with the rest of the bookkeeping in eraseCall().
-    std::unordered_map<CallId, int> m_lastStatusCodes;
-    std::unordered_map<CallId, bool> m_heldState;
-    std::unordered_map<CallId, bool> m_mutedState;
+
+    sipbackend::ISipBackend *m_backend;
+    AccountsManager *m_am;
+
+    // Live calls — main-thread-only.
+    std::unordered_map<CallId, CallRecord> m_records;
+    // Post-disconnect UI linger (frozen records) — main-thread-only. A
+    // lingering entry is just a frozen record with state == Disconnected.
+    std::unordered_map<CallId, CallRecord> m_lingeringCalls;
     // Tracks calls to hang up once a REFER/transfer completes.
     TransferTracker m_transfers;
-    // Cached identity strings — PJSIP clears info.remoteUri after disconnect,
-    // but the call card lingers for a grace period, so we remember the URI
-    // here while the call is live.
-    mutable std::unordered_map<CallId, std::string> m_remoteUriCache;
-    mutable std::unordered_map<CallId, std::string> m_remoteDisplayCache;
-    // Owns the per-call WAV recorders (a PJSIP conference-bridge slot each;
-    // dropped when the call ends or stopRecording is called).
-    std::unique_ptr<CallRecorder> m_recorder;
-    std::unordered_map<CallId, std::unique_ptr<pj::AudioMediaPlayer>>
-        m_players;
-    // Guards m_cb / m_eventCb: assigned on the main thread (controller
-    // ctors/dtors), invoked on the PJSIP thread (notifyStateChange).
-    // Invocation happens UNDER this mutex, so a setter call is a quiesce
-    // barrier — when setOnCallEvent({}) returns, no in-flight invocation of
-    // the previous callback exists and none can start. Never call a setter
-    // from inside a callback. Separate from m_mutex so callbacks may call
-    // back into CallManager.
+
+    // Guards m_cb / m_eventCb. PHASE-4 REMOVAL CANDIDATE: since phase 3,
+    // both assignment (controller ctors/dtors) and invocation
+    // (notifyStateChange, now driven by queued main-thread listener
+    // events) happen on the main thread, so this mutex no longer guards
+    // any cross-thread access. It survives only so the controllers'
+    // quiesce idiom (setOnX({}) in destructors) keeps its documented
+    // contract until phase 4 replaces the slots outright.
     mutable std::mutex m_callbackMutex;
     std::function<void(CallState)> m_cb;
     std::function<void(CallId, CallState)> m_eventCb;
-    std::atomic<CallId> m_nextId{1};
     CallId m_activeCallId = kInvalidCallId;
+    int m_lingerMs = 2200;
 
     void notifyStateChange(CallId id, CallState s);
-    // Records the final-disposition SIP code for a call. Runs on the PJSIP
-    // worker thread from CallImpl::onCallState, BEFORE the Disconnected
-    // notification — so an observer that sees Disconnected can immediately
-    // read the code via lastStatusCode().
-    void recordDisconnectCode(CallId id, int statusCode);
+    void handleDisconnected(CallId id, int sipCode);
+    void eraseLingering(CallId id);
     void handleTransferStatus(CallId id, int statusCode, bool finalNotify,
                               const std::string &reason);
     bool isConfirmedState(CallId id) const;
     bool requestUnhold(CallId id, int retriesRemaining);
     bool wireBridge(CallId activeCallId, CallId heldCallId, int retriesRemaining);
-    // Hangs up each recorded transfer leg with 200 OK; legs that already
-    // disconnected on their own are skipped. Main-thread-only.
+    // Hangs up each recorded transfer leg; legs that already disconnected on
+    // their own are skipped. Main-thread-only.
     void hangupTransferLegs(const std::vector<CallId> &cleanupIds);
 
     // Promotes `id` to active. Auto-holds the previously active call (if any

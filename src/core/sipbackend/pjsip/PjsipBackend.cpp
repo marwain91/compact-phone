@@ -51,8 +51,8 @@ const char *transportScheme(sipbackend::Transport t)
 // run on the PJSUA worker thread. They may ONLY:
 //   (a) Call owner->post* helpers, which marshal via m_events.post() —
 //       thread-safe by EventDispatch's contract.
-//   (b) Touch owner->m_nativeCallIds under owner->m_nativeMutex
-//       (announceIncomingCall, held briefly, PJSIP not called while held).
+//   (b) For onIncomingCall, call owner->wrapIncomingCall, which claims the
+//       INVITE session and inserts into owner->m_calls under m_callsMutex.
 // They must NOT call any other PJSIP API or touch any shared state without
 // the appropriate lock.
 // ---------------------------------------------------------------------------
@@ -91,9 +91,8 @@ public:
     void onIncomingCall(pj::OnIncomingCallParam &prm) override
     {
         // Delegate to wrapIncomingCall which constructs a PjsipCall eagerly
-        // (inside the callback, retaining the INVITE session) and posts to
-        // the listener. The hook short-circuit inside wrapIncomingCall
-        // ensures the phase-2 adoption path is used when a hook is installed.
+        // (inside the callback, retaining the INVITE session) and posts the
+        // queued onIncomingCall to the listener.
         owner->wrapIncomingCall(*this, id, prm.callId);
     }
 
@@ -177,8 +176,8 @@ public:
             m_owner->postCallState(m_id, CallState::Disconnected, lastCode); break;
         default: break;
         }
-        // NOTE: the releaseCallToGrace invokeMethod that CallImpl had here is
-        // GONE — release is now manager-driven through releaseCall().
+        // NOTE: no release is scheduled here — the call is released only when
+        // the manager calls releaseCall() (the grace dance lives there).
     }
 
     void onCallMediaState(pj::OnCallMediaStateParam & /*prm*/) override
@@ -511,18 +510,6 @@ void PjsipBackend::wrapIncomingCall(PjsipAccount &account, AccountId accId,
 {
     // PJSUA WORKER THREAD.
     //
-    // Transitional (deleted in the CallManager-rewire commit): while the
-    // phase-2 hook is installed, the old synchronous-adoption path runs and
-    // the eager wrap below is skipped — two pj::Call wrappers for one
-    // pjsua call id would corrupt pjsua2's call map.
-    {
-        std::lock_guard<std::mutex> lk(m_hookMutex);
-        if (m_nativeIncomingHook) {
-            m_nativeIncomingHook(accId, pjsipCallId);
-            return;
-        }
-    }
-
     // Claim the INVITE session NOW, inside the callback (see the
     // declaration comment). Construction registers the wrapper in pjsua2's
     // call map; subsequent callbacks for this call land on the PjsipCall.
@@ -556,70 +543,6 @@ void PjsipBackend::wrapIncomingCall(PjsipAccount &account, AccountId accId,
     m_events.post([this, accId, id, remoteUri, displayName] {
         if (m_listener)
             m_listener->onIncomingCall(accId, id, remoteUri, displayName);
-    });
-}
-
-// ---------------------------------------------------------------------------
-// announceIncomingCall — superseded by wrapIncomingCall (deleted in Task 4).
-// Kept for one commit so this TU still compiles; no longer called.
-// ---------------------------------------------------------------------------
-
-void PjsipBackend::announceIncomingCall(AccountId accId, int pjsipCallId)
-{
-    // Mint a backend CallId atomically (no mutex needed for the counter itself).
-    const CallId callId = m_nextCallId.fetch_add(1, std::memory_order_relaxed);
-
-    // Store the native-id mapping under m_nativeMutex. Lock scope is
-    // deliberately minimal — PJSIP is never called while the lock is held.
-    {
-        std::lock_guard<std::mutex> lk(m_nativeMutex);
-        m_nativeCallIds[callId] = pjsipCallId;
-    }
-
-    // If a synchronous hook is registered, fire it under m_hookMutex and
-    // return immediately. The hook runs ON THE PJSIP THREAD — the caller
-    // (CallsController/CallManager) adopts the call synchronously here,
-    // which avoids the PJSIP_ESESSIONTERMINATED race that would occur if
-    // adoption were deferred to the main thread. The queued listener
-    // onIncomingCall is suppressed: the hook owner takes responsibility for
-    // the full announcement (it posts its own main-thread notification).
-    {
-        std::lock_guard<std::mutex> lk(m_hookMutex);
-        if (m_nativeIncomingHook) {
-            m_nativeIncomingHook(accId, pjsipCallId);
-            return;
-        }
-    }
-
-    // No hook — resolve remote display info via the PJSUA C API and post
-    // to the listener. This is safe to call on the PJSUA worker thread
-    // (the call is in ringing state by now). If it fails we still announce
-    // with empty strings rather than dropping the announcement.
-    std::string remoteUri;
-    std::string displayName;
-
-    pjsua_call_info ci;
-    if (pjsua_call_get_info(static_cast<pjsua_call_id>(pjsipCallId), &ci)
-            == PJ_SUCCESS) {
-        // ci.remote_info has the raw SIP Address-of-Record string.
-        const std::string raw(ci.remote_info.ptr,
-                              static_cast<std::size_t>(ci.remote_info.slen));
-        const auto ri = parseRemoteInfo(raw);
-        remoteUri    = ri.uri;
-        displayName  = ri.displayName;
-    } else {
-        spdlog::warn("PjsipBackend::announceIncomingCall: "
-                     "pjsua_call_get_info failed for pjsip call id {}",
-                     pjsipCallId);
-    }
-
-    spdlog::info("PjsipBackend: incoming call account={} callId={} "
-                 "pjsip={} uri='{}' display='{}'",
-                 accId, callId, pjsipCallId, remoteUri, displayName);
-
-    m_events.post([this, accId, callId, remoteUri, displayName] {
-        if (m_listener)
-            m_listener->onIncomingCall(accId, callId, remoteUri, displayName);
     });
 }
 
@@ -1322,27 +1245,14 @@ void PjsipBackend::releaseCall(CallId id)
 }
 
 // ---------------------------------------------------------------------------
-// Transitional bridges — removed in phase 3
+// Presence bridge — pj::Account access for LinesManager (removed in phase 5)
 // ---------------------------------------------------------------------------
-
-void PjsipBackend::setNativeIncomingCallHook(std::function<void(AccountId, int)> hook)
-{
-    std::lock_guard<std::mutex> lk(m_hookMutex);
-    m_nativeIncomingHook = std::move(hook);
-}
 
 pj::Account *PjsipBackend::pjAccountFor(AccountId id)
 {
     const auto it = m_accounts.find(id);
     if (it == m_accounts.end()) return nullptr;
     return it->second.get();  // PjsipAccount IS-A pj::Account
-}
-
-int PjsipBackend::nativeCallIdFor(CallId id) const
-{
-    std::lock_guard<std::mutex> lk(m_nativeMutex);
-    const auto it = m_nativeCallIds.find(id);
-    return it != m_nativeCallIds.end() ? it->second : -1;
 }
 
 } // namespace compactphone::sipbackend

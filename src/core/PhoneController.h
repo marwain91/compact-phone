@@ -40,7 +40,7 @@ class MessagesManager;
 class SettingsManager;
 }
 
-namespace compactphone::sipbackend { class PjsipBackend; }
+namespace compactphone::sipbackend { class PjsipBackend; class ListenerFanout; }
 
 namespace compactphone {
 
@@ -209,6 +209,10 @@ private:
     // order — so declare engine BEFORE backend BEFORE the rest.
     std::unique_ptr<sip::SipEngine>             m_engine;
     std::unique_ptr<sipbackend::PjsipBackend>   m_backend;
+    // Routes backend events to accounts then calls. Kept alive for the
+    // backend's listener pointer; quiesced via setListener(nullptr) in the
+    // destructor before the managers it points at are torn down.
+    std::unique_ptr<sipbackend::ListenerFanout> m_listener;
     std::unique_ptr<sip::AccountsManager>       m_accounts;
     std::unique_ptr<models::AccountsModel>      m_accountsModel;
     std::unique_ptr<sip::CallManager>           m_calls;

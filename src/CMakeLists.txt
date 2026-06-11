@@ -40,6 +40,7 @@ add_library(compactphone_core STATIC
     core/SipUri.cpp
     core/sipbackend/Types.h
     core/sipbackend/ISipBackend.h
+    core/sipbackend/ListenerFanout.h
     core/sipbackend/EventDispatch.h
     core/sipbackend/EventDispatch.cpp
     core/sipbackend/fake/FakeSipBackend.h
@@ -72,8 +73,6 @@ add_library(compactphone_core STATIC
     core/ContactImporter.cpp
     core/CallManager.h
     core/CallManager.cpp
-    core/CallRecorder.h
-    core/CallRecorder.cpp
     core/CoreSipGraph.h
     core/CoreSipGraph.cpp
     core/TransferTracker.h
