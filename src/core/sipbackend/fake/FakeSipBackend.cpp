@@ -173,31 +173,292 @@ void FakeSipBackend::simulatePresence(WatchId id, PresenceState state)
     post([this, id, state] { m_listener->onPresence(id, state); });
 }
 
-// --- Task 4 replaces everything below with real call bookkeeping ---
-CallId FakeSipBackend::makeCall(AccountId, const std::string &) { return kInvalidCallId; }
-bool FakeSipBackend::answer(CallId) { return false; }
-bool FakeSipBackend::decline(CallId, int) { return false; }
-bool FakeSipBackend::redirect(CallId, const std::string &) { return false; }
-void FakeSipBackend::hangup(CallId) {}
-bool FakeSipBackend::hold(CallId) { return false; }
-bool FakeSipBackend::unhold(CallId) { return false; }
-bool FakeSipBackend::setMuted(CallId, bool) { return false; }
-bool FakeSipBackend::sendDtmf(CallId, const std::string &, DtmfMethod) { return false; }
-bool FakeSipBackend::blindTransfer(CallId, const std::string &) { return false; }
-bool FakeSipBackend::attendedTransfer(CallId, CallId) { return false; }
-bool FakeSipBackend::bridge(CallId, CallId) { return false; }
-bool FakeSipBackend::startRecording(CallId, const std::string &) { return false; }
-bool FakeSipBackend::stopRecording(CallId) { return false; }
-bool FakeSipBackend::playFile(CallId, const std::string &, bool) { return false; }
-bool FakeSipBackend::stopFile(CallId) { return false; }
-StreamStats FakeSipBackend::streamStats(CallId) const { return {}; }
-bool FakeSipBackend::isMediaActive(CallId) const { return false; }
-bool FakeSipBackend::isCaptureTransmitting(CallId) const { return false; }
-void FakeSipBackend::releaseCall(CallId) {}
-CallId FakeSipBackend::simulateIncomingCall(AccountId, const std::string &, const std::string &) { return kInvalidCallId; }
-void FakeSipBackend::simulateRemoteAnswer(CallId) {}
-void FakeSipBackend::simulateRemoteHangup(CallId, int) {}
-void FakeSipBackend::simulateTransferStatus(CallId, int, bool, const std::string &) {}
-FakeSipBackend::FakeCall *FakeSipBackend::liveCall(CallId) { return nullptr; }
+FakeSipBackend::FakeCall *FakeSipBackend::liveCall(CallId id)
+{
+    auto it = m_calls.find(id);
+    if (it == m_calls.end() || it->second.released)
+        return nullptr;
+    return &it->second;
+}
+
+CallId FakeSipBackend::makeCall(AccountId accountId, const std::string &uri)
+{
+    if (!m_running || m_accounts.count(accountId) == 0)
+        return kInvalidCallId;
+    const CallId id = m_nextCallId++;
+    FakeCall c;
+    c.accountId = accountId;
+    c.remoteUri = uri;
+    c.state = CallState::Calling;
+    m_calls[id] = c;
+    logCmd("makeCall:" + std::to_string(id) + ":" + uri);
+    post([this, id] {
+        m_listener->onCallState(id, CallState::Calling, 0);
+    });
+    return id;
+}
+
+CallId FakeSipBackend::simulateIncomingCall(AccountId accountId,
+                                            const std::string &remoteUri,
+                                            const std::string &displayName)
+{
+    if (!m_running || m_accounts.count(accountId) == 0)
+        return kInvalidCallId;
+    const CallId id = m_nextCallId++;
+    FakeCall c;
+    c.accountId = accountId;
+    c.remoteUri = remoteUri;
+    c.state = CallState::EarlyMedia;
+    c.inbound = true;
+    m_calls[id] = c;
+    post([this, accountId, id, remoteUri, displayName] {
+        m_listener->onIncomingCall(accountId, id, remoteUri, displayName);
+    });
+    return id;
+}
+
+bool FakeSipBackend::answer(CallId id)
+{
+    auto *c = liveCall(id);
+    if (!c || !c->inbound || c->state == CallState::Confirmed
+        || c->state == CallState::Disconnected)
+        return false;
+    logCmd("answer:" + std::to_string(id));
+    c->state = CallState::Confirmed;
+    c->mediaActive = true;
+    post([this, id] {
+        m_listener->onCallState(id, CallState::Confirmed, 200);
+        m_listener->onMediaState(id, true, false);
+    });
+    return true;
+}
+
+void FakeSipBackend::simulateRemoteAnswer(CallId id)
+{
+    auto *c = liveCall(id);
+    if (!c || c->inbound || c->state != CallState::Calling)
+        return;
+    c->state = CallState::Confirmed;
+    c->mediaActive = true;
+    post([this, id] {
+        m_listener->onCallState(id, CallState::Confirmed, 200);
+        m_listener->onMediaState(id, true, false);
+    });
+}
+
+bool FakeSipBackend::decline(CallId id, int sipCode)
+{
+    auto *c = liveCall(id);
+    if (!c || !c->inbound || c->state == CallState::Confirmed
+        || c->state == CallState::Disconnected)
+        return false;
+    logCmd("decline:" + std::to_string(id) + ":" + std::to_string(sipCode));
+    c->state = CallState::Disconnected;
+    post([this, id, sipCode] {
+        m_listener->onCallState(id, CallState::Disconnected, sipCode);
+    });
+    return true;
+}
+
+bool FakeSipBackend::redirect(CallId id, const std::string &contactUri)
+{
+    auto *c = liveCall(id);
+    if (!c || !c->inbound || c->state == CallState::Confirmed
+        || c->state == CallState::Disconnected)
+        return false;
+    logCmd("redirect:" + std::to_string(id) + ":" + contactUri);
+    c->state = CallState::Disconnected;
+    post([this, id] {
+        m_listener->onCallState(id, CallState::Disconnected, 302);
+    });
+    return true;
+}
+
+void FakeSipBackend::hangup(CallId id)
+{
+    auto *c = liveCall(id);
+    if (!c || c->state == CallState::Disconnected)
+        return;
+    logCmd("hangup:" + std::to_string(id));
+    c->state = CallState::Disconnected;
+    c->mediaActive = false;
+    post([this, id] {
+        m_listener->onCallState(id, CallState::Disconnected, 200);
+    });
+}
+
+void FakeSipBackend::simulateRemoteHangup(CallId id, int sipCode)
+{
+    auto *c = liveCall(id);
+    if (!c || c->state == CallState::Disconnected)
+        return;
+    c->state = CallState::Disconnected;
+    c->mediaActive = false;
+    post([this, id, sipCode] {
+        m_listener->onCallState(id, CallState::Disconnected, sipCode);
+    });
+}
+
+bool FakeSipBackend::hold(CallId id)
+{
+    auto *c = liveCall(id);
+    if (!c || c->state != CallState::Confirmed || c->held)
+        return false;
+    logCmd("hold:" + std::to_string(id));
+    c->held = true;
+    c->mediaActive = false;
+    post([this, id] { m_listener->onMediaState(id, false, true); });
+    return true;
+}
+
+bool FakeSipBackend::unhold(CallId id)
+{
+    auto *c = liveCall(id);
+    if (!c || c->state != CallState::Confirmed || !c->held)
+        return false;
+    logCmd("unhold:" + std::to_string(id));
+    c->held = false;
+    c->mediaActive = true;
+    post([this, id] { m_listener->onMediaState(id, true, false); });
+    return true;
+}
+
+bool FakeSipBackend::setMuted(CallId id, bool muted)
+{
+    auto *c = liveCall(id);
+    if (!c || c->state != CallState::Confirmed)
+        return false;
+    logCmd("setMuted:" + std::to_string(id) + ":" + (muted ? "1" : "0"));
+    c->muted = muted;
+    return true;
+}
+
+bool FakeSipBackend::sendDtmf(CallId id, const std::string &digits,
+                              DtmfMethod method)
+{
+    (void)method;
+    auto *c = liveCall(id);
+    if (!c || c->state != CallState::Confirmed)
+        return false;
+    logCmd("sendDtmf:" + std::to_string(id) + ":" + digits);
+    c->dtmfSent += digits;
+    return true;
+}
+
+bool FakeSipBackend::blindTransfer(CallId id, const std::string &targetUri)
+{
+    auto *c = liveCall(id);
+    if (!c || c->state != CallState::Confirmed)
+        return false;
+    logCmd("blindTransfer:" + std::to_string(id) + ":" + targetUri);
+    return true;
+}
+
+bool FakeSipBackend::attendedTransfer(CallId id, CallId otherId)
+{
+    auto *a = liveCall(id);
+    auto *b = liveCall(otherId);
+    if (!a || !b || a->state != CallState::Confirmed)
+        return false;
+    logCmd("attendedTransfer:" + std::to_string(id) + ":"
+           + std::to_string(otherId));
+    return true;
+}
+
+bool FakeSipBackend::bridge(CallId id, CallId otherId)
+{
+    auto *a = liveCall(id);
+    auto *b = liveCall(otherId);
+    if (!a || !b || a->state != CallState::Confirmed
+        || b->state != CallState::Confirmed)
+        return false;
+    logCmd("bridge:" + std::to_string(id) + ":" + std::to_string(otherId));
+    return true;
+}
+
+bool FakeSipBackend::startRecording(CallId id, const std::string &path)
+{
+    auto *c = liveCall(id);
+    if (!c || c->state != CallState::Confirmed || c->recording)
+        return false;
+    logCmd("startRecording:" + std::to_string(id) + ":" + path);
+    c->recording = true;
+    return true;
+}
+
+bool FakeSipBackend::stopRecording(CallId id)
+{
+    auto *c = liveCall(id);
+    if (!c || !c->recording)
+        return false;
+    logCmd("stopRecording:" + std::to_string(id));
+    c->recording = false;
+    return true;
+}
+
+bool FakeSipBackend::playFile(CallId id, const std::string &path, bool loop)
+{
+    (void)loop;
+    auto *c = liveCall(id);
+    if (!c || !c->mediaActive)
+        return false;
+    logCmd("playFile:" + std::to_string(id) + ":" + path);
+    c->playingFile = true;
+    return true;
+}
+
+bool FakeSipBackend::stopFile(CallId id)
+{
+    auto *c = liveCall(id);
+    if (!c || !c->playingFile)
+        return false;
+    logCmd("stopFile:" + std::to_string(id));
+    c->playingFile = false;
+    return true;
+}
+
+StreamStats FakeSipBackend::streamStats(CallId id) const
+{
+    auto it = m_calls.find(id);
+    if (it == m_calls.end() || !it->second.mediaActive)
+        return {};
+    StreamStats s;
+    s.mos = 4.2;
+    s.lossPct = 0.0;
+    s.rttMs = 20;
+    s.jitterMs = 3;
+    return s;
+}
+
+bool FakeSipBackend::isMediaActive(CallId id) const
+{
+    auto it = m_calls.find(id);
+    return it != m_calls.end() && !it->second.released
+        && it->second.mediaActive;
+}
+
+bool FakeSipBackend::isCaptureTransmitting(CallId id) const
+{
+    auto it = m_calls.find(id);
+    return it != m_calls.end() && !it->second.released
+        && it->second.mediaActive && !it->second.muted;
+}
+
+void FakeSipBackend::releaseCall(CallId id)
+{
+    logCmd("releaseCall:" + std::to_string(id));
+    m_calls.erase(id);
+}
+
+void FakeSipBackend::simulateTransferStatus(CallId id, int sipCode,
+                                            bool isFinal,
+                                            const std::string &reason)
+{
+    if (!liveCall(id))
+        return;
+    post([this, id, sipCode, isFinal, reason] {
+        m_listener->onTransferStatus(id, sipCode, isFinal, reason);
+    });
+}
 
 } // namespace compactphone::sipbackend
