@@ -143,6 +143,14 @@ private:
     std::atomic<CallId> m_nextCallId{50001};  // offset: distinct from account id space
     std::map<AccountId, std::unique_ptr<PjsipAccount>> m_accounts;
 
+    // Presence watch bookkeeping — main-thread only. Phase 5 will replace
+    // the map value with a real pj::Buddy subscription object; until then
+    // we store only the owning AccountId so watch/unwatch id-lifetime rules
+    // (contract: valid id returned for known account, false on double-unwatch,
+    // cleared on stop()) are satisfied without initiating any SIP SUBSCRIBE.
+    WatchId m_nextWatchId = 80001;  // offset: distinct from account/call spaces
+    std::map<WatchId, AccountId> m_watches;  // watchId → owning backendAccountId
+
     // Guards m_nativeCallIds. PJSUA worker thread writes (announceIncomingCall),
     // main thread reads (nativeCallIdFor). Never held while calling into PJSIP.
     mutable std::mutex m_nativeMutex;

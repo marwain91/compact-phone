@@ -158,6 +158,11 @@ void PjsipBackend::stop()
         std::lock_guard<std::mutex> lk(m_nativeMutex);
         m_nativeCallIds.clear();
     }
+    // Presence watch bookkeeping: cleared on stop so a restarted backend
+    // starts empty (contract rule: "stop() drops all accounts, calls, and
+    // watches"). No real SIP un-SUBSCRIBE here — phase 5 handles teardown
+    // of actual pj::Buddy subscriptions.
+    m_watches.clear();
     // Invalidate the event queue so nothing queued before this fires.
     m_events.invalidate();
     m_engine->stop();
@@ -518,16 +523,31 @@ bool PjsipBackend::sendMessage(AccountId id, const std::string &toUri,
 // Presence — phase 5 stubs
 // ---------------------------------------------------------------------------
 
-WatchId PjsipBackend::watch(AccountId /*accountId*/, const std::string & /*uri*/)
+WatchId PjsipBackend::watch(AccountId accountId, const std::string & /*uri*/)
 {
-    // phase 5 stub
-    return kInvalidWatchId;
+    // Phase 5 will initiate a real SIP SUBSCRIBE / pj::Buddy here; for now
+    // we satisfy the contract's id-lifetime rules with pure bookkeeping:
+    //   - unknown account (not in m_accounts): return kInvalidWatchId
+    //   - known account: mint and store a WatchId, return it
+    // The uri is intentionally not stored — phase 5 stores it in pj::Buddy.
+    if (!m_engine->isRunning() || m_accounts.count(accountId) == 0)
+        return kInvalidWatchId;
+    const WatchId id = m_nextWatchId++;
+    m_watches[id] = accountId;
+    spdlog::debug("PjsipBackend::watch: id={} account={} (presence phase-5 stub)",
+                  id, accountId);
+    return id;
 }
 
-bool PjsipBackend::unwatch(WatchId /*id*/)
+bool PjsipBackend::unwatch(WatchId id)
 {
-    // phase 5 stub
-    return false;
+    // Phase 5 will cancel the pj::Buddy subscription here. For now just
+    // prune the bookkeeping entry; return false if already gone (contract
+    // rule: false on double-unwatch).
+    if (m_watches.erase(id) == 0)
+        return false;
+    spdlog::debug("PjsipBackend::unwatch: id={} (presence phase-5 stub)", id);
+    return true;
 }
 
 // ---------------------------------------------------------------------------

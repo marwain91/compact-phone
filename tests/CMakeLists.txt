@@ -89,6 +89,7 @@ gtest_discover_tests(test_release_packaging
 )
 
 add_executable(test_integration
+    integration/test_pjsip_backend_contract.cpp
     integration/test_register_udp.cpp
     integration/test_outbound_call_echo.cpp
     integration/test_call_lifecycle.cpp
@@ -112,7 +113,10 @@ add_executable(test_integration
 target_link_libraries(test_integration
     PRIVATE GTest::gtest GTest::gtest_main Qt6::Core compactphone_core
 )
-target_include_directories(test_integration PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(test_integration PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+)
 gtest_discover_tests(test_integration
     DISCOVERY_TIMEOUT 30
     PROPERTIES LABELS "integration"
