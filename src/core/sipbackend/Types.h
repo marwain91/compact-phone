@@ -45,7 +45,10 @@ struct EngineConfig {
 
 // Trust anchors for verify-on TLS. Platform resolution (env var, system
 // bundles, Windows ROOT store) stays in core; backends receive the
-// resolved result. Exactly one of the two fields is non-empty.
+// resolved result. At most one of the two fields is set. When platform
+// resolution finds nothing, core never calls setCaTrust() and the backend
+// has no trust anchors — verify-on TLS then rejects every certificate,
+// matching today's SipEngine behavior.
 struct CaTrust {
     std::string caFile;  // path to a PEM bundle on disk
     std::string caPem;   // in-memory PEM bundle (Windows ROOT store)
