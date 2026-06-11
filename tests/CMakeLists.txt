@@ -29,6 +29,7 @@ add_executable(test_unit
     unit/test_reg_state_mapping.cpp
     unit/test_network_monitor.cpp
     unit/test_sipbackend_types.cpp
+    unit/test_fake_sip_backend.cpp
     unit/test_url_dispatcher.cpp
     unit/test_daktela_provider.cpp
     unit/test_provisioning_controller.cpp
