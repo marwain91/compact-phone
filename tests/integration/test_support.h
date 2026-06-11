@@ -24,7 +24,7 @@
 // an ASSERT early-return.
 //
 // Phase-2 note: integration tests construct their AccountsManager via the
-// makeAccountsManager() factory below which pairs it with a PjsipBackend.
+// SipManagerPair helper below which pairs it with a PjsipBackend.
 // waitForRegState uses pumpUntil in Task 6 (registration state now arrives
 // as a queued main-thread event); for now the suite is compile-clean but
 // registration waits may time-out until Task 6 pumps the event loop.

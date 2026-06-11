@@ -139,7 +139,7 @@ private:
     // PjsipBackend borrows m_engine; declared after engine so it is destroyed
     // first (unique_ptr destructors in reverse order). Accounts are removed
     // from the backend inside AccountsManager's destructor before m_backend
-    // is reset. clearAndStop() below handles the explicit ordering.
+    // is reset. The destructor above handles the explicit teardown ordering.
     std::unique_ptr<compactphone::sipbackend::PjsipBackend> m_backend;
     std::unique_ptr<compactphone::sip::AccountsManager> m_accounts;
     std::unique_ptr<compactphone::models::AccountsModel> m_accountsModel;

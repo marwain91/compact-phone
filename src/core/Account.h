@@ -13,7 +13,9 @@ enum class SrtpMode { Disabled, Optional, Required };
 enum class DtmfMethod { Inband, Rfc2833, Info };
 
 // Plain value object — owns no resources, copyable, no PJSIP coupling.
-// AccountsManager translates this into pj::AccountConfig at registration time.
+// AccountsManager translates this into sipbackend::AccountSettings at
+// registration time; PjsipBackend owns the further translation into
+// pj::AccountConfig.
 struct Account {
     AccountId id = kInvalidAccountId;
     std::string label;          // human-readable, UI only (e.g. "Work Office")

@@ -96,6 +96,7 @@ AccountId FakeSipBackend::addAccount(const AccountSettings &settings)
         return kInvalidAccountId;
     const AccountId id = m_nextAccountId++;
     m_accounts[id] = FakeAccount{settings};
+    m_lastAddedId = id;
     logCmd("addAccount:" + std::to_string(id) + ":" + settings.username);
     return id;
 }

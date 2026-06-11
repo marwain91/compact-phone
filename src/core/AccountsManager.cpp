@@ -64,10 +64,9 @@ RegStateUpdate mapRegEvent(bool regIsActive, int statusCode,
 
 struct AccountsManager::Entry {
     Account account;
-    // Valid (non-negative) while the account is registered with the backend.
-    // Domain AccountId → backend AccountId mapping is mirrored in m_backendIds;
-    // this field is kept for fast "is this account registered?" checks without
-    // a map lookup.
+    // true iff this account has a live entry in m_backendIds (i.e. it has
+    // been added to the backend and not yet removed).  Invariant:
+    //   registered  ⟺  m_backendIds contains account.id
     bool registered = false;
 };
 
@@ -130,24 +129,18 @@ AccountsManager::~AccountsManager()
     if (m_pjsipBridge) {
         m_pjsipBridge->setNativeIncomingCallHook({});
     }
-    // Unregister all live accounts from the backend.
-    std::vector<AccountId> toRemove;
+    // Unregister all live accounts from the backend. Collect both domain
+    // and backend ids in one locked pass so we never re-lock per entry.
+    std::vector<sipbackend::AccountId> toRemove;
     {
         std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+        toRemove.reserve(m_backendIds.size());
         for (const auto &kv : m_backendIds) {
-            toRemove.push_back(kv.first);
+            toRemove.push_back(kv.second);
         }
     }
-    for (const auto id : toRemove) {
-        sipbackend::AccountId backendId = sipbackend::kInvalidAccountId;
-        {
-            std::lock_guard<std::mutex> lk(m_backendIdsMutex);
-            auto it = m_backendIds.find(id);
-            if (it != m_backendIds.end()) backendId = it->second;
-        }
-        if (backendId != sipbackend::kInvalidAccountId) {
-            try { m_backend->removeAccount(backendId); } catch (...) {}
-        }
+    for (const auto backendId : toRemove) {
+        try { m_backend->removeAccount(backendId); } catch (...) {}
     }
 }
 
@@ -748,8 +741,12 @@ void AccountsManager::setOnInstantMessage(
 
 void AccountsManager::reregisterAllEnabled()
 {
-    // Snapshot the IDs first — registerAccount can rebuild entries, which
-    // would invalidate iterators if we walked m_entries directly.
+    // Snapshot the IDs first: unregisterAccount erases from m_backendIds and
+    // sets registered=false, while registerAccount inserts into m_backendIds
+    // and sets registered=true — neither mutates m_entries itself, so iterator
+    // invalidation is not actually the concern here. The snapshot is still the
+    // right shape: it avoids relying on the loop body not mutating the
+    // collection we are iterating and makes the intent explicit.
     std::vector<AccountId> targets;
     targets.reserve(m_entries.size());
     for (const auto &e : m_entries) {

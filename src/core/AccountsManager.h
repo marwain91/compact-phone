@@ -215,6 +215,16 @@ private:
     // by registerAccount/unregisterAccount; read on the PJSIP thread by the
     // incoming-call hook. Guarded by m_backendIdsMutex.
     //
+    // THREE-LOCK ORDERING (must be observed everywhere, no exceptions):
+    //   PjsipBackend::m_hookMutex → m_callbackMutex → m_backendIdsMutex
+    //
+    // The incoming-call path nests them in this order: PjsipBackend fires
+    // the hook under m_hookMutex; the hook acquires m_backendIdsMutex for
+    // the reverse-map lookup, then releases it before acquiring
+    // m_callbackMutex to invoke m_onIncoming.  Never acquire these mutexes
+    // in any other relative order, and never hold m_backendIdsMutex across
+    // a callback invocation.
+    //
     // m_backendIdsMutex discipline:
     //   - Hold BRIEFLY (map read/write only).
     //   - NEVER call into PJSIP or the backend while holding it.
@@ -233,9 +243,12 @@ private:
     // threads (PJSIP hook for incoming calls; main thread for reg/MWI/IM
     // events). Invocation happens UNDER this mutex, so a setter call is a
     // quiesce barrier — when setOnX({}) returns, no in-flight invocation of
-    // the previous callback exists and none can start. Never call a setter
-    // from inside a callback. Phase 4 removes this mutex when all callbacks
-    // become main-thread-only listener events.
+    // the previous callback exists and none can start.
+    // FORBIDDEN from inside a callback: any setter (deadlock via self-lock)
+    // AND any getter that takes this same mutex — mwiStateOf() in particular
+    // acquires m_callbackMutex and will deadlock if called from a callback
+    // handler that already holds it. Phase 4 removes this mutex when all
+    // callbacks become main-thread-only listener events.
     mutable std::mutex m_callbackMutex;
     std::function<void(AccountId, RegistrationState)> m_cb;
     std::function<void(AccountId, int)> m_onIncoming;

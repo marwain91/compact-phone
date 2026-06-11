@@ -59,11 +59,14 @@ struct CoreSipGraph {
 //
 // pjsipBridge is nullable (pass nullptr for fake-backend tests or non-PJSIP
 // backends). It is the same object as backend when using PjsipBackend.
+// engine is a required parameter; pass nullptr only in unit tests that use
+// a fake backend with no SipEngine (no default — a silently-droppable
+// critical dependency caused a real bug; callers must be explicit).
 CoreSipGraph buildCoreSipGraph(sipbackend::ISipBackend *backend,
                                sipbackend::PjsipBackend *pjsipBridge,
                                persistence::Database *db,
                                platform::IKeychain *keychain,
-                               sip::SipEngine *engine = nullptr,
+                               sip::SipEngine *engine,
                                QObject *parent = nullptr);
 
 } // namespace compactphone

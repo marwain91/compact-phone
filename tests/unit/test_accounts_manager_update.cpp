@@ -277,22 +277,11 @@ TEST_F(AccountsManagerUpdateTest, ListenerDrivenRegStateIsObservable)
     const auto id = mgr->add(a, "secret");
     ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
 
-    // Find the backend id minted by addAccount from the command log.
-    // addAccount entries have the form "addAccount:<backendId>:<username>".
-    compactphone::sipbackend::AccountId backendId =
-        compactphone::sipbackend::kInvalidAccountId;
-    for (const auto &entry : fake.commandLog()) {
-        if (entry.rfind("addAccount:", 0) == 0) {
-            // Parse "addAccount:<id>:<username>"
-            const auto first = entry.find(':', 11);
-            if (first != std::string::npos) {
-                backendId = std::stoi(entry.substr(11, first - 11));
-            }
-            break;
-        }
-    }
+    // The fake accessor records the backend id minted by the last addAccount.
+    const compactphone::sipbackend::AccountId backendId =
+        fake.lastAddedAccountId();
     ASSERT_NE(backendId, compactphone::sipbackend::kInvalidAccountId)
-        << "No addAccount entry in command log";
+        << "No account has been added to the fake backend yet";
 
     // Simulate a successful registration event from the fake backend.
     fake.simulateRegState(backendId, /*regActive=*/true, /*sipCode=*/200,
@@ -543,19 +532,11 @@ TEST_F(AccountsManagerUpdateTest, UnregisterClearsLastRegError)
     const auto id = mgr->add(a, "secret");
     ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
 
-    // Find the backend id from the command log.
-    compactphone::sipbackend::AccountId backendId =
-        compactphone::sipbackend::kInvalidAccountId;
-    for (const auto &entry : fake.commandLog()) {
-        if (entry.rfind("addAccount:", 0) == 0) {
-            const auto first = entry.find(':', 11);
-            if (first != std::string::npos)
-                backendId = std::stoi(entry.substr(11, first - 11));
-            break;
-        }
-    }
+    // The fake accessor records the backend id minted by the last addAccount.
+    const compactphone::sipbackend::AccountId backendId =
+        fake.lastAddedAccountId();
     ASSERT_NE(backendId, compactphone::sipbackend::kInvalidAccountId)
-        << "No addAccount entry in command log";
+        << "No account has been added to the fake backend yet";
 
     // Drive a registration failure through the listener path.
     fake.simulateRegState(backendId, /*regActive=*/false, /*sipCode=*/403,
@@ -571,6 +552,52 @@ TEST_F(AccountsManagerUpdateTest, UnregisterClearsLastRegError)
     EXPECT_EQ(mgr->stateOf(id), compactphone::sip::RegistrationState::Unregistered);
     EXPECT_TRUE(mgr->lastRegErrorOf(id).empty())
         << "lastRegErrorOf must be empty after unregister";
+
+    fake.setListener(nullptr);
+}
+
+// Pin the live-update re-register flow: update() on an enabled+registered
+// account must issue removeAccount for the old binding then addAccount for
+// the new one, and lastAddedAccountId() must reflect the new backend id.
+TEST_F(AccountsManagerUpdateTest, UpdateEnabledRegisteredReregisters)
+{
+    auto mgr = makeManager();
+    compactphone::sip::Account a;
+    a.username = "1001";
+    a.domain = "pbx.example.com";
+    a.enabled = true;
+    a.registerOnStartup = true;
+    const auto id = mgr->add(a, "secret");
+    ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
+
+    // Count how many addAccount / removeAccount commands have been issued so
+    // far (just the initial registration from add()).
+    const auto countCmd = [&](const std::string &prefix) {
+        int n = 0;
+        for (const auto &s : fake.commandLog())
+            if (s.rfind(prefix, 0) == 0) ++n;
+        return n;
+    };
+    ASSERT_EQ(countCmd("addAccount:"), 1);
+    ASSERT_EQ(countCmd("removeAccount:"), 0);
+    const auto firstBackendId = fake.lastAddedAccountId();
+    ASSERT_NE(firstBackendId, compactphone::sipbackend::kInvalidAccountId);
+
+    // Update the account — displayName change only, still enabled+registered.
+    auto edited = mgr->find(id).value();
+    edited.displayName = "Updated";
+    ASSERT_TRUE(mgr->update(edited));
+
+    // update() should have removed the old binding and added a new one.
+    EXPECT_EQ(countCmd("addAccount:"), 2)
+        << "update() on a registered account must re-issue addAccount";
+    EXPECT_EQ(countCmd("removeAccount:"), 1)
+        << "update() on a registered account must issue removeAccount first";
+
+    // The new backend id must be distinct (freshly minted).
+    const auto newBackendId = fake.lastAddedAccountId();
+    EXPECT_NE(newBackendId, firstBackendId)
+        << "re-register must mint a new backend id";
 
     fake.setListener(nullptr);
 }

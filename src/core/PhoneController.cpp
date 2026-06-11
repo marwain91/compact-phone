@@ -400,11 +400,11 @@ PhoneController::~PhoneController()
     m_accounts.reset();
     // The PjsipBackend's internal PjsipAccount map must be cleared while the
     // engine is still running (pj::Account destructors call into pjsua). Reset
-    // m_backend (which calls stop() indirectly via the member map's dtors)
-    // AFTER m_accounts (which already removed accounts via removeAccount) but
-    // BEFORE m_engine->stop() — at this point m_accounts has already removed
-    // every backend account, so the backend's m_accounts map is empty and the
-    // reset is a no-op for PJSIP.
+    // m_backend AFTER m_accounts (which already removed all accounts via
+    // removeAccount) but BEFORE m_engine->stop() — at this point the backend's
+    // m_accounts map is empty so the reset is a no-op for PJSIP.  Note:
+    // ~PjsipBackend does NOT call engine->stop(); that is m_engine's own
+    // responsibility, done explicitly below.
     m_backend.reset();
     if (m_engine) m_engine->stop();
     m_engine.reset();
