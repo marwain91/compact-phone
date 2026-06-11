@@ -99,7 +99,7 @@ TEST_F(MuteTest, MutesAndUnmutesActiveCall)
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
     ASSERT_TRUE(registerAccount(am));
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
@@ -150,7 +150,7 @@ TEST_F(MuteTest, MuteSurvivesHoldUnholdReinvite)
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
     ASSERT_TRUE(registerAccount(am));
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
@@ -205,7 +205,7 @@ TEST_F(MuteTest, MuteBeforeMediaIsAppliedOnActivation)
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
     ASSERT_TRUE(registerAccount(am));
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
 
     auto callId = cm.makeCall("sip:600@" + sipServer());
     ASSERT_NE(callId, compactphone::sip::kInvalidCallId);
@@ -244,7 +244,7 @@ TEST_F(MuteTest, MuteRejectsUnknownCallId)
 {
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     EXPECT_FALSE(cm.setMuted(9999, true));
     EXPECT_FALSE(cm.isMuted(9999));
 }

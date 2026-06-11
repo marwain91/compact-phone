@@ -25,6 +25,11 @@ std::string sipServer()
     return "asterisk:5060";
 }
 
+std::string udpTarget(const std::string &extension)
+{
+    return "sip:" + extension + "@" + sipServer() + ";transport=udp";
+}
+
 // Registers the 1001 test account and waits for REGISTERED. Callback-free:
 // polls the manager's atomic registration state, so no lock or stack slot
 // is ever shared with PJSIP threads.
@@ -67,46 +72,45 @@ protected:
     void TearDown() override { engine.stop(); }
 };
 
-// pj::Call::getInfo() throws pj::Error once pjsua has invalidated the
-// underlying call — which can race any Q_INVOKABLE entry point between
-// CallManager's map lookup and the PJSIP query (call teardown is driven by
-// the PJSIP worker thread). An exception escaping a Q_INVOKABLE into the Qt
-// event loop, or escaping a pjsua2 callback into PJSIP's C frames, aborts
-// the process.
+// Operations on a call that has disconnected (and whose backend id has been
+// released) must fail soft — false/empty/no-op, never a crash or a pj::Error
+// escaping into the event loop. This covers the released-id path through
+// CallManager and the adapter's unknown-id guards; the adapter's internal
+// getInfo-throws-mid-teardown guards (moved verbatim from CallImpl) are
+// additionally exercised nondeterministically by the ThreadStress suite.
 //
-// Deterministic stand-in for that race: adopt a pjsua call id that is in
-// range but has no active session. adoptIncomingCall() itself never queries
-// PJSIP, so CallManager happily creates the CallImpl — and every later
-// getInfo() on it throws exactly like a torn-down call's would. Every
-// operation below must fail soft (false / empty), not crash.
-TEST_F(ZombieCallGuardsTest, OperationsOnDeadPjsuaCallFailSoft)
+// The synthetic adoption of a dead pjsua id (adoptIncomingCall) is gone with
+// the queued-event model, so the call is disconnected the honest way: dialing
+// an extension Asterisk rejects (no contact) so the dialog tears itself down,
+// after which every CallManager operation runs against a released id.
+TEST_F(ZombieCallGuardsTest, OperationsOnDisconnectedCallFailSoft)
 {
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
+    auto &cm = smp.calls;
     compactphone::sip::AccountId accountId = compactphone::sip::kInvalidAccountId;
     ASSERT_TRUE(registerAccount(am, accountId));
-    compactphone::sip::CallManager cm(&am);
 
-    // pjsua call id 2 is within maxCalls (SipEngine sets PJSUA_MAX_CALLS-1;
-    // out-of-range ids trip a pjsua assert instead of throwing) but no
-    // session exists behind it — this test places no real calls.
-    const auto id = cm.adoptIncomingCall(accountId, 2);
+    // Dial an extension Asterisk rejects (no contact) so the call disconnects
+    // on its own; 1009 is unrouted in the fixture dialplan (only 600/1001/1002
+    // exist), so the dialog tears down and the backend id is released.
+    const auto id = cm.makeCall(accountId, udpTarget("1009"));
     ASSERT_NE(id, compactphone::sip::kInvalidCallId);
+    ASSERT_TRUE(compactphone::testsupport::pumpUntil(
+        [&] { return cm.callCount() == 0; }, std::chrono::seconds(10)));
 
     EXPECT_FALSE(cm.setMuted(id, true));
     EXPECT_FALSE(cm.startRecording(id, "/tmp/zombie-call.wav"));
     EXPECT_FALSE(cm.playAudioFile(id, "/tmp/zombie-call.wav", false));
     EXPECT_FALSE(cm.isCaptureTransmitting(id));
     EXPECT_FALSE(cm.isMediaActive(id));
+    EXPECT_FALSE(cm.hold(id));
 
     const auto stats = cm.streamStats(id);
     EXPECT_LT(stats.mos, 0.0); // empty stats, not garbage
 
-    // snapshot() must survive the zombie entry (it getInfo()s every call).
-    const auto snap = cm.snapshot();
-    EXPECT_GE(snap.size(), 1u);
-
-    // hangup() must not throw out of the Q_INVOKABLE either; the zombie has
-    // no session, so this is bookkeeping-only.
-    cm.hangup(id);
+    const auto snap = cm.snapshot();             // lingering entry only
+    (void)snap;
+    cm.hangup(id);                                // no-op, must not crash
+    EXPECT_NE(cm.lastStatusCode(id), 0);          // disposition readable
 }

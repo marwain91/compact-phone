@@ -18,7 +18,6 @@
 #include <unordered_map>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
 using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 using compactphone::testsupport::ScopedAccountCallbacks;
@@ -94,13 +93,13 @@ TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
     ASSERT_TRUE(waitForRegState(
         am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
-    // The incoming-call lambda captures cm; the guard clears the
-    // AccountsManager callbacks before cm dies, ASSERT early-returns included.
+    auto &cm = smp.calls;
+    // The incoming-call signal fires on the main thread from a pumped queued
+    // event; the guard clears the remaining AccountsManager callbacks before
+    // the managers die, ASSERT early-returns included.
     ScopedAccountCallbacks guard(am);
-    am.setOnIncomingCall([&](compactphone::sip::AccountId aid, int pjsipCallId) {
-        incomingId.store(cm.adoptIncomingCall(aid, pjsipCallId));
-    });
+    QObject::connect(&cm, &compactphone::sip::CallManager::incomingCall,
+                     [&incomingId](int id) { incomingId.store(id); });
     cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx);
         observed[id] = s;
@@ -109,7 +108,7 @@ TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
     // 1002 dials 1001 -> Asterisk routes -> 1001 sees INVITE.
     auto callerLeg = cm.makeCall(id2, udpTarget("1001"));
     ASSERT_NE(callerLeg, compactphone::sip::kInvalidCallId);
-    ASSERT_TRUE(pollUntil([&] { return incomingId.load() > 0; }, 10s));
+    ASSERT_TRUE(pumpUntil([&] { return incomingId.load() > 0; }, 10s));
 
     // Forward the incoming dialog to extension 600 (echo) via 302.
     EXPECT_TRUE(cm.forwardCall(incomingId.load(), udpTarget("600")));
@@ -117,7 +116,7 @@ TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
     // The receiving leg always disconnects once we hangup with 302. The
     // caller-leg fate depends on Asterisk's redirect handling in our
     // dialplan; we only assert the side we control.
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         std::lock_guard l(mtx);
         return observed[incomingId.load()] ==
                compactphone::sip::CallState::Disconnected;
@@ -132,15 +131,13 @@ TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
 TEST_F(ForwardCallTest, ForwardCallReturnsFalseForUnknownCallId)
 {
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
-    auto &am = smp.manager;
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     EXPECT_FALSE(cm.forwardCall(12345, "sip:600@example"));
 }
 
 TEST_F(ForwardCallTest, ForwardCallReturnsFalseForEmptyTarget)
 {
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
-    auto &am = smp.manager;
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     EXPECT_FALSE(cm.forwardCall(1, ""));
 }

@@ -15,7 +15,6 @@
 #include <mutex>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
 using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 using compactphone::testsupport::ScopedAccountCallbacks;

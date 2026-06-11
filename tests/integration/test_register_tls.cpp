@@ -147,7 +147,7 @@ TEST(RegisterTlsVerifiedTest, AcceptsTrustedCaSignedCertWithVerificationOn)
     ASSERT_TRUE(db.openInMemory());
     compactphone::platform::MemoryKeychain kc;
     compactphone::sipbackend::PjsipBackend backend(&engine);
-    compactphone::sip::AccountsManager mgr(&backend, &backend, &db, &kc);
+    compactphone::sip::AccountsManager mgr(&backend, &db, &kc);
     backend.setListener(&mgr);
     mgr.registerStartupAccounts(); // DB empty here; mirrors buildCoreSipGraph order
 

@@ -18,7 +18,6 @@
 #include <unordered_map>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
 using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 
@@ -84,7 +83,7 @@ TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
     ASSERT_TRUE(waitForRegState(
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx); observed[id] = s;
     });
@@ -95,7 +94,7 @@ TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
     auto leg2 = cm.makeCall(udpTarget("600"));
     ASSERT_NE(leg1, compactphone::sip::kInvalidCallId);
     ASSERT_NE(leg2, compactphone::sip::kInvalidCallId);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         std::lock_guard l(mtx);
         return observed[leg1] == compactphone::sip::CallState::Confirmed &&
                observed[leg2] == compactphone::sip::CallState::Confirmed;
@@ -121,7 +120,7 @@ TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
 
     cm.hangup(leg1);
     cm.hangup(leg2);
-    ASSERT_TRUE(pollUntil([&] {
+    ASSERT_TRUE(pumpUntil([&] {
         std::lock_guard l(mtx);
         return observed[leg1] == compactphone::sip::CallState::Disconnected &&
                observed[leg2] == compactphone::sip::CallState::Disconnected;
@@ -137,7 +136,7 @@ TEST_F(ConferenceTest, MergeRejectsNonConfirmedCalls)
 {
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &am = smp.manager;
-    compactphone::sip::CallManager cm(&am);
+    auto &cm = smp.calls;
     // No calls exist — both ids are bogus.
     EXPECT_FALSE(cm.mergeCalls(1, 2));
 }
