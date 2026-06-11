@@ -52,7 +52,8 @@ public:
     virtual ~ISipBackend() = default;
 
     // --- lifecycle ---
-    // Listener must be set before start() and survives until cleared.
+    // Backends must tolerate a null listener (events are dropped). Set the
+    // listener before start() to receive events; it survives until cleared.
     // setListener(nullptr) is a quiesce barrier: after it returns, no
     // event is delivered to the previous listener.
     virtual void setListener(ISipBackendListener *listener) = 0;

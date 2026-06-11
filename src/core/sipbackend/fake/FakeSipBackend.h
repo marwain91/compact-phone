@@ -127,8 +127,9 @@ public:
     bool callExists(CallId id) const { return m_calls.count(id) != 0; }
     const FakeCall &callInfo(CallId id) const { return m_calls.at(id); }
     size_t accountCount() const { return m_accounts.size(); }
-    // Every mutating backend command, in order ("makeCall:1:sip:200@x",
-    // "hold:1", ...). Lets tests assert managers issued the right ops.
+    // Account, watch, and call commands the consumer issued, in order
+    // ("addAccount:1:alice", "makeCall:1:sip:200@x", "hold:1", ...).
+    // Engine-level config setters are not logged.
     const std::vector<std::string> &commandLog() const { return m_log; }
 
 private:

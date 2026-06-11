@@ -28,7 +28,7 @@ static QCoreApplication *ensureApp()
 
 INSTANTIATE_TEST_SUITE_P(
     Fake, SipBackendContract,
-    ::testing::Values(BackendFactory{[] -> std::unique_ptr<ISipBackend> {
+    ::testing::Values(BackendFactory{[]() -> std::unique_ptr<ISipBackend> {
         ensureApp();
         return std::make_unique<FakeSipBackend>();
     }}));

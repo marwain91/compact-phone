@@ -39,6 +39,7 @@ void FakeSipBackend::stop()
     m_calls.clear();
     m_watches.clear();
     m_ringtonePath.clear();
+    m_log.clear();
 }
 
 void FakeSipBackend::post(std::function<void()> fn)
@@ -146,6 +147,8 @@ bool FakeSipBackend::unwatch(WatchId id)
 void FakeSipBackend::simulateRegState(AccountId id, bool regActive,
                                       int sipCode, const std::string &reason)
 {
+    if (!m_running)
+        return;
     post([this, id, regActive, sipCode, reason] {
         m_listener->onRegState(id, regActive, sipCode, reason);
     });
@@ -154,6 +157,8 @@ void FakeSipBackend::simulateRegState(AccountId id, bool regActive,
 void FakeSipBackend::simulateMwi(AccountId id, int newMessages,
                                  int oldMessages, bool active)
 {
+    if (!m_running)
+        return;
     post([this, id, newMessages, oldMessages, active] {
         m_listener->onMwi(id, newMessages, oldMessages, active);
     });
@@ -163,6 +168,8 @@ void FakeSipBackend::simulateInstantMessage(AccountId id,
                                             const std::string &fromUri,
                                             const std::string &body)
 {
+    if (!m_running)
+        return;
     post([this, id, fromUri, body] {
         m_listener->onInstantMessage(id, fromUri, body);
     });
@@ -170,6 +177,8 @@ void FakeSipBackend::simulateInstantMessage(AccountId id,
 
 void FakeSipBackend::simulatePresence(WatchId id, PresenceState state)
 {
+    if (!m_running)
+        return;
     post([this, id, state] { m_listener->onPresence(id, state); });
 }
 
