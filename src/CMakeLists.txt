@@ -38,6 +38,8 @@ add_library(compactphone_core STATIC
     core/SipEngine.cpp
     core/SipUri.h
     core/SipUri.cpp
+    core/sipbackend/Types.h
+    core/sipbackend/ISipBackend.h
     core/AccountsManager.h
     core/AccountsManager.cpp
     core/BootConfig.h
