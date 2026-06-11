@@ -63,6 +63,11 @@ public:
     CallId adoptIncomingCall(AccountId accountId, int pjsipCallId);
 
     bool accept(CallId id);
+
+    // Rejects a ringing incoming call with 486 Busy Here, so the server
+    // applies its busy treatment (forward-on-busy, voicemail) instead of
+    // hard-failing the caller. Used by both the manual decline button and
+    // the DND policy.
     bool decline(CallId id);
 
     // Reject an incoming call with 302 Moved Temporarily and a Contact
@@ -156,7 +161,7 @@ public:
 
     // SIP status code of the call's final disposition (pj::CallInfo's
     // lastStatusCode, captured when the DISCONNECTED state was dispatched)
-    // — e.g. 603 for a decline, 486 busy, 200 for a normal BYE. Returns 0
+    // — e.g. 486 for a decline/busy, 200 for a normal BYE. Returns 0
     // while the call is still up, if the id is unknown, or once the
     // post-disconnect grace eraseCall() has dropped the entry — read it
     // promptly after observing Disconnected. Test-only accessor: lets
