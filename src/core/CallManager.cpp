@@ -548,7 +548,14 @@ bool CallManager::decline(CallId id)
         call = it->second.get();
     }
     pj::CallOpParam prm;
-    prm.statusCode = PJSIP_SC_DECLINE;
+    // 486 Busy Here, not 603 Decline: 486 invites the server to apply its
+    // busy treatment (forward-on-busy, voicemail, hunt), which is what a
+    // declined caller should get — DND included. 603 means "do not try to
+    // reach me anywhere else", and Asterisk additionally relayed it to the
+    // caller as a hostile-looking 403 Forbidden (cause-21 mapping); 486
+    // passes through as 486. Matches the 486 adoptIncomingCall already
+    // sends when auto-declining a second call.
+    prm.statusCode = PJSIP_SC_BUSY_HERE;
     try {
         call->hangup(prm);
     } catch (const pj::Error &e) {

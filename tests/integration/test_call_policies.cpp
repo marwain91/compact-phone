@@ -169,18 +169,17 @@ TEST_F(CallPoliciesTest, DndDeclinesIncomingCallAndOriginatorDisconnects)
     // Disconnected alone is not enough: a fixture mishap (e.g. Asterisk
     // returning 480 because 1002's contact wasn't registered yet) also ends
     // the call and would pass vacuously. The caller leg's final disposition
-    // must be the decline family. Our policy declines the callee leg with
-    // 603; Asterisk maps an incoming 603 to hangup cause 21 (Call Rejected)
-    // and relays cause 21 to the caller as 403 Forbidden — so 403 is the
-    // expected code through this fixture, with 486/600/603 accepted for
-    // Asterisk builds that pass the decline through. 480 (no contact),
-    // 408 (timeout) and 5xx still fail loudly.
+    // must be the busy/decline family. Our policy declines the callee leg
+    // with 486 Busy Here; Asterisk maps it to hangup cause 17 (User Busy)
+    // and relays 486 to the caller. 600/603 are accepted for servers that
+    // report a decline cause instead. 480 (no contact), 408 (timeout) and
+    // 5xx still fail loudly.
     // Read promptly after Disconnected: the entry is dropped by the
     // post-disconnect grace eraseCall().
     const int code = cm->lastStatusCode(callerLeg);
-    EXPECT_TRUE(code == 403 || code == 486 || code == 600 || code == 603)
+    EXPECT_TRUE(code == 486 || code == 600 || code == 603)
         << "caller leg ended with status " << code
-        << ", not a decline";
+        << ", not a busy/decline";
 }
 
 TEST_F(CallPoliciesTest, AutoAnswerAcceptsIncomingCallWithoutManualAccept)
