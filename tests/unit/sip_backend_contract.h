@@ -16,8 +16,13 @@
 
 #include <gtest/gtest.h>
 
+#include <QCoreApplication>
+
+#include <chrono>
 #include <functional>
 #include <memory>
+#include <thread>
+#include <vector>
 
 namespace compactphone::sipbackend::testing {
 
@@ -43,6 +48,116 @@ inline AccountSettings contractAccount()
     a.domain = "contract.test";
     a.password = "pw";
     return a;
+}
+
+// Records call-relevant listener events. Registration noise from the
+// (unroutable) contract account is captured separately and ignored by the
+// call-event assertions.
+struct RecordingListener : ISipBackendListener {
+    struct CallEv { CallId id; CallState state; int code; };
+    std::vector<CallEv> callStates;
+    std::vector<CallId> incoming;
+    int regEvents = 0;
+    // Set by the test around a backend command; any delivery while true is
+    // a re-entrancy violation (contract rule 2).
+    bool inBackendCall = false;
+    bool reentrantDelivery = false;
+
+    void onRegState(AccountId, bool, int, const std::string &) override
+    { ++regEvents; if (inBackendCall) reentrantDelivery = true; }
+    void onIncomingCall(AccountId, CallId c, const std::string &,
+                        const std::string &) override
+    { incoming.push_back(c); if (inBackendCall) reentrantDelivery = true; }
+    void onCallState(CallId c, CallState s, int code) override
+    { callStates.push_back({c, s, code}); if (inBackendCall) reentrantDelivery = true; }
+};
+
+// Pumps the Qt event loop until pred holds or timeout elapses. Requires a
+// live QCoreApplication (both instantiating TUs create one).
+template <typename Pred>
+inline bool contractPump(Pred pred, std::chrono::milliseconds timeout)
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        if (pred()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return pred();
+}
+
+// An unroutable but syntactically valid target: the PJSIP adapter sends the
+// INVITE into the void (CALLING state, no answer); the fake scripts Calling
+// directly. Port 9 (discard) on loopback never answers.
+inline const char *contractCallTarget() { return "sip:nobody@127.0.0.1:9"; }
+
+TEST_P(SipBackendContract, CallEventsAreQueuedNeverReentrant)
+{
+    RecordingListener rec;
+    backend->setListener(&rec);
+    ASSERT_TRUE(backend->start(EngineConfig{}));
+    const auto acc = backend->addAccount(contractAccount());
+    ASSERT_NE(acc, kInvalidAccountId);
+
+    rec.inBackendCall = true;
+    const auto id = backend->makeCall(acc, contractCallTarget());
+    rec.inBackendCall = false;
+    ASSERT_NE(id, kInvalidCallId);
+    // Rule 2: nothing may have been delivered synchronously inside
+    // makeCall — even though PJSIP dispatches CALLING re-entrantly on the
+    // calling thread, the adapter must queue it.
+    EXPECT_TRUE(rec.callStates.empty());
+    EXPECT_FALSE(rec.reentrantDelivery);
+
+    ASSERT_TRUE(contractPump([&] { return !rec.callStates.empty(); },
+                             std::chrono::seconds(5)));
+    EXPECT_EQ(rec.callStates.front().id, id);
+    EXPECT_EQ(rec.callStates.front().state, CallState::Calling);
+    EXPECT_FALSE(rec.reentrantDelivery);
+    backend->setListener(nullptr);
+}
+
+TEST_P(SipBackendContract, NoCallEventsAfterStop)
+{
+    RecordingListener rec;
+    backend->setListener(&rec);
+    ASSERT_TRUE(backend->start(EngineConfig{}));
+    const auto acc = backend->addAccount(contractAccount());
+    ASSERT_NE(acc, kInvalidAccountId);
+    (void)backend->makeCall(acc, contractCallTarget());
+    backend->stop();   // rule 4: queued-but-undelivered events die here
+    contractPump([] { return false; }, std::chrono::milliseconds(200));
+    EXPECT_TRUE(rec.callStates.empty());
+    EXPECT_TRUE(rec.incoming.empty());
+    backend->setListener(nullptr);
+}
+
+TEST_P(SipBackendContract, ClearedListenerReceivesNothing)
+{
+    RecordingListener rec;
+    backend->setListener(&rec);
+    ASSERT_TRUE(backend->start(EngineConfig{}));
+    const auto acc = backend->addAccount(contractAccount());
+    ASSERT_NE(acc, kInvalidAccountId);
+    (void)backend->makeCall(acc, contractCallTarget());
+    backend->setListener(nullptr);   // quiesce barrier
+    contractPump([] { return false; }, std::chrono::milliseconds(200));
+    EXPECT_TRUE(rec.callStates.empty());
+}
+
+TEST_P(SipBackendContract, ReleasedCallIdIsDead)
+{
+    ASSERT_TRUE(backend->start(EngineConfig{}));
+    const auto acc = backend->addAccount(contractAccount());
+    ASSERT_NE(acc, kInvalidAccountId);
+    const auto id = backend->makeCall(acc, contractCallTarget());
+    ASSERT_NE(id, kInvalidCallId);
+    backend->releaseCall(id);        // rule 3: id invalid afterwards
+    EXPECT_FALSE(backend->hold(id));
+    EXPECT_FALSE(backend->setMuted(id, true));
+    EXPECT_FALSE(backend->isMediaActive(id));
+    backend->hangup(id);             // must not crash
+    backend->releaseCall(id);        // double release: no-op
 }
 
 TEST_P(SipBackendContract, StartsAndStops)
