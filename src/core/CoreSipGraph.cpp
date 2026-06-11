@@ -21,10 +21,14 @@ CoreSipGraph buildCoreSipGraph(sipbackend::ISipBackend *backend,
     g.accounts = std::make_unique<sip::AccountsManager>(
         backend, pjsipBridge, db, keychain);
     // Wire the listener AFTER construction so the manager is fully constructed
-    // when the first queued event arrives. The caller must call
+    // when the first queued event arrives. registerStartupAccounts() is called
+    // immediately after so events from the first REGISTER response have a
+    // live listener — this closes the window where a fast registrar's first
+    // onRegState lands before anyone listens. The caller must call
     // backend->setListener(nullptr) before the graph is torn down —
     // see CoreSipGraph.h's wiring contract.
     backend->setListener(g.accounts.get());
+    g.accounts->registerStartupAccounts();
     g.accountsModel =
         std::make_unique<models::AccountsModel>(g.accounts.get(), parent);
     // engine is passed through so AccountsController::pushNetworkAndCodecSettings

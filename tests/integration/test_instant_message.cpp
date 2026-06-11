@@ -16,6 +16,7 @@
 
 using namespace std::chrono_literals;
 using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 using compactphone::testsupport::ScopedAccountCallbacks;
 
@@ -104,7 +105,8 @@ TEST_F(InstantMessageTest, AccountToAccountRoundTripDeliversBody)
     const std::string body = "Hello from integration test";
     EXPECT_TRUE(am.sendInstantMessage(id2, udpTarget("1001"), body));
 
-    ASSERT_TRUE(pollUntil([&] {
+    // onInstantMessage fires as a queued main-thread event — pump the loop.
+    ASSERT_TRUE(pumpUntil([&] {
         std::lock_guard l(mtx);
         return gotMessage;
     }, 10s));

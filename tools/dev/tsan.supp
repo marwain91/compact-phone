@@ -70,3 +70,16 @@ race:pjmedia_wsola_save
 # frames inside the executed functor, not in the invokeMethod allocation.
 race:invokeMethodCallableHelper
 race:QMetaObject::invokeMethodImpl
+
+# PjsipBackend::post* helpers create a lambda on the PJSIP thread and move it
+# into EventDispatch::post, which queues it via QMetaObject::invokeMethod.
+# Qt's event-queue mutex provides the happens-before for the functor's heap
+# storage (same guarantee the invokeMethodCallableHelper/invokeMethodImpl
+# suppressions above cover for direct invokeMethod callers), but the allocation
+# frame is in our post* helper — not inside Qt — so TSan cannot infer the
+# guarantee from the existing suppressions. Real races in lambda-captured data
+# would appear in the frames of the executed functor, not in the allocation.
+race:PjsipBackend::postRegState
+race:PjsipBackend::postInstantMessage
+race:PjsipBackend::postMwi
+race:PjsipBackend::announceIncomingCall

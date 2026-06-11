@@ -25,9 +25,8 @@
 //
 // Phase-2 note: integration tests construct their AccountsManager via the
 // SipManagerPair helper below which pairs it with a PjsipBackend.
-// waitForRegState uses pumpUntil in Task 6 (registration state now arrives
-// as a queued main-thread event); for now the suite is compile-clean but
-// registration waits may time-out until Task 6 pumps the event loop.
+// waitForRegState uses pumpUntil (registration state arrives as a queued
+// main-thread event and only advances when the Qt event loop pumps).
 
 #include "core/AccountsManager.h"
 #include "core/SipEngine.h"
@@ -43,12 +42,11 @@
 
 namespace compactphone::testsupport {
 
-// Phase-2 transitional helper: pairs a PjsipBackend with an AccountsManager
-// and wires the listener, so integration tests can switch away from the old
-// AccountsManager(engine, db, kc) three-arg constructor in a single-line
-// change. Task 6 will inline this wiring into the fixture classes; for now
-// it keeps the "DO NOT touch integration" goal limited to the semantic
-// changes (pumpUntil registration waits).
+// Pairs a PjsipBackend with an AccountsManager and wires the listener,
+// matching the buildCoreSipGraph wiring order (setListener then
+// registerStartupAccounts). Integration tests that need a full
+// engine+accounts stack construct this helper in their fixtures or test
+// bodies instead of building the graph by hand.
 //
 // Destruction order: manager destructor runs first (quiesces the native
 // hook, removes backend accounts), then backend destructor. The backend
@@ -63,7 +61,10 @@ struct SipManagerPair {
         : backend(engine)
         , manager(&backend, &backend, db, kc)
     {
+        // setListener first so queued reg-state events have a destination,
+        // then registerStartupAccounts() — mirrors buildCoreSipGraph order.
         backend.setListener(&manager);
+        manager.registerStartupAccounts();
     }
     ~SipManagerPair()
     {
@@ -106,27 +107,27 @@ bool pumpUntil(Pred pred, std::chrono::milliseconds timeout)
     return pred();
 }
 
-// Waits until stateOf(id) == want for every id. Callback-free: registration
-// state changes arrive as queued main-thread events (AccountsManager::onRegState
-// posts via the backend listener), so the wait must pump the event loop for
-// state to advance — pumpUntil is used for that in Task 6; until then
-// pollUntil is a compile-clean placeholder that may time out.
-// Tracking CURRENT state (not transition counts) also makes the wait
-// immune to registration flaps — an account that registers, drops, and
-// re-registers can satisfy a "saw Registered N times" count while another
-// account is still unregistered (the CallPoliciesTest flake).
+// Waits until stateOf(id) == want for every id. Registration state changes
+// arrive as queued main-thread events (AccountsManager::onRegState is posted
+// via the backend's EventDispatch and runs only when the Qt event loop pumps),
+// so the wait uses pumpUntil — pumping from the main thread cannot re-enter
+// PJSIP callbacks because those now stop at the adapter's queue boundary.
+// Tracking CURRENT state (not transition counts) also makes the wait immune to
+// registration flaps — an account that registers, drops, and re-registers can
+// satisfy a "saw Registered N times" count while another account is still
+// unregistered (the CallPoliciesTest flake).
 inline bool waitForRegState(
     sip::AccountsManager &am,
     std::initializer_list<sip::AccountId> ids,
     sip::RegistrationState want,
     std::chrono::milliseconds timeout)
 {
-    return pollUntil([&] {
+    return pumpUntil([&] {
         for (const auto id : ids) {
             if (am.stateOf(id) != want) return false;
         }
         return true;
-    }, timeout, std::chrono::milliseconds(50));
+    }, timeout);
 }
 
 // Quiesce barrier on scope exit: clears every AccountsManager callback

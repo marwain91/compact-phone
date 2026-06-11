@@ -87,6 +87,7 @@ protected:
         backend = std::make_unique<compactphone::sipbackend::PjsipBackend>(&engine);
         am = std::make_unique<compactphone::sip::AccountsManager>(backend.get(), backend.get(), &db, &kc);
         backend->setListener(am.get());
+        am->registerStartupAccounts(); // DB is empty here; call mirrors buildCoreSipGraph order
         cm = std::make_unique<compactphone::sip::CallManager>(am.get());
         callsModel = std::make_unique<compactphone::models::CallsModel>(cm.get());
         hm = std::make_unique<compactphone::sip::HistoryManager>(&db);

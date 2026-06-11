@@ -9,12 +9,14 @@
 
 #include "test_support.h"
 
+#include <QCoreApplication>
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 
 namespace {
@@ -34,12 +36,18 @@ std::string caCertFile()
 
 class RegisterTlsTest : public ::testing::Test {
 protected:
+    int argc = 1;
+    char argv0[1] = {0};
+    char *argv = argv0;
+    std::unique_ptr<QCoreApplication> app;
+
     compactphone::sip::SipEngine engine;
     compactphone::persistence::Database db;
     compactphone::platform::MemoryKeychain kc;
 
     void SetUp() override
     {
+        app = std::make_unique<QCoreApplication>(argc, &argv);
         ASSERT_TRUE(engine.start(0));
         ASSERT_TRUE(db.openInMemory());
     }
@@ -108,8 +116,9 @@ TEST_F(RegisterTlsTest, RejectsSelfSignedCertWhenVerificationRequired)
     ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
 
     // The handshake should fail; wait for a Failed state and confirm we
-    // never observed a successful registration.
-    pollUntil([&] { return sawFailed.load(); }, 20s);
+    // never observed a successful registration. The callback fires via the
+    // queued main-thread listener event — pump the loop.
+    pumpUntil([&] { return sawFailed.load(); }, 20s);
     EXPECT_TRUE(sawFailed.load());
     EXPECT_FALSE(sawRegistered.load());
 
@@ -124,6 +133,13 @@ TEST_F(RegisterTlsTest, RejectsSelfSignedCertWhenVerificationRequired)
 // so the CA bundle can be set before start().
 TEST(RegisterTlsVerifiedTest, AcceptsTrustedCaSignedCertWithVerificationOn)
 {
+    int argc = 1;
+    char argv0[] = "test";
+    char *argv[] = {argv0};
+    std::unique_ptr<QCoreApplication> app;
+    if (!QCoreApplication::instance())
+        app = std::make_unique<QCoreApplication>(argc, argv);
+
     compactphone::sip::SipEngine engine;
     engine.setCaCertFile(caCertFile());
     ASSERT_TRUE(engine.start(0));
@@ -133,6 +149,7 @@ TEST(RegisterTlsVerifiedTest, AcceptsTrustedCaSignedCertWithVerificationOn)
     compactphone::sipbackend::PjsipBackend backend(&engine);
     compactphone::sip::AccountsManager mgr(&backend, &backend, &db, &kc);
     backend.setListener(&mgr);
+    mgr.registerStartupAccounts(); // DB empty here; mirrors buildCoreSipGraph order
 
     compactphone::sip::Account a;
     a.displayName = "Test TLS verified";

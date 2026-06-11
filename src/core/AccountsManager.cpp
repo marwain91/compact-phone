@@ -114,11 +114,10 @@ AccountsManager::AccountsManager(sipbackend::ISipBackend *backend,
     }
 
     loadFromDatabase();
-    for (auto &e : m_entries) {
-        if (e->account.enabled && e->account.registerOnStartup) {
-            registerAccount(e->account.id);
-        }
-    }
+    // NOTE: startup accounts are NOT registered here. The caller must
+    // call backend->setListener(this) first so queued reg-state events
+    // have a destination, then call registerStartupAccounts(). Both
+    // buildCoreSipGraph and SipManagerPair do this in the correct order.
 }
 
 AccountsManager::~AccountsManager()
@@ -497,6 +496,15 @@ bool AccountsManager::setPassword(AccountId id, const std::string &password)
 // ---------------------------------------------------------------------------
 // Registration — drives the backend via ISipBackend
 // ---------------------------------------------------------------------------
+
+void AccountsManager::registerStartupAccounts()
+{
+    for (auto &e : m_entries) {
+        if (e->account.enabled && e->account.registerOnStartup) {
+            registerAccount(e->account.id);
+        }
+    }
+}
 
 bool AccountsManager::registerAccount(AccountId id)
 {

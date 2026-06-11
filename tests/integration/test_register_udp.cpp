@@ -8,6 +8,8 @@
 
 #include "test_support.h"
 
+#include <QCoreApplication>
+
 #include <chrono>
 #include <cstdlib>
 #include <string>
@@ -25,12 +27,18 @@ std::string sipServer()
 
 class RegisterUdpTest : public ::testing::Test {
 protected:
+    int argc = 1;
+    char argv0[1] = {0};
+    char *argv = argv0;
+    std::unique_ptr<QCoreApplication> app;
+
     compactphone::sip::SipEngine engine;
     compactphone::persistence::Database db;
     compactphone::platform::MemoryKeychain kc;
 
     void SetUp() override
     {
+        app = std::make_unique<QCoreApplication>(argc, &argv);
         ASSERT_TRUE(engine.start(0));
         ASSERT_TRUE(db.openInMemory());
     }

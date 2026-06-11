@@ -117,8 +117,13 @@ public:
     // refresh with stale auth.
     bool setPassword(AccountId id, const std::string &password);
 
-    // Registration. Called automatically for enabled accounts on construction
-    // and when add/update flips an account to enabled.
+    // Registration. registerAccount and unregisterAccount are called
+    // automatically when add/update/setEnabled flips account state.
+    // registerStartupAccounts() registers all enabled+registerOnStartup
+    // accounts; it must be called AFTER the backend listener is installed
+    // (buildCoreSipGraph and SipManagerPair do this — callers must not
+    // call it before backend->setListener(this)).
+    void registerStartupAccounts();
     bool registerAccount(AccountId id);
     void unregisterAccount(AccountId id);
 
