@@ -6,22 +6,22 @@
 // contract: queued onto the Qt main thread, dropped after stop() /
 // setListener(nullptr).
 //
-// Main-thread-only, like every backend consumer. The epoch counter is
-// how queued lambdas detect they were invalidated: stop() and
-// setListener() bump it, and a lambda only fires if its captured epoch
-// still matches. Destruction safety comes from m_dispatch being the
-// invokeMethod context — destroying it cancels undelivered lambdas —
-// so it must never be replaced with an app-global context.
+// Main-thread-only, like every backend consumer. Event queuing and
+// invalidation are handled by EventDispatch (see EventDispatch.h):
+// stop() and setListener() call m_events.invalidate(), which bumps
+// the epoch so lambdas queued before it are dropped. Destruction safety
+// comes from EventDispatch::m_dispatch being the invokeMethod context —
+// destroying it cancels undelivered lambdas — so m_events is declared
+// LAST among data members so it dies first.
 
 #include "../ISipBackend.h"
+#include "../EventDispatch.h"
 
 #include <functional>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
-
-class QObject;
 
 namespace compactphone::sipbackend {
 
@@ -127,6 +127,10 @@ public:
     bool callExists(CallId id) const { return m_calls.count(id) != 0; }
     const FakeCall &callInfo(CallId id) const { return m_calls.at(id); }
     size_t accountCount() const { return m_accounts.size(); }
+    // Returns the backend AccountId assigned to the most recently added
+    // account (the value returned by the last addAccount() call).  Returns
+    // kInvalidAccountId if no account has been added yet.
+    AccountId lastAddedAccountId() const { return m_lastAddedId; }
     // Account, watch, and call commands the consumer issued, in order
     // ("addAccount:1:alice", "makeCall:1:sip:200@x", "hold:1", ...).
     // Engine-level config setters are not logged.
@@ -142,9 +146,7 @@ private:
     FakeCall *liveCall(CallId id);
 
     bool m_running = false;
-    std::uint64_t m_epoch = 0;
     ISipBackendListener *m_listener = nullptr;
-    std::unique_ptr<QObject> m_dispatch;
 
     CaTrust m_caTrust;
     std::vector<std::string> m_stunServers;
@@ -155,12 +157,18 @@ private:
     std::function<void(int, const std::string &)> m_logSink;
 
     AccountId m_nextAccountId = 1;
+    AccountId m_lastAddedId = kInvalidAccountId;
     CallId m_nextCallId = 1;
     WatchId m_nextWatchId = 1;
     std::map<AccountId, FakeAccount> m_accounts;
     std::map<CallId, FakeCall> m_calls;
     std::map<WatchId, std::string> m_watches;
     std::vector<std::string> m_log;
+
+    // Declared LAST: EventDispatch's internal QObject is the invokeMethod
+    // context — destroying it cancels undelivered lambdas — so it must die
+    // before the maps and other state the lambdas may capture.
+    EventDispatch m_events;
 };
 
 } // namespace compactphone::sipbackend

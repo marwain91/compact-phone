@@ -8,6 +8,8 @@
 
 #include "test_support.h"
 
+#include <QCoreApplication>
+
 #include <chrono>
 #include <cstdlib>
 #include <string>
@@ -25,12 +27,18 @@ std::string sipServer()
 
 class RegisterUdpTest : public ::testing::Test {
 protected:
+    int argc = 1;
+    char argv0[1] = {0};
+    char *argv = argv0;
+    std::unique_ptr<QCoreApplication> app;
+
     compactphone::sip::SipEngine engine;
     compactphone::persistence::Database db;
     compactphone::platform::MemoryKeychain kc;
 
     void SetUp() override
     {
+        app = std::make_unique<QCoreApplication>(argc, &argv);
         ASSERT_TRUE(engine.start(0));
         ASSERT_TRUE(db.openInMemory());
     }
@@ -39,7 +47,8 @@ protected:
 
 TEST_F(RegisterUdpTest, RegistersExtension1001)
 {
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &mgr = smp.manager;
 
     compactphone::sip::Account a;
     a.displayName = "Test 1001";
@@ -61,7 +70,8 @@ TEST_F(RegisterUdpTest, RegistersExtension1001)
 
 TEST_F(RegisterUdpTest, RejectsInvalidPassword)
 {
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &mgr = smp.manager;
 
     compactphone::sip::Account a;
     a.displayName = "Bad Password";

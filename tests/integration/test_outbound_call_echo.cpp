@@ -9,6 +9,8 @@
 
 #include "test_support.h"
 
+#include <QCoreApplication>
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -29,12 +31,18 @@ std::string sipServer()
 
 class OutboundCallTest : public ::testing::Test {
 protected:
+    int argc = 1;
+    char argv0[1] = {0};
+    char *argv = argv0;
+    std::unique_ptr<QCoreApplication> app;
+
     compactphone::sip::SipEngine engine;
     compactphone::persistence::Database db;
     compactphone::platform::MemoryKeychain kc;
 
     void SetUp() override
     {
+        app = std::make_unique<QCoreApplication>(argc, &argv);
         ASSERT_TRUE(engine.start(0));
         ASSERT_TRUE(db.openInMemory());
     }
@@ -48,7 +56,8 @@ TEST_F(OutboundCallTest, CallsEchoExtensionAndHangsUp)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
 
     compactphone::sip::Account a;
     a.displayName = "Test 1001";

@@ -114,7 +114,8 @@ TEST_F(AudioPlaybackTest, PlaysAndStopsWavFileOnActiveCall)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::Account a;
     a.displayName = "Play";
     a.username = "1001";
@@ -164,7 +165,8 @@ TEST_F(AudioPlaybackTest, PlaysAndStopsWavFileOnActiveCall)
 // no phantom player to stop.
 TEST_F(AudioPlaybackTest, PlayRejectsUnknownCallAndStopWithoutPlayer)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::CallManager cm(&am);
     EXPECT_FALSE(cm.playAudioFile(9999, "/nonexistent.wav", false));
     EXPECT_FALSE(cm.isPlayingAudioFile(9999));

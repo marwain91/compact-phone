@@ -1,40 +1,20 @@
 #include "AccountsManager.h"
-#include "SipEngine.h"
 #include "persistence/Database.h"
 #include "persistence/SqliteUtil.h"
 #include "platform/Keychain.h"
+#include "sipbackend/pjsip/PjsipBackend.h"
 
-#include <pjsua-lib/pjsua.h>
-#include <pjsua2.hpp>
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
 
 #include <QUuid>
 
 #include <algorithm>
-#include <atomic>
-#include <cstdio>
-#include <cstring>
 #include <mutex>
 
 namespace compactphone::sip {
 
 namespace {
-
-const char *transportScheme(Transport t)
-{
-    switch (t) {
-    case Transport::Tcp: return ";transport=tcp";
-    case Transport::Tls: return ";transport=tls";
-    case Transport::Udp:
-    default:
-        // Explicitly state UDP so PJSIP does not size-escalate to TCP for
-        // large requests (RFC 3261 §18.1.1) and so any cached non-UDP
-        // connection to the registrar isn't reused. The parameter also
-        // makes the chosen transport visible on the wire / in pcaps.
-        return ";transport=udp";
-    }
-}
 
 std::string newPasswordRef()
 {
@@ -45,6 +25,10 @@ std::string newPasswordRef()
 
 using persistence::bindText;
 using persistence::readText;
+
+// ---------------------------------------------------------------------------
+// mapRegEvent — manager-side policy, unit-testable without a live backend
+// ---------------------------------------------------------------------------
 
 RegStateUpdate mapRegEvent(bool regIsActive, int statusCode,
                            const std::string &reason,
@@ -74,131 +58,94 @@ RegStateUpdate mapRegEvent(bool regIsActive, int statusCode,
     return upd;
 }
 
-class AccountsManager::AccountImpl : public pj::Account {
-public:
-    AccountId id = kInvalidAccountId;
-    // Raw pointer is safe across threads: AccountsManager owns this impl,
-    // and pj::Account's destructor serializes against in-flight callback
-    // dispatch via the PJSUA lock — by the time AccountsManager dies, no
-    // callback can still be running.
-    AccountsManager *owner = nullptr;
-    std::atomic<RegistrationState> state{RegistrationState::Unregistered};
-    // Guarded by ownersMutex on read; written only from the PJSIP thread
-    // inside onRegState while the same mutex is held.
-    mutable std::mutex errMutex;
-    RegError lastError;
-
-    void onRegState(pj::OnRegStateParam &prm) override
-    {
-        pj::AccountInfo info;
-        try {
-            info = getInfo();
-        } catch (const pj::Error &e) {
-            // getInfo() only fails once pjsua has invalidated the account
-            // (shutdown/removal racing a final reg event). Nothing to
-            // report — and the exception must not unwind into PJSIP's C
-            // frames.
-            spdlog::warn("Account {} onRegState getInfo failed: {}", id,
-                         e.info());
-            return;
-        }
-        spdlog::info("Account {} reg state: active={} code={} reason='{}'",
-                     id, info.regIsActive, static_cast<int>(prm.code),
-                     prm.reason);
-        RegistrationState s;
-        {
-            std::lock_guard<std::mutex> lk(errMutex);
-            const auto upd = mapRegEvent(info.regIsActive,
-                                         static_cast<int>(prm.code),
-                                         prm.reason, lastError);
-            lastError = upd.error;
-            s = upd.state;
-        }
-        state.store(s);
-        // Invoke under the callback mutex: the main thread reassigns these
-        // std::functions (controller ctors/dtors) while this thread invokes
-        // them — see m_callbackMutex in the header.
-        if (owner) {
-            std::lock_guard<std::mutex> lk(owner->m_callbackMutex);
-            if (owner->m_cb) owner->m_cb(id, s);
-        }
-    }
-
-    void onIncomingCall(pj::OnIncomingCallParam &prm) override
-    {
-        spdlog::info("Account {} incoming call (pjsip id {})", id, prm.callId);
-        if (owner) {
-            std::lock_guard<std::mutex> lk(owner->m_callbackMutex);
-            if (owner->m_onIncoming) owner->m_onIncoming(id, prm.callId);
-        }
-    }
-
-    // Inbound SIP MESSAGE (RFC 3428 instant message).
-    void onInstantMessage(pj::OnInstantMessageParam &prm) override
-    {
-        if (owner) {
-            std::lock_guard<std::mutex> lk(owner->m_callbackMutex);
-            if (owner->m_onInstantMessage) {
-                owner->m_onInstantMessage(id, prm.fromUri, prm.msgBody);
-            }
-        }
-    }
-
-    // Server sent a SIMPLE NOTIFY for message-summary (voicemail). PJSIP
-    // hands us the parsed Messages-Waiting body in prm.rdata.wholeMsg.
-    // We extract "Voice-Message: <new>/<old>" and stash it for the UI.
-    void onMwiInfo(pj::OnMwiInfoParam &prm) override
-    {
-        const std::string body = prm.rdata.wholeMsg;
-        int newCount = 0;
-        int oldCount = 0;
-        bool active = false;
-        // Voice-Message line: "Voice-Message: N/M (urgent N/M)" — we only
-        // care about the first integer pair.
-        const auto pos = body.find("Voice-Message:");
-        if (pos != std::string::npos) {
-            const char *p = body.c_str() + pos + std::strlen("Voice-Message:");
-            while (*p == ' ' || *p == '\t') ++p;
-            sscanf(p, "%d/%d", &newCount, &oldCount);
-            active = newCount > 0;
-        } else {
-            const auto a = body.find("Messages-Waiting:");
-            if (a != std::string::npos) {
-                active = body.find("yes", a) != std::string::npos;
-            }
-        }
-        spdlog::info("Account {} MWI: new={} old={} active={}",
-                     id, newCount, oldCount, active);
-        if (owner) owner->updateMwi(id, newCount, oldCount, active);
-    }
-};
+// ---------------------------------------------------------------------------
+// Entry — one DB row + optional live backend id
+// ---------------------------------------------------------------------------
 
 struct AccountsManager::Entry {
     Account account;
-    std::unique_ptr<AccountImpl> impl;
+    // true iff this account has a live entry in m_backendIds (i.e. it has
+    // been added to the backend and not yet removed).  Invariant:
+    //   registered  ⟺  m_backendIds contains account.id
+    bool registered = false;
 };
 
-AccountsManager::AccountsManager(SipEngine *engine,
+// ---------------------------------------------------------------------------
+// Construction / destruction
+// ---------------------------------------------------------------------------
+
+AccountsManager::AccountsManager(sipbackend::ISipBackend *backend,
+                                 sipbackend::PjsipBackend *pjsipBridge,
                                  persistence::Database *db,
                                  platform::IKeychain *keychain)
-    : m_engine(engine), m_db(db), m_keychain(keychain)
+    : m_backend(backend), m_pjsipBridge(pjsipBridge),
+      m_db(db), m_keychain(keychain)
 {
-    loadFromDatabase();
-    for (auto &e : m_entries) {
-        if (e->account.enabled && e->account.registerOnStartup) {
-            registerAccount(e->account.id);
-        }
+    // Install the synchronous incoming-call hook BEFORE loadFromDatabase /
+    // registerAccount so any incoming call during startup isn't lost.
+    //
+    // The hook fires on the PJSIP thread. It reverse-maps the backend account
+    // id to a domain id (under m_backendIdsMutex — held BRIEFLY, no PJSIP
+    // calls inside), then invokes m_onIncoming under m_callbackMutex.
+    if (m_pjsipBridge) {
+        m_pjsipBridge->setNativeIncomingCallHook(
+            [this](sipbackend::AccountId backendAccId, int pjsipCallId) {
+                // PJSIP THREAD: reverse-map backendAccId to domain id.
+                AccountId domainId = kInvalidAccountId;
+                {
+                    std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+                    for (const auto &kv : m_backendIds) {
+                        if (kv.second == backendAccId) {
+                            domainId = kv.first;
+                            break;
+                        }
+                    }
+                }
+                if (domainId == kInvalidAccountId) {
+                    spdlog::warn("AccountsManager: incoming call for unknown "
+                                 "backend account id {}", backendAccId);
+                    return;
+                }
+                spdlog::info("AccountsManager: incoming call account={} "
+                             "pjsip={}", domainId, pjsipCallId);
+                std::lock_guard<std::mutex> lk(m_callbackMutex);
+                if (m_onIncoming) m_onIncoming(domainId, pjsipCallId);
+            });
     }
+
+    loadFromDatabase();
+    // NOTE: startup accounts are NOT registered here. The caller must
+    // call backend->setListener(this) first so queued reg-state events
+    // have a destination, then call registerStartupAccounts(). Both
+    // buildCoreSipGraph and SipManagerPair do this in the correct order.
 }
 
 AccountsManager::~AccountsManager()
 {
-    for (auto &e : m_entries) {
-        if (e->impl) {
-            try { e->impl->setRegistration(false); } catch (...) {}
+    // Quiesce the PJSIP incoming-call hook FIRST (while m_backendIds and
+    // m_callbackMutex are still valid). After this returns, no in-flight hook
+    // invocation can be running and no new one will start.
+    if (m_pjsipBridge) {
+        m_pjsipBridge->setNativeIncomingCallHook({});
+    }
+    // Unregister all live accounts from the backend. Collect both domain
+    // and backend ids in one locked pass so we never re-lock per entry.
+    std::vector<sipbackend::AccountId> toRemove;
+    {
+        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+        toRemove.reserve(m_backendIds.size());
+        for (const auto &kv : m_backendIds) {
+            toRemove.push_back(kv.second);
         }
     }
+    for (const auto backendId : toRemove) {
+        try { m_backend->removeAccount(backendId); } catch (...) {}
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Database
+// ---------------------------------------------------------------------------
 
 void AccountsManager::loadFromDatabase()
 {
@@ -338,8 +285,8 @@ bool AccountsManager::remove(AccountId id)
     auto it = std::find_if(m_entries.begin(), m_entries.end(),
                            [id](const auto &e) { return e->account.id == id; });
     if (it == m_entries.end()) return false;
-    if ((*it)->impl) {
-        try { (*it)->impl->setRegistration(false); } catch (...) {}
+    if ((*it)->registered) {
+        unregisterAccount(id);
     }
     m_keychain->erase((*it)->account.passwordRef);
     m_passwordCache.erase((*it)->account.passwordRef);
@@ -415,7 +362,7 @@ bool AccountsManager::update(const Account &acc)
     sqlite3_finalize(stmt);
     if (!ok) return false;
 
-    const bool hadLiveAccount = (*it)->impl != nullptr;
+    const bool hadLiveAccount = (*it)->registered;
     if (hadLiveAccount) {
         unregisterAccount(acc.id);
     }
@@ -528,15 +475,15 @@ bool AccountsManager::setPassword(AccountId id, const std::string &password)
                            [id](const auto &e) { return e->account.id == id; });
     if (it == m_entries.end()) return false;
     auto &e = **it;
-    // Keep the same passwordRef so existing in-flight pj::AuthCredInfo
-    // references and the DB row don't need to change.
+    // Keep the same passwordRef so existing in-flight backend credentials
+    // and the DB row don't need to change.
     if (!m_keychain->set(e.account.passwordRef, password)) {
         spdlog::error("setPassword: keychain set failed");
         return false;
     }
     m_passwordCache[e.account.passwordRef] = password;
-    // Rebuild the PJSIP account so the new credentials take effect now.
-    const bool wasLive = e.impl != nullptr;
+    // Rebuild the backend account so the new credentials take effect now.
+    const bool wasLive = e.registered;
     if (wasLive) {
         unregisterAccount(id);
     }
@@ -546,14 +493,27 @@ bool AccountsManager::setPassword(AccountId id, const std::string &password)
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Registration — drives the backend via ISipBackend
+// ---------------------------------------------------------------------------
+
+void AccountsManager::registerStartupAccounts()
+{
+    for (auto &e : m_entries) {
+        if (e->account.enabled && e->account.registerOnStartup) {
+            registerAccount(e->account.id);
+        }
+    }
+}
+
 bool AccountsManager::registerAccount(AccountId id)
 {
     auto it = std::find_if(m_entries.begin(), m_entries.end(),
                            [id](const auto &e) { return e->account.id == id; });
     if (it == m_entries.end()) return false;
     auto &e = **it;
-    if (!m_engine || !m_engine->isRunning()) return false;
-    if (e.impl) return true; // already registered
+    if (!m_backend || !m_backend->isRunning()) return false;
+    if (e.registered) return true; // already registered
 
     // In-memory cache short-circuits the macOS Keychain prompt on every
     // subsequent registerAccount within the same session (network back,
@@ -565,133 +525,169 @@ bool AccountsManager::registerAccount(AccountId id)
     } else {
         auto fetched = m_keychain->get(e.account.passwordRef);
         if (!fetched) {
-            spdlog::error("registerAccount: keychain missing ref {}", e.account.passwordRef);
+            spdlog::error("registerAccount: keychain missing ref {}",
+                          e.account.passwordRef);
             return false;
         }
         password = *fetched;
         m_passwordCache.emplace(e.account.passwordRef, password);
     }
 
-    pj::AccountConfig acfg;
-    const bool tls = e.account.transport == Transport::Tls;
-    const std::string scheme = tls ? "sips:" : "sip:";
-    acfg.idUri = e.account.hideCallerId
-        ? scheme + "anonymous@anonymous.invalid"
-        : scheme + e.account.username + "@" + e.account.domain;
-    acfg.regConfig.registrarUri =
-        scheme + e.account.domain + (tls ? "" : transportScheme(e.account.transport));
-    acfg.regConfig.timeoutSec = e.account.registerIntervalSec > 0
-        ? e.account.registerIntervalSec : 300;
-    const auto authUser = e.account.authUser.empty()
-                              ? e.account.username
-                              : e.account.authUser;
-    const auto authRealm = e.account.authRealm.empty()
-                               ? std::string{"*"}
-                               : e.account.authRealm;
-    pj::AuthCredInfo cred("digest", authRealm, authUser, 0, password);
-    acfg.sipConfig.authCreds.push_back(cred);
+    // Build the stack-neutral AccountSettings from the Account value.
+    // authUser/authRealm are passed RAW; the adapter defaults them
+    // (authUser → username, authRealm → "*") only when empty.
+    sipbackend::AccountSettings settings;
+    settings.displayName           = e.account.displayName;
+    settings.username              = e.account.username;
+    settings.domain                = e.account.domain;
+    settings.authUser              = e.account.authUser;
+    settings.authRealm             = e.account.authRealm;
+    settings.password              = password;
+    settings.transport             = static_cast<sipbackend::Transport>(
+                                         static_cast<int>(e.account.transport));
+    settings.proxy                 = e.account.proxy;
+    settings.publicAddress         = e.account.publicAddress;
+    settings.registerIntervalSec   = e.account.registerIntervalSec;
+    settings.keepaliveIntervalSec  = e.account.keepaliveIntervalSec;
+    settings.sessionTimersEnabled  = e.account.sessionTimersEnabled;
+    settings.publishPresenceEnabled = e.account.publishPresenceEnabled;
+    settings.iceEnabled            = e.account.iceEnabled;
+    settings.hideCallerId          = e.account.hideCallerId;
+    settings.zrtpEnabled           = e.account.zrtpEnabled;
+    settings.srtpMode              = static_cast<sipbackend::SrtpMode>(
+                                         static_cast<int>(e.account.srtpMode));
+    settings.allowUntrustedCert    = e.account.allowUntrustedCert;
+    settings.dtmfMethod            = static_cast<sipbackend::DtmfMethod>(
+                                         static_cast<int>(e.account.dtmfMethod));
+    // STUN opt-in: when the account has a STUN server configured, ask the
+    // backend to use the global STUN config for this account. The STUN server
+    // itself is loaded into the engine at start time (SipEngine::start /
+    // PhoneController — phase-4 scope to route via the backend).
+    settings.useStun               = !e.account.stunServer.empty();
 
-    // Outbound proxy
-    if (!e.account.proxy.empty()) {
-        std::string proxy = e.account.proxy;
-        if (proxy.rfind("sip:", 0) != 0 && proxy.rfind("sips:", 0) != 0) {
-            proxy = scheme + proxy + transportScheme(e.account.transport);
-        }
-        acfg.sipConfig.proxies.push_back(proxy);
-    }
-
-    // NAT helpers
-    if (!e.account.publicAddress.empty()) {
-        acfg.sipConfig.contactForced = scheme + e.account.username + "@"
-                                       + e.account.publicAddress;
-    }
-    // STUN: when present, request PJSIP to use the global STUN config for
-    // this account. The STUN server itself must be set at endpoint init
-    // time (SipEngine::start). Per-account dynamic STUN isn't exposed by
-    // PJSUA2 — that's a v1 enhancement.
-    if (!e.account.stunServer.empty()) {
-        acfg.natConfig.sipStunUse = PJSUA_STUN_USE_DEFAULT;
-        acfg.natConfig.mediaStunUse = PJSUA_STUN_USE_DEFAULT;
-    }
-    if (e.account.iceEnabled) {
-        acfg.natConfig.iceEnabled = true;
-    }
-    acfg.regConfig.registerOnAdd = true;
-    if (e.account.keepaliveIntervalSec > 0) {
-        acfg.natConfig.udpKaIntervalSec = e.account.keepaliveIntervalSec;
-    }
-    if (!e.account.sessionTimersEnabled) {
-        acfg.callConfig.timerUse = PJSUA_SIP_TIMER_INACTIVE;
-    }
-    acfg.presConfig.publishEnabled = e.account.publishPresenceEnabled;
-
-    // Subscribe to message-summary so the server can push voicemail
-    // notifications. PJSIP issues SUBSCRIBE shortly after REGISTER.
-    acfg.mwiConfig.enabled = true;
-
-    // SRTP per spec §3.1
-    switch (e.account.srtpMode) {
-    case SrtpMode::Disabled:
-        acfg.mediaConfig.srtpUse = PJMEDIA_SRTP_DISABLED;
-        break;
-    case SrtpMode::Optional:
-        acfg.mediaConfig.srtpUse = PJMEDIA_SRTP_OPTIONAL;
-        break;
-    case SrtpMode::Required:
-        acfg.mediaConfig.srtpUse = PJMEDIA_SRTP_MANDATORY;
-        break;
-    }
-    acfg.mediaConfig.srtpSecureSignaling = 0;
-
-    // Per-account TLS verify: create a dedicated TLS transport with this
-    // account's verify policy and bind the account to it via transportId.
-    // PJSUA2 doesn't expose verifyServer on AccountSipConfig, so a per-
-    // account transport is the supported way to control TLS verify.
-    if (tls) {
-        try {
-            pj::TransportConfig tlsCfg;
-            tlsCfg.port = 0;
-            tlsCfg.tlsConfig.method = PJSIP_TLSV1_2_METHOD;
-            tlsCfg.tlsConfig.verifyServer = !e.account.allowUntrustedCert;
-            tlsCfg.tlsConfig.verifyClient = false;
-            // Trust anchors so a verifying account can actually accept a
-            // legitimately-signed cert (without these, verifyServer rejects
-            // every cert). Shared with the engine's resolved CA trust (PEM
-            // file on Linux/macOS, OS ROOT store buffer on Windows).
-            if (m_engine) m_engine->applyCaTrust(tlsCfg.tlsConfig);
-            const auto tpId = pj::Endpoint::instance()
-                .transportCreate(PJSIP_TRANSPORT_TLS, tlsCfg);
-            acfg.sipConfig.transportId = tpId;
-        } catch (const pj::Error &err) {
-            spdlog::error("registerAccount: per-account TLS transport: {}",
-                          err.info());
-            return false;
-        }
-    }
-
-    auto impl = std::make_unique<AccountImpl>();
-    impl->id = id;
-    impl->owner = this;
-    try {
-        impl->create(acfg);
-    } catch (const pj::Error &err) {
-        spdlog::error("registerAccount: pj create failed: {}", err.info());
+    const sipbackend::AccountId backendId = m_backend->addAccount(settings);
+    if (backendId == sipbackend::kInvalidAccountId) {
+        spdlog::error("registerAccount: backend addAccount failed for id {}", id);
         return false;
     }
-    e.impl = std::move(impl);
+    {
+        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+        m_backendIds[id] = backendId;
+    }
+    e.registered = true;
     return true;
 }
 
 void AccountsManager::unregisterAccount(AccountId id)
 {
     for (auto &e : m_entries) {
-        if (e->account.id == id && e->impl) {
-            try { e->impl->setRegistration(false); } catch (...) {}
-            e->impl.reset();
-            return;
+        if (e->account.id != id || !e->registered) continue;
+
+        sipbackend::AccountId backendId = sipbackend::kInvalidAccountId;
+        {
+            std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+            auto it = m_backendIds.find(id);
+            if (it != m_backendIds.end()) {
+                backendId = it->second;
+                m_backendIds.erase(it);
+            }
         }
+        if (backendId != sipbackend::kInvalidAccountId) {
+            m_backend->removeAccount(backendId);
+        }
+        e->registered = false;
+        // Reset to Unregistered and clear the stored error so that a later
+        // re-register starts with a clean slate — matching the old impl where
+        // the error lived on the AccountImpl object that was destroyed on
+        // unregister, making lastRegErrorOf() return RegError{} until the
+        // next failure.
+        m_regStates[id] = RegistrationState::Unregistered;
+        m_regErrors.erase(id);
+        return;
     }
 }
+
+// ---------------------------------------------------------------------------
+// ISipBackendListener — events arrive QUEUED on the main thread
+// ---------------------------------------------------------------------------
+
+void AccountsManager::onRegState(sipbackend::AccountId backendId,
+                                 bool regActive, int sipCode,
+                                 const std::string &reason)
+{
+    // Reverse-map backendId to domain id. Under m_backendIdsMutex only for
+    // the lookup; no PJSIP call, no backend call, no long hold.
+    AccountId domainId = kInvalidAccountId;
+    {
+        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+        for (const auto &kv : m_backendIds) {
+            if (kv.second == backendId) { domainId = kv.first; break; }
+        }
+    }
+    if (domainId == kInvalidAccountId) {
+        // Stale post-removal event — guaranteed to happen; ignore silently.
+        spdlog::debug("AccountsManager::onRegState: unknown backend id {} "
+                      "(stale post-removal event)", backendId);
+        return;
+    }
+
+    const auto upd = mapRegEvent(regActive, sipCode, reason, m_regErrors[domainId]);
+    m_regStates[domainId] = upd.state;
+    m_regErrors[domainId] = upd.error;
+
+    spdlog::info("AccountsManager: account {} reg state: {} code={} reason='{}'",
+                 domainId,
+                 upd.state == RegistrationState::Registered ? "Registered"
+                 : upd.state == RegistrationState::Registering ? "Registering"
+                 : upd.state == RegistrationState::Failed ? "Failed"
+                 : "Unregistered",
+                 sipCode, reason);
+
+    std::lock_guard<std::mutex> lk(m_callbackMutex);
+    if (m_cb) m_cb(domainId, upd.state);
+}
+
+void AccountsManager::onMwi(sipbackend::AccountId backendId,
+                            int newMessages, int oldMessages, bool active)
+{
+    // Reverse-map to domain id.
+    AccountId domainId = kInvalidAccountId;
+    {
+        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+        for (const auto &kv : m_backendIds) {
+            if (kv.second == backendId) { domainId = kv.first; break; }
+        }
+    }
+    if (domainId == kInvalidAccountId) {
+        spdlog::debug("AccountsManager::onMwi: unknown backend id {}", backendId);
+        return;
+    }
+    updateMwi(domainId, newMessages, oldMessages, active);
+}
+
+void AccountsManager::onInstantMessage(sipbackend::AccountId backendId,
+                                       const std::string &fromUri,
+                                       const std::string &body)
+{
+    AccountId domainId = kInvalidAccountId;
+    {
+        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+        for (const auto &kv : m_backendIds) {
+            if (kv.second == backendId) { domainId = kv.first; break; }
+        }
+    }
+    if (domainId == kInvalidAccountId) {
+        spdlog::debug("AccountsManager::onInstantMessage: unknown backend id {}",
+                      backendId);
+        return;
+    }
+    std::lock_guard<std::mutex> lk(m_callbackMutex);
+    if (m_onInstantMessage) m_onInstantMessage(domainId, fromUri, body);
+}
+
+// ---------------------------------------------------------------------------
+// MWI
+// ---------------------------------------------------------------------------
 
 MwiState AccountsManager::mwiStateOf(AccountId id) const
 {
@@ -703,8 +699,8 @@ MwiState AccountsManager::mwiStateOf(AccountId id) const
 void AccountsManager::updateMwi(AccountId id, int newCount, int oldCount,
                                 bool active)
 {
-    // Runs on the PJSIP worker thread (AccountImpl::onMwiInfo); the map and
-    // the callback are read on the main thread.
+    // May be called from the main thread (via queued onMwi listener event).
+    // The map and the callback are read on the main thread.
     MwiState s;
     s.newMessages = newCount;
     s.oldMessages = oldCount;
@@ -721,29 +717,22 @@ void AccountsManager::setOnMwiChanged(
     m_onMwi = std::move(cb);
 }
 
+// ---------------------------------------------------------------------------
+// Instant message
+// ---------------------------------------------------------------------------
+
 bool AccountsManager::sendInstantMessage(AccountId accountId,
                                          const std::string &to,
                                          const std::string &body)
 {
-    for (auto &e : m_entries) {
-        if (e->account.id != accountId || !e->impl) continue;
-        // PJSUA2 only exposes sendInstantMessage on Buddy/Call (i.e. inside
-        // an existing dialog/subscription). For one-shot out-of-dialog
-        // MESSAGE the C API pjsua_im_send is the right tool.
-        const int pjAccId = e->impl->getId();
-        pj_str_t toStr  = pj_str(const_cast<char *>(to.c_str()));
-        pj_str_t mime   = pj_str(const_cast<char *>("text/plain"));
-        pj_str_t cont   = pj_str(const_cast<char *>(body.c_str()));
-        const pj_status_t st = pjsua_im_send(pjAccId, &toStr, &mime,
-                                             &cont, nullptr, nullptr);
-        if (st != PJ_SUCCESS) {
-            spdlog::error("AccountsManager::sendInstantMessage: pjsua_im_send={}",
-                          st);
-            return false;
-        }
-        return true;
+    sipbackend::AccountId backendId = sipbackend::kInvalidAccountId;
+    {
+        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+        auto it = m_backendIds.find(accountId);
+        if (it != m_backendIds.end()) backendId = it->second;
     }
-    return false;
+    if (backendId == sipbackend::kInvalidAccountId) return false;
+    return m_backend->sendMessage(backendId, to, body);
 }
 
 void AccountsManager::setOnInstantMessage(
@@ -754,10 +743,18 @@ void AccountsManager::setOnInstantMessage(
     m_onInstantMessage = std::move(cb);
 }
 
+// ---------------------------------------------------------------------------
+// Reregister
+// ---------------------------------------------------------------------------
+
 void AccountsManager::reregisterAllEnabled()
 {
-    // Snapshot the IDs first — registerAccount can rebuild Entry::impl,
-    // which would invalidate iterators if we walked m_entries directly.
+    // Snapshot the IDs first: unregisterAccount erases from m_backendIds and
+    // sets registered=false, while registerAccount inserts into m_backendIds
+    // and sets registered=true — neither mutates m_entries itself, so iterator
+    // invalidation is not actually the concern here. The snapshot is still the
+    // right shape: it avoids relying on the loop body not mutating the
+    // collection we are iterating and makes the intent explicit.
     std::vector<AccountId> targets;
     targets.reserve(m_entries.size());
     for (const auto &e : m_entries) {
@@ -773,26 +770,25 @@ void AccountsManager::reregisterAllEnabled()
                  targets.size());
 }
 
+// ---------------------------------------------------------------------------
+// State reads
+// ---------------------------------------------------------------------------
+
 RegistrationState AccountsManager::stateOf(AccountId id) const
 {
-    for (const auto &e : m_entries) {
-        if (e->account.id == id) {
-            return e->impl ? e->impl->state.load() : RegistrationState::Unregistered;
-        }
-    }
-    return RegistrationState::Unregistered;
+    auto it = m_regStates.find(id);
+    return it == m_regStates.end() ? RegistrationState::Unregistered : it->second;
 }
 
 RegError AccountsManager::lastRegErrorOf(AccountId id) const
 {
-    for (const auto &e : m_entries) {
-        if (e->account.id == id && e->impl) {
-            std::lock_guard<std::mutex> lk(e->impl->errMutex);
-            return e->impl->lastError;
-        }
-    }
-    return {};
+    auto it = m_regErrors.find(id);
+    return it == m_regErrors.end() ? RegError{} : it->second;
 }
+
+// ---------------------------------------------------------------------------
+// Callback setters
+// ---------------------------------------------------------------------------
 
 void AccountsManager::setOnRegistrationStateChanged(
     std::function<void(AccountId, RegistrationState)> cb)
@@ -807,13 +803,26 @@ void AccountsManager::setOnIncomingCall(std::function<void(AccountId, int)> cb)
     m_onIncoming = std::move(cb);
 }
 
+// ---------------------------------------------------------------------------
+// Transitional bridge — phase-3-removed
+// ---------------------------------------------------------------------------
+
 pj::Account *AccountsManager::pjAccountFor(AccountId id)
 {
-    for (auto &e : m_entries) {
-        if (e->account.id == id) return e->impl.get();
+    if (!m_pjsipBridge) return nullptr;
+    sipbackend::AccountId backendId = sipbackend::kInvalidAccountId;
+    {
+        std::lock_guard<std::mutex> lk(m_backendIdsMutex);
+        auto it = m_backendIds.find(id);
+        if (it != m_backendIds.end()) backendId = it->second;
     }
-    return nullptr;
+    if (backendId == sipbackend::kInvalidAccountId) return nullptr;
+    return m_pjsipBridge->pjAccountFor(backendId);
 }
+
+// ---------------------------------------------------------------------------
+// Test accessors
+// ---------------------------------------------------------------------------
 
 std::string AccountsManager::passwordRefFor(AccountId id) const
 {

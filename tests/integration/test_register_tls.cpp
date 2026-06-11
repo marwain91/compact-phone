@@ -4,16 +4,19 @@
 #include "core/AccountsManager.h"
 #include "core/SipEngine.h"
 #include "core/platform/Keychain_memory.h"
+#include "core/sipbackend/pjsip/PjsipBackend.h"
 #include "persistence/Database.h"
 
 #include "test_support.h"
+
+#include <QCoreApplication>
 
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 
 using namespace std::chrono_literals;
-using compactphone::testsupport::pollUntil;
+using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
 
 namespace {
@@ -33,12 +36,18 @@ std::string caCertFile()
 
 class RegisterTlsTest : public ::testing::Test {
 protected:
+    int argc = 1;
+    char argv0[1] = {0};
+    char *argv = argv0;
+    std::unique_ptr<QCoreApplication> app;
+
     compactphone::sip::SipEngine engine;
     compactphone::persistence::Database db;
     compactphone::platform::MemoryKeychain kc;
 
     void SetUp() override
     {
+        app = std::make_unique<QCoreApplication>(argc, &argv);
         ASSERT_TRUE(engine.start(0));
         ASSERT_TRUE(db.openInMemory());
     }
@@ -47,7 +56,8 @@ protected:
 
 TEST_F(RegisterTlsTest, RegistersOverTlsWithSelfSignedCert)
 {
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &mgr = smp.manager;
 
     compactphone::sip::Account a;
     a.displayName = "Test TLS";
@@ -81,7 +91,8 @@ TEST_F(RegisterTlsTest, RejectsSelfSignedCertWhenVerificationRequired)
     std::atomic<bool> sawRegistered{false};
     std::atomic<bool> sawFailed{false};
 
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &mgr = smp.manager;
     mgr.setOnRegistrationStateChanged([&](auto, auto s) {
         if (s == compactphone::sip::RegistrationState::Registered) {
             sawRegistered.store(true);
@@ -105,8 +116,9 @@ TEST_F(RegisterTlsTest, RejectsSelfSignedCertWhenVerificationRequired)
     ASSERT_NE(id, compactphone::sip::kInvalidAccountId);
 
     // The handshake should fail; wait for a Failed state and confirm we
-    // never observed a successful registration.
-    pollUntil([&] { return sawFailed.load(); }, 20s);
+    // never observed a successful registration. The callback fires via the
+    // queued main-thread listener event — pump the loop.
+    pumpUntil([&] { return sawFailed.load(); }, 20s);
     EXPECT_TRUE(sawFailed.load());
     EXPECT_FALSE(sawRegistered.load());
 
@@ -121,13 +133,23 @@ TEST_F(RegisterTlsTest, RejectsSelfSignedCertWhenVerificationRequired)
 // so the CA bundle can be set before start().
 TEST(RegisterTlsVerifiedTest, AcceptsTrustedCaSignedCertWithVerificationOn)
 {
+    int argc = 1;
+    char argv0[] = "test";
+    char *argv[] = {argv0};
+    std::unique_ptr<QCoreApplication> app;
+    if (!QCoreApplication::instance())
+        app = std::make_unique<QCoreApplication>(argc, argv);
+
     compactphone::sip::SipEngine engine;
     engine.setCaCertFile(caCertFile());
     ASSERT_TRUE(engine.start(0));
     compactphone::persistence::Database db;
     ASSERT_TRUE(db.openInMemory());
     compactphone::platform::MemoryKeychain kc;
-    compactphone::sip::AccountsManager mgr(&engine, &db, &kc);
+    compactphone::sipbackend::PjsipBackend backend(&engine);
+    compactphone::sip::AccountsManager mgr(&backend, &backend, &db, &kc);
+    backend.setListener(&mgr);
+    mgr.registerStartupAccounts(); // DB empty here; mirrors buildCoreSipGraph order
 
     compactphone::sip::Account a;
     a.displayName = "Test TLS verified";
@@ -146,5 +168,6 @@ TEST(RegisterTlsVerifiedTest, AcceptsTrustedCaSignedCertWithVerificationOn)
         mgr, {id}, compactphone::sip::RegistrationState::Registered, 20s));
 
     mgr.remove(id);
+    backend.setListener(nullptr);
     engine.stop();
 }

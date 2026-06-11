@@ -71,7 +71,8 @@ TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
     std::mutex mtx;
     std::unordered_map<int, compactphone::sip::CallState> observed;
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     auto mkAccount = [&](const std::string &user, const std::string &pwd,
                          bool isDefault) {
         compactphone::sip::Account a;
@@ -130,14 +131,16 @@ TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
 
 TEST_F(ForwardCallTest, ForwardCallReturnsFalseForUnknownCallId)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::CallManager cm(&am);
     EXPECT_FALSE(cm.forwardCall(12345, "sip:600@example"));
 }
 
 TEST_F(ForwardCallTest, ForwardCallReturnsFalseForEmptyTarget)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::CallManager cm(&am);
     EXPECT_FALSE(cm.forwardCall(1, ""));
 }

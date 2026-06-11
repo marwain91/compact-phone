@@ -96,7 +96,8 @@ protected:
 // bookkeeping bool flipped. Also pins idempotency of re-muting a muted call.
 TEST_F(MuteTest, MutesAndUnmutesActiveCall)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     ASSERT_TRUE(registerAccount(am));
     compactphone::sip::CallManager cm(&am);
 
@@ -146,7 +147,8 @@ TEST_F(MuteTest, MutesAndUnmutesActiveCall)
 // mute assertions pass vacuously.
 TEST_F(MuteTest, MuteSurvivesHoldUnholdReinvite)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     ASSERT_TRUE(registerAccount(am));
     compactphone::sip::CallManager cm(&am);
 
@@ -200,7 +202,8 @@ TEST_F(MuteTest, MuteSurvivesHoldUnholdReinvite)
 // the mic went live.
 TEST_F(MuteTest, MuteBeforeMediaIsAppliedOnActivation)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     ASSERT_TRUE(registerAccount(am));
     compactphone::sip::CallManager cm(&am);
 
@@ -239,7 +242,8 @@ TEST_F(MuteTest, MuteBeforeMediaIsAppliedOnActivation)
 // a phantom call as muted.
 TEST_F(MuteTest, MuteRejectsUnknownCallId)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::CallManager cm(&am);
     EXPECT_FALSE(cm.setMuted(9999, true));
     EXPECT_FALSE(cm.isMuted(9999));

@@ -2,12 +2,14 @@
 
 #include "core/AccountsController.h"
 #include "core/AccountsManager.h"
+#include "core/sipbackend/fake/FakeSipBackend.h"
 #include "core/platform/Keychain_memory.h"
 #include "models/AccountsModel.h"
 #include "persistence/Database.h"
 
 class AccountsControllerTest : public ::testing::Test {
 protected:
+    compactphone::sipbackend::FakeSipBackend fake;
     compactphone::persistence::Database db;
     compactphone::platform::MemoryKeychain kc;
 
@@ -16,7 +18,7 @@ protected:
 
 TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
 {
-    compactphone::sip::AccountsManager manager(nullptr, &db, &kc);
+    compactphone::sip::AccountsManager manager(&fake, nullptr, &db, &kc);
     compactphone::models::AccountsModel model(&manager);
     compactphone::AccountsController controller(&manager, &model);
 
@@ -80,7 +82,7 @@ TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
 
 TEST_F(AccountsControllerTest, UpdateDefaultEnableAndRemoveRefreshModel)
 {
-    compactphone::sip::AccountsManager manager(nullptr, &db, &kc);
+    compactphone::sip::AccountsManager manager(&fake, nullptr, &db, &kc);
     compactphone::models::AccountsModel model(&manager);
     compactphone::AccountsController controller(&manager, &model);
 

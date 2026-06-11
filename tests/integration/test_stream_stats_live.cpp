@@ -58,7 +58,8 @@ TEST_F(StreamStatsLiveTest, SamplesRtpStreamForActiveCall)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::Account a;
     a.displayName = "Stats";
     a.username = "1001";
@@ -105,7 +106,8 @@ TEST_F(StreamStatsLiveTest, SamplesRtpStreamForActiveCall)
 // An unknown call id yields the default sentinel struct (all -1), not garbage.
 TEST_F(StreamStatsLiveTest, UnknownCallReturnsSentinelStats)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::CallManager cm(&am);
     const auto s = cm.streamStats(9999);
     EXPECT_EQ(s.rttMs, -1);

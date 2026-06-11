@@ -1,13 +1,8 @@
 #include "FakeSipBackend.h"
 
-#include <QObject>
-
 namespace compactphone::sipbackend {
 
-FakeSipBackend::FakeSipBackend()
-    : m_dispatch(std::make_unique<QObject>())
-{
-}
+FakeSipBackend::FakeSipBackend() = default;
 
 FakeSipBackend::~FakeSipBackend()
 {
@@ -16,9 +11,9 @@ FakeSipBackend::~FakeSipBackend()
 
 void FakeSipBackend::setListener(ISipBackendListener *listener)
 {
-    // Quiesce barrier: bump the epoch so lambdas queued for the previous
+    // Quiesce barrier: invalidate so lambdas queued for the previous
     // listener no-op when they run.
-    ++m_epoch;
+    m_events.invalidate();
     m_listener = listener;
 }
 
@@ -32,7 +27,7 @@ bool FakeSipBackend::start(const EngineConfig &cfg)
 void FakeSipBackend::stop()
 {
     // Contract rule 4: nothing queued before stop() may fire after it.
-    ++m_epoch;
+    m_events.invalidate();
     m_running = false;
     // Per ISipBackend contract: a restarted backend starts empty.
     m_accounts.clear();
@@ -44,14 +39,10 @@ void FakeSipBackend::stop()
 
 void FakeSipBackend::post(std::function<void()> fn)
 {
-    const auto epoch = m_epoch;
-    QMetaObject::invokeMethod(
-        m_dispatch.get(),
-        [this, epoch, fn = std::move(fn)] {
-            if (epoch == m_epoch && m_listener)
-                fn();
-        },
-        Qt::QueuedConnection);
+    m_events.post([this, fn = std::move(fn)] {
+        if (m_listener)
+            fn();
+    });
 }
 
 void FakeSipBackend::logCmd(const std::string &line)
@@ -105,6 +96,7 @@ AccountId FakeSipBackend::addAccount(const AccountSettings &settings)
         return kInvalidAccountId;
     const AccountId id = m_nextAccountId++;
     m_accounts[id] = FakeAccount{settings};
+    m_lastAddedId = id;
     logCmd("addAccount:" + std::to_string(id) + ":" + settings.username);
     return id;
 }

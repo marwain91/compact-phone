@@ -5,6 +5,7 @@
 #include "core/CoreSipGraph.h"
 #include "core/SipEngine.h"
 #include "core/platform/Keychain_memory.h"
+#include "core/sipbackend/pjsip/PjsipBackend.h"
 #include "models/AccountsModel.h"
 #include "persistence/Database.h"
 
@@ -56,6 +57,21 @@ public:
     {
     }
 
+    ~HeadlessRunner() override
+    {
+        // Quiesce the backend listener BEFORE managers die so no queued
+        // events are delivered to AccountsManager during teardown.
+        // (See CoreSipGraph.h wiring contract.)
+        if (m_backend) m_backend->setListener(nullptr);
+        // m_accounts, m_calls, m_accountsController, m_accountsModel,
+        // m_backend all destruct via unique_ptr in reverse declaration order
+        // after this function returns. m_engine.stop() is not called
+        // explicitly — the engine stays alive while pj::Account destructors
+        // run inside m_accounts (via AccountsManager::~AccountsManager /
+        // PjsipBackend::removeAccount). The engine stops when m_engine goes
+        // out of scope or the process exits.
+    }
+
     int start()
     {
         if (m_cfg.accounts.isEmpty()) {
@@ -76,8 +92,11 @@ public:
             spdlog::error("headless: SIP engine failed to start");
             return 2;
         }
+        // PjsipBackend borrows the already-started SipEngine.
+        m_backend = std::make_unique<compactphone::sipbackend::PjsipBackend>(&m_engine);
 
-        auto core = compactphone::buildCoreSipGraph(&m_engine, &m_db, &m_keychain);
+        auto core = compactphone::buildCoreSipGraph(
+            m_backend.get(), m_backend.get(), &m_db, &m_keychain, &m_engine);
         m_accounts = std::move(core.accounts);
         m_accountsModel = std::move(core.accountsModel);
         m_accountsController = std::move(core.accountsController);
@@ -117,6 +136,11 @@ private:
     compactphone::persistence::Database m_db;
     compactphone::platform::MemoryKeychain m_keychain;
     compactphone::sip::SipEngine m_engine;
+    // PjsipBackend borrows m_engine; declared after engine so it is destroyed
+    // first (unique_ptr destructors in reverse order). Accounts are removed
+    // from the backend inside AccountsManager's destructor before m_backend
+    // is reset. The destructor above handles the explicit teardown ordering.
+    std::unique_ptr<compactphone::sipbackend::PjsipBackend> m_backend;
     std::unique_ptr<compactphone::sip::AccountsManager> m_accounts;
     std::unique_ptr<compactphone::models::AccountsModel> m_accountsModel;
     std::unique_ptr<compactphone::AccountsController> m_accountsController;

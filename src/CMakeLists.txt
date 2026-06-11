@@ -40,8 +40,16 @@ add_library(compactphone_core STATIC
     core/SipUri.cpp
     core/sipbackend/Types.h
     core/sipbackend/ISipBackend.h
+    core/sipbackend/EventDispatch.h
+    core/sipbackend/EventDispatch.cpp
     core/sipbackend/fake/FakeSipBackend.h
     core/sipbackend/fake/FakeSipBackend.cpp
+    core/sipbackend/pjsip/MwiSummary.h
+    core/sipbackend/pjsip/MwiSummary.cpp
+    core/sipbackend/pjsip/RemoteInfo.h
+    core/sipbackend/pjsip/RemoteInfo.cpp
+    core/sipbackend/pjsip/PjsipBackend.h
+    core/sipbackend/pjsip/PjsipBackend.cpp
     core/AccountsManager.h
     core/AccountsManager.cpp
     core/BootConfig.h

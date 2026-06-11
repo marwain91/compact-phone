@@ -40,6 +40,8 @@ class MessagesManager;
 class SettingsManager;
 }
 
+namespace compactphone::sipbackend { class PjsipBackend; }
+
 namespace compactphone {
 
 class AccountsController;
@@ -201,7 +203,12 @@ private:
 
     std::unique_ptr<persistence::Database>      m_db;
     std::unique_ptr<platform::IKeychain>        m_keychain;
+    // Destruction order is load-bearing: engine first (starts the PJSUA lib),
+    // then backend (borrows engine; its accounts must be removed before engine
+    // stops), then managers. Unique_ptr members destruct in REVERSE declaration
+    // order — so declare engine BEFORE backend BEFORE the rest.
     std::unique_ptr<sip::SipEngine>             m_engine;
+    std::unique_ptr<sipbackend::PjsipBackend>   m_backend;
     std::unique_ptr<sip::AccountsManager>       m_accounts;
     std::unique_ptr<models::AccountsModel>      m_accountsModel;
     std::unique_ptr<sip::CallManager>           m_calls;

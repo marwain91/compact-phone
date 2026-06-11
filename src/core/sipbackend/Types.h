@@ -94,6 +94,10 @@ struct AccountSettings {
     SrtpMode srtpMode = SrtpMode::Optional;
     bool allowUntrustedCert = false;
     DtmfMethod dtmfMethod = DtmfMethod::Rfc2833;
+    // When true the adapter applies PJSUA_STUN_USE_DEFAULT for both SIP and
+    // media. AccountsManager sets this from !account.stunServer.empty(); the
+    // STUN server itself must already be loaded into the engine at start time.
+    bool useStun = false;
 };
 
 } // namespace compactphone::sipbackend

@@ -53,7 +53,8 @@ TEST_F(DtmfTest, SendsRfc2833Digits)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::Account a;
     a.displayName = "D"; a.username = "1001"; a.domain = sipServer();
     a.authUser = "1001"; a.transport = compactphone::sip::Transport::Udp;
@@ -91,7 +92,8 @@ TEST_F(DtmfTest, SendsSipInfoDigits)
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::Account a;
     a.displayName = "D-Info"; a.username = "1001"; a.domain = sipServer();
     a.authUser = "1001"; a.transport = compactphone::sip::Transport::Udp;

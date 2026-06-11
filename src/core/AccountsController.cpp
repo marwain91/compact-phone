@@ -67,9 +67,11 @@ AccountsController::AccountsController(sip::AccountsManager *accounts,
     if (!m_accounts) return;
     m_accounts->setOnRegistrationStateChanged(
         [this](sip::AccountId id, sip::RegistrationState s) {
-            // PJSIP thread — marshal everything to the Qt main thread,
-            // including the previous-state lookup, so m_lastState only
-            // mutates from one thread.
+            // Reg events arrive queued on the main thread (dispatched by
+            // EventDispatch in PjsipBackend).  The QueuedConnection hop
+            // here is therefore harmless: it re-queues an already-main-
+            // thread call, ensuring m_lastState only mutates in one place
+            // and preserving correct ordering relative to other Qt slots.
             QMetaObject::invokeMethod(this, [this, id, s] {
                 const auto it = m_lastState.find(static_cast<int>(id));
                 const bool isNewFailure =

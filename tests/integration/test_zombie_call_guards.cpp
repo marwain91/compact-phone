@@ -81,7 +81,8 @@ protected:
 // operation below must fail soft (false / empty), not crash.
 TEST_F(ZombieCallGuardsTest, OperationsOnDeadPjsuaCallFailSoft)
 {
-    compactphone::sip::AccountsManager am(&engine, &db, &kc);
+    compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
+    auto &am = smp.manager;
     compactphone::sip::AccountId accountId = compactphone::sip::kInvalidAccountId;
     ASSERT_TRUE(registerAccount(am, accountId));
     compactphone::sip::CallManager cm(&am);
