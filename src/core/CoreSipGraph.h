@@ -9,7 +9,6 @@ namespace compactphone::platform { class IKeychain; }
 namespace compactphone::sip {
 class AccountsManager;
 class CallManager;
-class SipEngine;
 }
 namespace compactphone::models { class AccountsModel; }
 namespace compactphone::sipbackend {
@@ -41,14 +40,12 @@ struct CoreSipGraph {
 
 // Build the shared core against an already-started backend, an open database,
 // and a keychain — all owned by the caller, whose lifetimes must outlive the
-// returned graph. `engine` is passed to AccountsController so it can apply
-// STUN / codec-priority settings whenever accounts are added, updated,
-// enabled, or set as default; pass nullptr only in unit tests that use a fake
-// backend with no SipEngine. `parent` is the QObject parent for the
-// model/controller (PhoneController passes itself; the headless runner passes
-// nullptr and owns them through the returned unique_ptrs). The caller does any
-// additional signal wiring and layers the GUI-only CallsModel/CallsController
-// on top.
+// returned graph. AccountsController pushes STUN / codec-priority settings to
+// the backend whenever accounts are added, updated, enabled, or set as
+// default. `parent` is the QObject parent for the model/controller
+// (PhoneController passes itself; the headless runner passes nullptr and owns
+// them through the returned unique_ptrs). The caller does any additional
+// signal wiring and layers the GUI-only CallsModel/CallsController on top.
 //
 // Wiring contract:
 //   - buildCoreSipGraph constructs a ListenerFanout (accounts then calls) and
@@ -60,13 +57,9 @@ struct CoreSipGraph {
 //     In HeadlessRunner it belongs in the destructor or in stop() before
 //     the graph unique_ptrs are released.
 //
-// engine is a required parameter; pass nullptr only in unit tests that use
-// a fake backend with no SipEngine (no default — a silently-droppable
-// critical dependency caused a real bug; callers must be explicit).
 CoreSipGraph buildCoreSipGraph(sipbackend::ISipBackend *backend,
                                persistence::Database *db,
                                platform::IKeychain *keychain,
-                               sip::SipEngine *engine,
                                QObject *parent = nullptr);
 
 } // namespace compactphone

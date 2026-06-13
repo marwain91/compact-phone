@@ -10,10 +10,8 @@
 #include <unordered_map>
 
 namespace compactphone::models { class AccountsModel; }
-namespace compactphone::sip {
-class AccountsManager;
-class SipEngine;
-}
+namespace compactphone::sip { class AccountsManager; }
+namespace compactphone::sipbackend { class ISipBackend; }
 
 namespace compactphone {
 
@@ -22,7 +20,7 @@ class AccountsController : public QObject {
 public:
     explicit AccountsController(sip::AccountsManager *accounts,
                                 models::AccountsModel *model,
-                                sip::SipEngine *engine = nullptr,
+                                sipbackend::ISipBackend *backend = nullptr,
                                 QObject *parent = nullptr);
     ~AccountsController() override;
 
@@ -50,7 +48,7 @@ signals:
 private:
     sip::AccountsManager *m_accounts = nullptr;
     models::AccountsModel *m_model = nullptr;
-    sip::SipEngine *m_engine = nullptr;
+    sipbackend::ISipBackend *m_backend = nullptr;
     int m_registeredAccountCount = 0;
     int m_activeAccountId = -1;
     // Per-account last observed state, so we only emit registrationFailed

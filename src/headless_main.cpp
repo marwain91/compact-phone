@@ -99,7 +99,7 @@ public:
         m_backend = std::make_unique<compactphone::sipbackend::PjsipBackend>(&m_engine);
 
         auto core = compactphone::buildCoreSipGraph(
-            m_backend.get(), &m_db, &m_keychain, &m_engine);
+            m_backend.get(), &m_db, &m_keychain);
         m_accounts = std::move(core.accounts);
         m_accountsModel = std::move(core.accountsModel);
         m_accountsController = std::move(core.accountsController);

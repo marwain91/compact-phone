@@ -3,7 +3,6 @@
 #include "AccountsController.h"
 #include "AccountsManager.h"
 #include "CallManager.h"
-#include "SipEngine.h"
 #include "models/AccountsModel.h"
 #include "sipbackend/ISipBackend.h"
 #include "sipbackend/ListenerFanout.h"
@@ -15,7 +14,6 @@ namespace compactphone {
 CoreSipGraph buildCoreSipGraph(sipbackend::ISipBackend *backend,
                                persistence::Database *db,
                                platform::IKeychain *keychain,
-                               sip::SipEngine *engine,
                                QObject *parent)
 {
     CoreSipGraph g;
@@ -36,11 +34,10 @@ CoreSipGraph buildCoreSipGraph(sipbackend::ISipBackend *backend,
     g.accounts->registerStartupAccounts();
     g.accountsModel =
         std::make_unique<models::AccountsModel>(g.accounts.get(), parent);
-    // engine is passed through so AccountsController::pushNetworkAndCodecSettings
-    // can apply STUN / codec-priority on every account add/update/enable/default
-    // change. Pass nullptr only in unit tests that use a fake backend.
+    // AccountsController::pushNetworkAndCodecSettings sends STUN / codec-priority
+    // to the backend on every account add/update/enable/default change.
     g.accountsController = std::make_unique<AccountsController>(
-        g.accounts.get(), g.accountsModel.get(), engine, parent);
+        g.accounts.get(), g.accountsModel.get(), backend, parent);
     return g;
 }
 
