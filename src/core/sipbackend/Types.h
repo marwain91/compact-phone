@@ -1,7 +1,7 @@
 #pragma once
 
-// Stack-neutral value types shared by every SIP backend (PJSIP adapter,
-// baresip adapter, test fake). This header must stay free of pj::, Qt,
+// Stack-neutral value types shared by every SIP backend (the PJSIP
+// adapter and the test fake). This header must stay free of pj::, Qt,
 // and core/ includes — it IS the boundary. See
 // docs/superpowers/specs/2026-06-11-sip-backend-abstraction-design.md.
 

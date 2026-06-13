@@ -1,7 +1,7 @@
 #pragma once
 
 // The SIP stack boundary. Everything below this interface is a backend
-// (PJSIP adapter, baresip adapter, test fake); everything above is
+// (the PJSIP adapter, or the test fake); everything above is
 // stack-neutral domain code. Threading contract (see spec §Threading):
 //
 //  1. Every ISipBackend method is called from the Qt main thread only.

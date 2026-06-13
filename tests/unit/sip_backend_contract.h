@@ -1,7 +1,7 @@
 #pragma once
 
-// Backend-agnostic ISipBackend contract. Every backend (fake, pjsip,
-// baresip) must pass this suite unchanged — instantiate it with:
+// Backend-agnostic ISipBackend contract. Every backend (fake, pjsip)
+// must pass this suite unchanged — instantiate it with:
 //
 //   INSTANTIATE_TEST_SUITE_P(MyBackend, SipBackendContract,
 //       ::testing::Values(BackendFactory{[] { return std::make_unique<...>(); }}));
