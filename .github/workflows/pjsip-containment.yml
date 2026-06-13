@@ -1,0 +1,32 @@
+name: PJSIP containment
+
+# Enforces the SIP-stack abstraction: all pj::/pjsua2/pjsip usage must stay
+# inside src/core/sipbackend/pjsip/ (the PJSIP adapter) or cmake/FindPJSIP.cmake.
+# A cheap, comment-aware static grep (tools/ci/check-pjsip-containment.sh) — no
+# build, no PJSIP needed — so, like the secret scan, it runs on every PR and on
+# direct main pushes. push is scoped to main so a PR branch push does not run
+# twice (the pull_request event already covers feature-branch commits).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cheap check — safe to cancel a superseded run (unlike the release workflows,
+# which must never be interrupted mid-publish).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  containment:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check PJSIP containment
+        run: bash tools/ci/check-pjsip-containment.sh
