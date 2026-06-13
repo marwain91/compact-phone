@@ -133,8 +133,8 @@ symbol and every `<pjsua2>`/`<pj*>` include lives in
 Nothing above the `ISipBackend` boundary may name `pj::`. Phases 1–5 of the
 abstraction cleared the tree; `.github/workflows/pjsip-containment.yml`
 enforces it going forward so a change can't quietly reach around the
-interface to the SIP stack (which would also block the eventual baresip
-swap).
+interface to the SIP stack, keeping the boundary clean and the domain
+code testable against the fake backend.
 
 The gate is `tools/ci/check-pjsip-containment.sh` — a small **lexer-lite**
 (run it locally with `make check-containment`). It is comment- and
