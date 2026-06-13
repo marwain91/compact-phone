@@ -99,7 +99,7 @@ public:
         m_backend = std::make_unique<compactphone::sipbackend::PjsipBackend>(&m_engine);
 
         auto core = compactphone::buildCoreSipGraph(
-            m_backend.get(), &m_db, &m_keychain, &m_engine);
+            m_backend.get(), &m_db, &m_keychain);
         m_accounts = std::move(core.accounts);
         m_accountsModel = std::move(core.accountsModel);
         m_accountsController = std::move(core.accountsController);
@@ -161,9 +161,10 @@ private:
 
     void wireCallbacks()
     {
-        m_accounts->setOnRegistrationStateChanged(
-            [this](compactphone::sip::AccountId id,
-                   compactphone::sip::RegistrationState state) {
+        QObject::connect(m_accounts.get(),
+                         &compactphone::sip::AccountsManager::registrationStateChanged,
+                         this, [this](compactphone::sip::AccountId id,
+                                      compactphone::sip::RegistrationState state) {
                 QMetaObject::invokeMethod(this, [this, id, state] {
                     onRegistrationState(id, state);
                 }, Qt::QueuedConnection);
@@ -175,9 +176,10 @@ private:
                          &compactphone::sip::CallManager::incomingCall,
                          this, [this](int callId) { onIncomingCall(callId); });
 
-        m_calls->setOnCallEvent(
-            [this](compactphone::sip::CallId id,
-                   compactphone::sip::CallState state) {
+        QObject::connect(m_calls.get(),
+                         &compactphone::sip::CallManager::callEvent,
+                         this, [this](compactphone::sip::CallId id,
+                                      compactphone::sip::CallState state) {
                 QMetaObject::invokeMethod(this, [this, id, state] {
                     onCallEvent(id, state);
                 }, Qt::QueuedConnection);

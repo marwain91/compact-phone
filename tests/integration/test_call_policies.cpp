@@ -170,7 +170,7 @@ TEST_F(CallPoliciesTest, DndDeclinesIncomingCallAndOriginatorDisconnects)
 
     sc->setDndEnabled(true);
 
-    cm->setOnCallEvent([this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    QObject::connect(cm.get(), &compactphone::sip::CallManager::callEvent, [this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx); observed[id] = s;
     });
 
@@ -210,7 +210,7 @@ TEST_F(CallPoliciesTest, AutoAnswerAcceptsIncomingCallWithoutManualAccept)
     sc->setAutoAnswerEnabled(true);
     sc->setAutoAnswerDelayMs(0);
 
-    cm->setOnCallEvent([this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    QObject::connect(cm.get(), &compactphone::sip::CallManager::callEvent, [this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx); observed[id] = s;
     });
 
@@ -241,7 +241,7 @@ TEST_F(CallPoliciesTest, AutoAnswerWithDelayWaitsThenAccepts)
     sc->setAutoAnswerEnabled(true);
     sc->setAutoAnswerDelayMs(1500);
 
-    cm->setOnCallEvent([this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    QObject::connect(cm.get(), &compactphone::sip::CallManager::callEvent, [this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx);
         observed[id] = s;
         if (s == compactphone::sip::CallState::Confirmed &&
@@ -279,7 +279,7 @@ TEST_F(CallPoliciesTest, ForwardAlwaysRedirectsIncoming)
     sc->setCfwdAlwaysEnabled(true);
     sc->setCfwdAlwaysTarget(QString::fromStdString(udpTarget("600")));
 
-    cm->setOnCallEvent([this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    QObject::connect(cm.get(), &compactphone::sip::CallManager::callEvent, [this](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx); observed[id] = s;
     });
 

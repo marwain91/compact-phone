@@ -1,8 +1,8 @@
 #include "AccountsController.h"
 
 #include "AccountsManager.h"
-#include "SipEngine.h"
 #include "models/AccountsModel.h"
+#include "sipbackend/ISipBackend.h"
 
 #include <QMetaObject>
 
@@ -58,15 +58,15 @@ void applyParams(sip::Account &a, const QVariantMap &p)
 
 AccountsController::AccountsController(sip::AccountsManager *accounts,
                                        models::AccountsModel *model,
-                                       sip::SipEngine *engine,
+                                       sipbackend::ISipBackend *backend,
                                        QObject *parent)
-    : QObject(parent), m_accounts(accounts), m_model(model), m_engine(engine)
+    : QObject(parent), m_accounts(accounts), m_model(model), m_backend(backend)
 {
     refreshRegisteredAccountCount();
     pushNetworkAndCodecSettings();
     if (!m_accounts) return;
-    m_accounts->setOnRegistrationStateChanged(
-        [this](sip::AccountId id, sip::RegistrationState s) {
+    connect(m_accounts, &sip::AccountsManager::registrationStateChanged, this,
+            [this](sip::AccountId id, sip::RegistrationState s) {
             // Reg events arrive queued on the main thread (dispatched by
             // EventDispatch in PjsipBackend).  The QueuedConnection hop
             // here is therefore harmless: it re-queues an already-main-
@@ -113,7 +113,7 @@ AccountsController::AccountsController(sip::AccountsManager *accounts,
 
 void AccountsController::pushNetworkAndCodecSettings()
 {
-    if (!m_accounts || !m_engine) return;
+    if (!m_accounts || !m_backend) return;
     // Union of STUN servers across all enabled accounts.
     std::vector<std::string> stuns;
     std::set<std::string> seen;
@@ -121,7 +121,7 @@ void AccountsController::pushNetworkAndCodecSettings()
         if (!a.enabled || a.stunServer.empty()) continue;
         if (seen.insert(a.stunServer).second) stuns.push_back(a.stunServer);
     }
-    m_engine->applyStunServers(stuns);
+    m_backend->setStunServers(stuns);
     // Codec priority comes from the default account (or first enabled).
     std::string codecs;
     for (const auto &a : m_accounts->list()) {
@@ -143,12 +143,13 @@ void AccountsController::pushNetworkAndCodecSettings()
         if (start == std::string::npos) continue;
         order.push_back(token.substr(start, end - start + 1));
     }
-    m_engine->applyCodecPriority(order);
+    m_backend->setCodecPriority(order);
 }
 
 AccountsController::~AccountsController()
 {
-    if (m_accounts) m_accounts->setOnRegistrationStateChanged({});
+    // The registrationStateChanged connection auto-disconnects on
+    // destruction: this controller is the connection context object.
 }
 
 QAbstractListModel *AccountsController::model() const

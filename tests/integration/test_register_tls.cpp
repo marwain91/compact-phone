@@ -93,7 +93,9 @@ TEST_F(RegisterTlsTest, RejectsSelfSignedCertWhenVerificationRequired)
 
     compactphone::testsupport::SipManagerPair smp(&engine, &db, &kc);
     auto &mgr = smp.manager;
-    mgr.setOnRegistrationStateChanged([&](auto, auto s) {
+    QObject::connect(&mgr, &compactphone::sip::AccountsManager::registrationStateChanged,
+                     [&](compactphone::sip::AccountId,
+                         compactphone::sip::RegistrationState s) {
         if (s == compactphone::sip::RegistrationState::Registered) {
             sawRegistered.store(true);
         }

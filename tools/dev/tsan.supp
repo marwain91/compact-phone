@@ -70,3 +70,22 @@ race:pjmedia_wsola_save
 # frames inside the executed functor, not in the invokeMethod allocation.
 race:invokeMethodCallableHelper
 race:QMetaObject::invokeMethodImpl
+
+# Same uninstrumented-QtCore event-queue class as above, different internal
+# structure: the per-thread QPostEventList backing array. When a PJSIP worker
+# thread posts a backend event (PjsipBackend::post* -> EventDispatch::post ->
+# QMetaObject::invokeMethod, QueuedConnection), QtCore appends to the receiver
+# thread's posted-event list under its QBasicMutex futex (invisible to TSan).
+# That list's grow/move (QPostEventList::addEvent -> memmove/realloc) gets
+# flagged against a concurrent main-thread QArrayData allocation made while a
+# manager emits a Qt signal (CallManager::notifyStateChange -> doActivate)
+# during delivery of an EARLIER event — the two are genuinely concurrent by
+# design (worker keeps posting while the main loop dispatches), and the
+# event-queue's own mutex makes the postEventList access safe at runtime.
+# Here the EventDispatch::post / invokeMethod frames inline down to addEvent,
+# so the posting-side patterns above don't match; this catches that shape.
+# The accessed memory is QtCore-internal (the event queue / transient emit
+# allocation), never our data — manager state (m_records, m_mwi, observation
+# maps) lives in application frames, so genuine CallManager-class races stay
+# visible.
+race:QPostEventList::addEvent

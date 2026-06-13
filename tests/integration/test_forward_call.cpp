@@ -20,7 +20,6 @@
 using namespace std::chrono_literals;
 using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
-using compactphone::testsupport::ScopedAccountCallbacks;
 
 namespace {
 std::string sipServer()
@@ -94,13 +93,12 @@ TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
         am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
     auto &cm = smp.calls;
-    // The incoming-call signal fires on the main thread from a pumped queued
-    // event; the guard clears the remaining AccountsManager callbacks before
-    // the managers die, ASSERT early-returns included.
-    ScopedAccountCallbacks guard(am);
+    // The incoming-call/state signals fire on the main thread from pumped
+    // queued events; the connections sever automatically when cm is
+    // destroyed, so no explicit quiesce is needed.
     QObject::connect(&cm, &compactphone::sip::CallManager::incomingCall,
                      [&incomingId](int id) { incomingId.store(id); });
-    cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    QObject::connect(&cm, &compactphone::sip::CallManager::callEvent, [&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx);
         observed[id] = s;
     });

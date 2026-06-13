@@ -3,10 +3,10 @@
 #include "Account.h"
 #include "sipbackend/ISipBackend.h"
 
-#include <functional>
+#include <QObject>
+
 #include <map>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -74,11 +74,25 @@ struct MwiState {
 // policy, enable/update orchestration, and mapRegEvent application.
 //
 // MAIN-THREAD-ONLY since phase 3 (the PJSIP-thread incoming-call hook is
-// gone): all listener-side state (m_backendIds, m_regStates, m_regErrors)
-// is read and written on the main thread, so no mutex guards them.
-// m_callbackMutex still guards the callback slots + m_mwi (phase 4 removes
-// it when those slots become listener events).
-class AccountsManager : public sipbackend::ISipBackendListener {
+// gone): all listener-side state (m_backendIds, m_regStates, m_regErrors,
+// m_mwi) is read and written on the main thread, so no mutex guards them.
+// Registration / MWI / instant-message events are published as Qt signals,
+// connected directly on the main thread.
+class AccountsManager : public QObject,
+                        public sipbackend::ISipBackendListener {
+    Q_OBJECT
+signals:
+    // Fired on the main thread when any account's registration state changes
+    // (from onRegState). Connect directly — no metatype registration needed.
+    void registrationStateChanged(AccountId id, RegistrationState state);
+    // Fired on the main thread when an account's MWI (message-summary)
+    // state changes (from onMwi/updateMwi).
+    void mwiChanged(AccountId id, MwiState state);
+    // Fired on the main thread on every inbound MESSAGE (from
+    // onInstantMessage). Args: (account, fromUri, body).
+    void instantMessageReceived(AccountId id, const std::string &fromUri,
+                                const std::string &body);
+
 public:
     // The caller (buildCoreSipGraph) must call backend->setListener(this)
     // AFTER construction and must call backend->setListener(nullptr) BEFORE
@@ -138,27 +152,13 @@ public:
     bool sendInstantMessage(AccountId accountId, const std::string &to,
                             const std::string &body);
 
-    // Callback fired on the main thread on every inbound MESSAGE.
-    // Args: (account, fromUri, body).
-    void setOnInstantMessage(
-        std::function<void(AccountId, const std::string &,
-                           const std::string &)> cb);
-
     // Latest MWI state for an account (zeroed default if unknown).
     MwiState mwiStateOf(AccountId id) const;
 
     // Internal: invoked from onMwi listener event. Stores state and
-    // notifies any registered listener.
+    // emits mwiChanged.
     void updateMwi(AccountId id, int newMessages, int oldMessages,
                    bool active);
-
-    // Called on the main thread when message-summary changes.
-    void setOnMwiChanged(std::function<void(AccountId, MwiState)> cb);
-
-    // Callback fired on the main thread when any account's registration
-    // state changes.
-    void setOnRegistrationStateChanged(
-        std::function<void(AccountId, RegistrationState)> cb);
 
     // Backend id for a registered domain account (kInvalidAccountId if not
     // registered). Main-thread-only. Used by CallManager::makeCall.
@@ -223,22 +223,10 @@ private:
     std::map<AccountId, RegistrationState> m_regStates;
     std::map<AccountId, RegError>          m_regErrors;
 
-    // Guards the callback slots below plus m_mwi. PHASE-4 REMOVAL CANDIDATE:
-    // since phase 3 every invocation (reg/MWI/IM events) is a queued
-    // main-thread listener event, so this mutex no longer guards any
-    // cross-thread access. It survives only so the controllers' quiesce
-    // idiom (setOnX({}) in destructors) keeps its documented contract until
-    // phase 4 replaces the slots outright.
-    // FORBIDDEN from inside a callback: any setter (deadlock via self-lock)
-    // AND any getter that takes this same mutex — mwiStateOf() in particular
-    // acquires m_callbackMutex and will deadlock if called from a callback
-    // handler that already holds it.
-    mutable std::mutex m_callbackMutex;
-    std::function<void(AccountId, RegistrationState)> m_cb;
-    std::function<void(AccountId, MwiState)> m_onMwi;
+    // Latest MWI state per account — main-thread-only, written by updateMwi
+    // and read by mwiStateOf. No mutex: every reg/MWI/IM event is a queued
+    // main-thread listener call that re-emits as a direct Qt signal.
     std::unordered_map<AccountId, MwiState> m_mwi;
-    std::function<void(AccountId, const std::string &, const std::string &)>
-        m_onInstantMessage;
 
     void loadFromDatabase();
     bool insertRow(Account &acc);

@@ -75,7 +75,7 @@ TEST_F(OutboundCallTest, CallsEchoExtensionAndHangsUp)
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     auto &cm = smp.calls;
-    cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
+    QObject::connect(&cm, &compactphone::sip::CallManager::callStateChanged, [&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 
