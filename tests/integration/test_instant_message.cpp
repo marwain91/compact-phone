@@ -52,8 +52,9 @@ protected:
 
 TEST_F(InstantMessageTest, AccountToAccountRoundTripDeliversBody)
 {
-    // Observation state shared with the PJSIP-thread callback: declared
-    // before the manager (outlives every delivery); the strings are only
+    // Observation state shared with the connected slot (instantMessageReceived
+    // is delivered queued on the main thread): declared before the manager
+    // (outlives every delivery); the strings are only
     // ever touched under brief lock holds — never slept on through a
     // condition_variable.
     struct Received {
