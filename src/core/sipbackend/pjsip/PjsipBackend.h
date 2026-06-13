@@ -64,7 +64,7 @@ public:
     bool sendMessage(AccountId id, const std::string &toUri,
                      const std::string &body) override;
 
-    // --- presence — bookkeeping only; SIP SUBSCRIBE/pj::Buddy land in phase 5 ---
+    // --- presence — one pj::Buddy SUBSCRIBE per watch ---
     WatchId watch(AccountId accountId, const std::string &uri) override;
     bool unwatch(WatchId id) override;
 
@@ -91,15 +91,10 @@ public:
     bool isCaptureTransmitting(CallId id) const override;
     void releaseCall(CallId id) override;
 
-    // --- presence bridge (NOT on ISipBackend) ---
-    // pjAccountFor: AccountsManager forwards this so LinesManager can create
-    // pj::Buddy presence (BLF) subscriptions against the right pj::Account.
-    // Removed in phase 5 when presence moves behind ISipBackend.
-    pj::Account *pjAccountFor(AccountId id);
-
 private:
     class PjsipAccount;   // pj::Account subclass; defined in .cpp
     class PjsipCall;      // pj::Call subclass; defined in .cpp
+    class PjsipBuddy;     // pj::Buddy subclass (presence); defined in .cpp
 
     // Called from PjsipAccount callbacks (PJSUA worker thread).
     // Each helper marshals one event onto the Qt main thread via m_events.
@@ -111,6 +106,8 @@ private:
     void postInstantMessage(AccountId id, const std::string &fromUri,
                             const std::string &body);
     void postMwi(AccountId id, int newMessages, int oldMessages, bool active);
+    // Called from PjsipBuddy::onBuddyState (PJSUA worker thread).
+    void postPresence(WatchId id, PresenceState state);
 
     // Called from PjsipCall callbacks (PJSUA worker thread). postCallState's
     // posted lambda additionally drops the call's recorder/file player on
@@ -134,6 +131,11 @@ private:
     // nullptr), taking and releasing m_callsMutex internally.
     PjsipCall *liveCall(CallId id) const;
 
+    // Un-SUBSCRIBE and destroy every presence buddy, then clear the map. Used
+    // by stop()/dtor; the per-watch (unwatch) and per-account (removeAccount)
+    // paths do their own un-SUBSCRIBE.
+    void clearWatches();
+
     static constexpr int kGraceDestroyMs = 2200;
 
     sip::SipEngine *m_engine;
@@ -147,13 +149,24 @@ private:
     std::atomic<CallId> m_nextCallId{50001};  // offset: distinct from account id space
     std::map<AccountId, std::unique_ptr<PjsipAccount>> m_accounts;
 
-    // Presence watch bookkeeping — main-thread only. Phase 5 will replace
-    // the map value with a real pj::Buddy subscription object; until then
-    // we store only the owning AccountId so watch/unwatch id-lifetime rules
-    // (contract: valid id returned for known account, false on double-unwatch,
-    // cleared on stop()) are satisfied without initiating any SIP SUBSCRIBE.
+    // Presence watches — main-thread only (watch/unwatch are main-thread
+    // commands). Each entry owns a pj::Buddy whose onBuddyState fires on the
+    // PJSUA worker thread and posts onPresence via m_events. The owning
+    // accountId lets removeAccount tear down its buddies; buddies are destroyed
+    // before m_accounts in stop()/dtor (a buddy outliving its pj::Account would
+    // dangle). A null buddy means the SUBSCRIBE setup failed but the WatchId
+    // stays live (the id-lifetime contract is satisfied regardless).
+    //
+    // No grace window is needed (unlike m_calls): pjsua_buddy_del holds the
+    // PJSUA lock, so ~pj::Buddy serializes against any in-flight onBuddyState
+    // — the same guarantee pj::Account/pj::Call destructors rely on. Buddies
+    // can therefore be destroyed synchronously here.
     WatchId m_nextWatchId = 80001;  // offset: distinct from account/call spaces
-    std::map<WatchId, AccountId> m_watches;  // watchId → owning backendAccountId
+    struct Watch {
+        std::unique_ptr<PjsipBuddy> buddy;
+        AccountId accountId = kInvalidAccountId;
+    };
+    std::map<WatchId, Watch> m_watches;
 
     // --- call layer state -------------------------------------------------
     //

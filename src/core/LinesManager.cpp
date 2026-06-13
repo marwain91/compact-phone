@@ -2,69 +2,38 @@
 
 #include "AccountsManager.h"
 #include "persistence/Database.h"
+#include "sipbackend/ISipBackend.h"
 
-#include <pjsua2.hpp>
 #include <sqlite3.h>
-#include <spdlog/spdlog.h>
 
 #include <algorithm>
 
 namespace compactphone::sip {
 
-namespace {
-
-class BuddyImpl : public pj::Buddy {
-public:
-    LinesManager *owner = nullptr;
-
-    void onBuddyState() override
-    {
-        if (!owner) return;
-        try {
-            auto info = getInfo();
-            LineState s = LineState::Unknown;
-            if (info.subState == PJSIP_EVSUB_STATE_TERMINATED) {
-                s = LineState::Offline;
-            } else if (info.presStatus.status == PJSUA_BUDDY_STATUS_ONLINE) {
-                // PJSIP doesn't natively map "ringing"/"on-call" to a
-                // separate status; the activity field is set on busy.
-                if (!info.presStatus.activity ||
-                    info.presStatus.activity == PJRPID_ACTIVITY_UNKNOWN) {
-                    s = LineState::Idle;
-                } else {
-                    s = LineState::Busy;
-                }
-            } else if (info.presStatus.status == PJSUA_BUDDY_STATUS_OFFLINE) {
-                s = LineState::Offline;
-            }
-            owner->onBuddyStateChanged(this, s);
-        } catch (const pj::Error &e) {
-            spdlog::warn("BuddyImpl::onBuddyState: {}", e.info());
-        }
-    }
-};
-
-} // namespace
-
-struct LinesManager::Entry {
-    WatchedLine line;
-    std::unique_ptr<BuddyImpl> buddy;
-};
-
 LinesManager::LinesManager(persistence::Database *db, AccountsManager *am,
-                           QObject *parent)
-    : QObject(parent), m_db(db), m_am(am)
+                           sipbackend::ISipBackend *backend, QObject *parent)
+    : QObject(parent), m_db(db), m_am(am), m_backend(backend)
 {
     loadFromDatabase();
+    if (m_am) {
+        // Presence arrives queued on the main thread (the backend posts
+        // onPresence via EventDispatch; AccountsManager re-emits it as
+        // presenceChanged). Direct connection — same thread, no metatype.
+        connect(m_am, &AccountsManager::presenceChanged,
+                this, &LinesManager::onPresence);
+    }
     subscribeAll();
 }
 
 LinesManager::~LinesManager()
 {
-    // Buddies must be destroyed before the PJSIP endpoint shuts down.
-    for (auto &e : m_entries) {
-        if (e->buddy) {
-            try { e->buddy->subscribePresence(false); } catch (...) {}
+    // Cancel each presence watch. The adapter also tears buddies down on
+    // stop()/teardown, but unwatching here is the clean path and matches the
+    // old subscribePresence(false) on destruction.
+    if (m_backend) {
+        for (auto &e : m_entries) {
+            if (e->watchId != sipbackend::kInvalidWatchId)
+                m_backend->unwatch(e->watchId);
         }
     }
 }
@@ -96,24 +65,21 @@ void LinesManager::loadFromDatabase()
 
 void LinesManager::subscribeAll()
 {
-    if (!m_am) return;
-    for (auto &e : m_entries) {
-        auto *acc = m_am->pjAccountFor(e->line.accountId);
-        if (!acc) continue;
-        try {
-            auto buddy = std::make_unique<BuddyImpl>();
-            buddy->owner = this;
-            pj::BuddyConfig bc;
-            bc.uri = e->line.uri;
-            bc.subscribe = true;
-            buddy->create(*acc, bc);
-            buddy->subscribePresence(true);
-            e->buddy = std::move(buddy);
-        } catch (const pj::Error &err) {
-            spdlog::error("LinesManager: buddy create failed for {}: {}",
-                          e->line.uri, err.info());
-        }
-    }
+    for (auto &e : m_entries) watchEntry(*e);
+}
+
+void LinesManager::watchEntry(Entry &e)
+{
+    if (!m_am || !m_backend) return;
+    // The backend keys watches by its own AccountId; translate from the
+    // domain id. kInvalidAccountId means the account isn't registered yet —
+    // skip (best-effort: presence resolves the next time lines are loaded
+    // with the account registered).
+    const sipbackend::AccountId backendAcc =
+        m_am->backendIdFor(e.line.accountId);
+    if (backendAcc == sipbackend::kInvalidAccountId) return;
+    const auto wid = m_backend->watch(backendAcc, e.line.uri);
+    if (wid != sipbackend::kInvalidWatchId) e.watchId = wid;
 }
 
 WatchedLineId LinesManager::add(AccountId accountId, const std::string &uri,
@@ -146,24 +112,7 @@ WatchedLineId LinesManager::add(AccountId accountId, const std::string &uri,
     e->line.sortOrder = static_cast<int>(m_entries.size());
     e->line.state = LineState::Unknown;
 
-    // Subscribe immediately.
-    if (m_am) {
-        auto *acc = m_am->pjAccountFor(accountId);
-        if (acc) {
-            try {
-                auto buddy = std::make_unique<BuddyImpl>();
-                buddy->owner = this;
-                pj::BuddyConfig bc;
-                bc.uri = uri;
-                bc.subscribe = true;
-                buddy->create(*acc, bc);
-                buddy->subscribePresence(true);
-                e->buddy = std::move(buddy);
-            } catch (const pj::Error &err) {
-                spdlog::error("LinesManager::add buddy create: {}", err.info());
-            }
-        }
-    }
+    watchEntry(*e);
 
     m_entries.push_back(std::move(e));
     emit linesChanged();
@@ -176,8 +125,8 @@ bool LinesManager::remove(WatchedLineId id)
         [id](const std::unique_ptr<Entry> &e) { return e->line.id == id; });
     if (it == m_entries.end()) return false;
 
-    if ((*it)->buddy) {
-        try { (*it)->buddy->subscribePresence(false); } catch (...) {}
+    if (m_backend && (*it)->watchId != sipbackend::kInvalidWatchId) {
+        m_backend->unwatch((*it)->watchId);
     }
 
     if (m_db && m_db->handle()) {
@@ -211,29 +160,19 @@ std::optional<WatchedLine> LinesManager::find(WatchedLineId id) const
     return std::nullopt;
 }
 
-LinesManager::Entry *LinesManager::findByBuddy(pj::Buddy *buddy)
+void LinesManager::onPresence(sipbackend::WatchId watchId,
+                              sipbackend::PresenceState state)
 {
     for (auto &e : m_entries) {
-        if (e->buddy.get() == buddy) return e.get();
+        if (e->watchId != watchId) continue;
+        // PresenceState mirrors LineState value-for-value (static-asserted in
+        // tests/unit/test_sipbackend_types.cpp).
+        const auto ls = static_cast<LineState>(state);
+        if (e->line.state == ls) return;
+        e->line.state = ls;
+        emit linesChanged();
+        return;
     }
-    return nullptr;
-}
-
-LinesManager::Entry *LinesManager::findById(WatchedLineId id)
-{
-    for (auto &e : m_entries) {
-        if (e->line.id == id) return e.get();
-    }
-    return nullptr;
-}
-
-void LinesManager::onBuddyStateChanged(pj::Buddy *buddy, LineState state)
-{
-    auto *e = findByBuddy(buddy);
-    if (!e) return;
-    if (e->line.state == state) return;
-    e->line.state = state;
-    emit linesChanged();
 }
 
 } // namespace compactphone::sip

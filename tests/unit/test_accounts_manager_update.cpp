@@ -5,8 +5,8 @@
 // STARTED FakeSipBackend (so registerAccount() can succeed when enabled=true)
 // plus nullptr pjsipBridge (no PJSIP-specific features exercised here).
 //
-// Where the old tests depended on pjsua2 being live (e.g. asserting on
-// pjAccountFor, waiting for PJSIP reg events), they are replaced by:
+// Where the old tests depended on pjsua2 being live (e.g. waiting for PJSIP
+// reg events), they are replaced by:
 //   - fake.commandLog() assertions for addAccount/removeAccount sequences
 //   - fake.simulateRegState() + QCoreApplication::processEvents() for
 //     stateOf/lastRegErrorOf through the real listener path
@@ -325,8 +325,7 @@ TEST_F(AccountsManagerUpdateTest, UpdateDisablesLiveAccount)
     edited.enabled = false;
     ASSERT_TRUE(mgr->update(edited));
 
-    // After disabling, pjAccountFor returns nullptr (no backend account).
-    EXPECT_EQ(mgr->pjAccountFor(id), nullptr);
+    // After disabling, the account is unregistered (no backend account).
     EXPECT_EQ(mgr->stateOf(id), compactphone::sip::RegistrationState::Unregistered);
     fake.setListener(nullptr);
 }
