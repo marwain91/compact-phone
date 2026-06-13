@@ -7,7 +7,7 @@
 #include "core/HistoryManager.h"
 #include "core/SettingsController.h"
 #include "core/SettingsManager.h"
-#include "core/SipEngine.h"
+#include "core/sipbackend/pjsip/SipEngine.h"
 #include "core/platform/Keychain_memory.h"
 #include "core/sipbackend/ListenerFanout.h"
 #include "core/sipbackend/pjsip/PjsipBackend.h"

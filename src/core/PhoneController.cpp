@@ -21,7 +21,7 @@
 #include "MessagesManager.h"
 #include "SettingsController.h"
 #include "SettingsManager.h"
-#include "SipEngine.h"
+#include "core/sipbackend/pjsip/SipEngine.h"
 #include "models/AccountsModel.h"
 #include "models/CallsModel.h"
 #include "models/ContactsModel.h"

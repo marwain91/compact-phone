@@ -4,7 +4,7 @@
 #include "core/AccountsManager.h"
 #include "core/CallEntry.h"
 #include "core/CallManager.h"
-#include "core/SipEngine.h"
+#include "core/sipbackend/pjsip/SipEngine.h"
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 

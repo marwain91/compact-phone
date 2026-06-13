@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "core/SipEngine.h"
+#include "core/sipbackend/pjsip/SipEngine.h"
 
 TEST(SipEngineLifecycle, StartsAndStops)
 {

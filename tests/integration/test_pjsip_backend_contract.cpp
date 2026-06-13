@@ -22,7 +22,7 @@
 
 #include "unit/sip_backend_contract.h"
 
-#include "core/SipEngine.h"
+#include "core/sipbackend/pjsip/SipEngine.h"
 #include "core/sipbackend/pjsip/PjsipBackend.h"
 
 #include <QCoreApplication>

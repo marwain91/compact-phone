@@ -34,7 +34,7 @@
 
 #include "core/AccountsManager.h"
 #include "core/CallManager.h"
-#include "core/SipEngine.h"
+#include "core/sipbackend/pjsip/SipEngine.h"
 #include "core/sipbackend/ListenerFanout.h"
 #include "core/sipbackend/pjsip/PjsipBackend.h"
 #include "core/platform/Keychain.h"
