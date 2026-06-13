@@ -17,7 +17,6 @@
 using namespace std::chrono_literals;
 using compactphone::testsupport::pumpUntil;
 using compactphone::testsupport::waitForRegState;
-using compactphone::testsupport::ScopedAccountCallbacks;
 
 namespace {
 std::string sipServer()
@@ -89,10 +88,10 @@ TEST_F(InstantMessageTest, AccountToAccountRoundTripDeliversBody)
     ASSERT_TRUE(waitForRegState(
         am, {id1, id2}, compactphone::sip::RegistrationState::Registered, 10s));
 
-    ScopedAccountCallbacks guard(am);
-    am.setOnInstantMessage([&](compactphone::sip::AccountId acc,
-                               const std::string &from,
-                               const std::string &body) {
+    QObject::connect(&am, &compactphone::sip::AccountsManager::instantMessageReceived,
+                     [&](compactphone::sip::AccountId acc,
+                         const std::string &from,
+                         const std::string &body) {
         std::lock_guard l(mtx);
         got = {acc, from, body};
         gotMessage = true;

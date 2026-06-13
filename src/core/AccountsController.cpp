@@ -65,8 +65,8 @@ AccountsController::AccountsController(sip::AccountsManager *accounts,
     refreshRegisteredAccountCount();
     pushNetworkAndCodecSettings();
     if (!m_accounts) return;
-    m_accounts->setOnRegistrationStateChanged(
-        [this](sip::AccountId id, sip::RegistrationState s) {
+    connect(m_accounts, &sip::AccountsManager::registrationStateChanged, this,
+            [this](sip::AccountId id, sip::RegistrationState s) {
             // Reg events arrive queued on the main thread (dispatched by
             // EventDispatch in PjsipBackend).  The QueuedConnection hop
             // here is therefore harmless: it re-queues an already-main-
@@ -148,7 +148,8 @@ void AccountsController::pushNetworkAndCodecSettings()
 
 AccountsController::~AccountsController()
 {
-    if (m_accounts) m_accounts->setOnRegistrationStateChanged({});
+    // The registrationStateChanged connection auto-disconnects on
+    // destruction: this controller is the connection context object.
 }
 
 QAbstractListModel *AccountsController::model() const

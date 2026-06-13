@@ -17,11 +17,9 @@
 //     by both the callback and the polling predicate, but never slept on
 //
 // Lifetime rule that goes with them: observation state shared with a
-// callback must be declared BEFORE the manager the callback is installed
-// on (so it is destroyed after the manager stops delivering events), and
-// AccountsManager callbacks that capture a CallManager must be cleared
-// before that CallManager dies — ScopedAccountCallbacks does this even on
-// an ASSERT early-return.
+// connected slot must be declared BEFORE the manager whose signal it
+// observes, so it outlives the connection — which is severed only when
+// that manager (the signal's sender) is destroyed.
 //
 // Phase-3 note: integration tests construct their full SIP stack via the
 // SipManagerPair helper below — a PjsipBackend paired with an AccountsManager,
@@ -135,32 +133,5 @@ inline bool waitForRegState(
         return true;
     }, timeout);
 }
-
-// Quiesce barrier on scope exit: clears every AccountsManager callback
-// slot. The setters share the slot mutex with the PJSIP-thread invocation,
-// so once the destructor returns no in-flight callback exists and none can
-// start. Declare AFTER the CallManager (and any frame-local capture) so it
-// runs first on scope exit — including gtest ASSERT early-returns, which
-// skip any cleanup written after the assertion.
-//
-// No calls-side quiesce is needed: CallManager callbacks (incomingCall and
-// friends) are main-thread-only now — they fire from pumped queued events,
-// never from a PJSIP thread — so there is no in-flight cross-thread callback
-// to barrier against on the call half.
-class ScopedAccountCallbacks {
-public:
-    explicit ScopedAccountCallbacks(sip::AccountsManager &am) : m_am(am) {}
-    ~ScopedAccountCallbacks()
-    {
-        m_am.setOnRegistrationStateChanged({});
-        m_am.setOnInstantMessage({});
-        m_am.setOnMwiChanged({});
-    }
-    ScopedAccountCallbacks(const ScopedAccountCallbacks &) = delete;
-    ScopedAccountCallbacks &operator=(const ScopedAccountCallbacks &) = delete;
-
-private:
-    sip::AccountsManager &m_am;
-};
 
 } // namespace compactphone::testsupport

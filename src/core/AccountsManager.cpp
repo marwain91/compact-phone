@@ -10,7 +10,6 @@
 #include <QUuid>
 
 #include <algorithm>
-#include <mutex>
 
 namespace compactphone::sip {
 
@@ -588,8 +587,7 @@ void AccountsManager::onRegState(sipbackend::AccountId backendId,
                  : "Unregistered",
                  sipCode, reason);
 
-    std::lock_guard<std::mutex> lk(m_callbackMutex);
-    if (m_cb) m_cb(domainId, upd.state);
+    emit registrationStateChanged(domainId, upd.state);
 }
 
 void AccountsManager::onMwi(sipbackend::AccountId backendId,
@@ -613,8 +611,7 @@ void AccountsManager::onInstantMessage(sipbackend::AccountId backendId,
                       backendId);
         return;
     }
-    std::lock_guard<std::mutex> lk(m_callbackMutex);
-    if (m_onInstantMessage) m_onInstantMessage(domainId, fromUri, body);
+    emit instantMessageReceived(domainId, fromUri, body);
 }
 
 // ---------------------------------------------------------------------------
@@ -623,7 +620,6 @@ void AccountsManager::onInstantMessage(sipbackend::AccountId backendId,
 
 MwiState AccountsManager::mwiStateOf(AccountId id) const
 {
-    std::lock_guard<std::mutex> lk(m_callbackMutex);
     auto it = m_mwi.find(id);
     return it == m_mwi.end() ? MwiState{} : it->second;
 }
@@ -637,16 +633,8 @@ void AccountsManager::updateMwi(AccountId id, int newCount, int oldCount,
     s.newMessages = newCount;
     s.oldMessages = oldCount;
     s.active = active;
-    std::lock_guard<std::mutex> lk(m_callbackMutex);
     m_mwi[id] = s;
-    if (m_onMwi) m_onMwi(id, s);
-}
-
-void AccountsManager::setOnMwiChanged(
-    std::function<void(AccountId, MwiState)> cb)
-{
-    std::lock_guard<std::mutex> lk(m_callbackMutex);
-    m_onMwi = std::move(cb);
+    emit mwiChanged(id, s);
 }
 
 // ---------------------------------------------------------------------------
@@ -660,14 +648,6 @@ bool AccountsManager::sendInstantMessage(AccountId accountId,
     const sipbackend::AccountId backendId = backendIdFor(accountId);
     if (backendId == sipbackend::kInvalidAccountId) return false;
     return m_backend->sendMessage(backendId, to, body);
-}
-
-void AccountsManager::setOnInstantMessage(
-    std::function<void(AccountId, const std::string &,
-                       const std::string &)> cb)
-{
-    std::lock_guard<std::mutex> lk(m_callbackMutex);
-    m_onInstantMessage = std::move(cb);
 }
 
 // ---------------------------------------------------------------------------
@@ -711,17 +691,6 @@ RegError AccountsManager::lastRegErrorOf(AccountId id) const
 {
     auto it = m_regErrors.find(id);
     return it == m_regErrors.end() ? RegError{} : it->second;
-}
-
-// ---------------------------------------------------------------------------
-// Callback setters
-// ---------------------------------------------------------------------------
-
-void AccountsManager::setOnRegistrationStateChanged(
-    std::function<void(AccountId, RegistrationState)> cb)
-{
-    std::lock_guard<std::mutex> lk(m_callbackMutex);
-    m_cb = std::move(cb);
 }
 
 // ---------------------------------------------------------------------------

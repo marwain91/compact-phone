@@ -161,9 +161,10 @@ private:
 
     void wireCallbacks()
     {
-        m_accounts->setOnRegistrationStateChanged(
-            [this](compactphone::sip::AccountId id,
-                   compactphone::sip::RegistrationState state) {
+        QObject::connect(m_accounts.get(),
+                         &compactphone::sip::AccountsManager::registrationStateChanged,
+                         this, [this](compactphone::sip::AccountId id,
+                                      compactphone::sip::RegistrationState state) {
                 QMetaObject::invokeMethod(this, [this, id, state] {
                     onRegistrationState(id, state);
                 }, Qt::QueuedConnection);

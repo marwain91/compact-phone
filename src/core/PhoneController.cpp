@@ -158,16 +158,17 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     connect(m_accountsController.get(), &AccountsController::registrationFailed,
             this, [this](const QString &msg) { postNotice(msg, notice::kWarning); });
 
-    // MWI notifications from PJSIP arrive on a worker thread — bounce to
-    // the main thread before touching Qt state.
+    // MWI and inbound-message events arrive queued on the main thread (the
+    // backend's EventDispatch already marshalled them); the inner
+    // invokeMethod requeue keeps their handling off the manager's emit stack.
     if (m_accounts) {
-        m_accounts->setOnMwiChanged(
+        connect(m_accounts.get(), &sip::AccountsManager::mwiChanged, this,
             [this](sip::AccountId, sip::MwiState) {
                 QMetaObject::invokeMethod(
                     this, [this] { emit voicemailStateChanged(); },
                     Qt::QueuedConnection);
             });
-        m_accounts->setOnInstantMessage(
+        connect(m_accounts.get(), &sip::AccountsManager::instantMessageReceived, this,
             [this](sip::AccountId aid, const std::string &from,
                    const std::string &body) {
                 QMetaObject::invokeMethod(this,
@@ -363,18 +364,14 @@ PhoneController::~PhoneController()
     // adapter's queued event dispatch, severed here by setListener(nullptr).
     if (m_backend) m_backend->setListener(nullptr);
 
-    // Quiesce the remaining callback slots we assigned before tearing down
-    // the objects they capture. The manager callback setters block until any
-    // in-flight invocation completes (see m_callbackMutex in the managers),
-    // so after these return no lambda can re-enter. Controller destructors
-    // below do the same for theirs.
-    // Teardown order: controllers (clear callbacks) -> managers (pj::Account /
-    // pj::Call destructors serialize against in-flight dispatch via the PJSUA
-    // lock) -> engine->stop() last (libDestroy after all pjsua2 objects gone).
-    if (m_accounts) {
-        m_accounts->setOnMwiChanged({});
-        m_accounts->setOnInstantMessage({});
-    }
+    // The manager→controller event path is Qt signals now: severing the
+    // backend listener above stops every emit (no event reaches onRegState/
+    // onMwi/onInstantMessage), and each connection auto-disconnects when its
+    // context object (this PhoneController, or a controller below) is
+    // destroyed. No explicit slot quiesce is needed.
+    // Teardown order: controllers -> managers (pj::Account / pj::Call
+    // destructors serialize against in-flight dispatch via the PJSUA lock) ->
+    // engine->stop() last (libDestroy after all pjsua2 objects gone).
     m_networkMonitor.reset();
     m_powerMonitor.reset();
     m_updateChecker.reset();
