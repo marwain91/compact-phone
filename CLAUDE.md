@@ -633,11 +633,18 @@ Gotchas, in the order they will bite you:
   both orders internally, and any deadlock suppression matching pj
   frames would also mask cycles involving our `m_mutex`. Lock-order
   discipline lives in the CallManager.h contract instead.
-- `tools/dev/tsan.supp` carries three narrow pj-internal race
-  suppressions (socket close-vs-send, pool reset vs logging,
-  call-info string copy). Keep suppressions leaf-function-narrow;
-  broad `pj*` globs would mask our own races, whose PJSIP-thread
-  stacks always contain pjsua frames.
+- `tools/dev/tsan.supp` carries narrow, documented suppressions for
+  uninstrumented-library internals: several pj-internal races (socket
+  close-vs-send, pool reset vs logging, call-info string copy, media
+  stat / WSOLA buffer) and QtCore event-queue races where Qt's
+  QBasicMutex futex is invisible to TSan —
+  `invokeMethodImpl`/`invokeMethodCallableHelper` (cross-thread functor
+  storage) and `QPostEventList::addEvent` (the posted-event list a PJSIP
+  worker grows via `EventDispatch::post`, overlapping a manager's
+  main-thread Qt signal emission — e.g. `CallManager::notifyStateChange`).
+  Keep suppressions leaf-function-narrow; broad `pj*`/Qt globs would mask
+  our own races, whose stacks sit in application frames, never in these
+  library internals.
 - **Never wait on a condition_variable whose mutex a PJSIP-delivered
   callback also locks.** pjsua can deliver `onRegState` re-entrantly on
   the registering/waiting thread; TSan reports it as a double lock of
@@ -647,10 +654,12 @@ Gotchas, in the order they will bite you:
   shapes live in `tests/integration/test_support.h`: `waitForRegState`
   (callback-free `stateOf()` polling), atomics for scalar observations,
   and brief-lock polling (`pollUntil`/`pumpUntil`) for mutex-guarded
-  maps. Observation state is declared before the managers, and
-  `ScopedAccountCallbacks` quiesces AccountsManager callbacks before a
-  captured CallManager dies. New integration tests must follow these
-  patterns or the gate halts on them.
+  maps. Since phase 4 the managers publish events as Qt signals, so
+  observation state is declared before the manager it observes — it must
+  outlive the connection, which severs only when the manager (the
+  signal's sender) is destroyed; the backend `setListener(nullptr)`
+  barrier in `SipManagerPair`/`PhoneController` stops any late emit. New
+  integration tests must follow these patterns or the gate halts on them.
 
 ## Branch + PR conventions
 
