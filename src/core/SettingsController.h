@@ -7,7 +7,6 @@
 #include <memory>
 
 namespace compactphone::sip {
-class RingtonePlayer;
 class SettingsManager;
 }
 
@@ -224,7 +223,9 @@ private:
     bool m_autoUpdateCheckEnabled = true;
     QString m_skippedUpdateVersion;
     std::unique_ptr<platform::IAutostart> m_autostart;
-    std::unique_ptr<sip::RingtonePlayer> m_ringtone;
+    // Resolved ringtone WAV path; the backend owns the player. Policy
+    // (enabled/ringing) lives here, playback crosses to ISipBackend.
+    QString m_ringtonePath;
 
     void applyRingtoneState();
 };

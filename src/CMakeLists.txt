@@ -76,8 +76,6 @@ add_library(compactphone_core STATIC
     core/CoreSipGraph.h
     core/CoreSipGraph.cpp
     core/TransferTracker.h
-    core/RingtonePlayer.h
-    core/RingtonePlayer.cpp
     core/platform/Keychain.h
     core/platform/Keychain_memory.h
     core/platform/Keychain_memory.cpp

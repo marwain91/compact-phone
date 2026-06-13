@@ -1,7 +1,6 @@
 #include "SettingsController.h"
 
 #include "CrashReporting.h"
-#include "RingtonePlayer.h"
 #include "SettingsManager.h"
 #include "sipbackend/ISipBackend.h"
 #include "platform/Autostart.h"
@@ -94,7 +93,7 @@ SettingsController::SettingsController(sipbackend::ISipBackend *backend,
     if (storedRing.empty() || !QFile::exists(QString::fromStdString(storedRing))) {
         storedRing = defaultRing;
     }
-    m_ringtone = std::make_unique<sip::RingtonePlayer>(storedRing);
+    m_ringtonePath = QString::fromStdString(storedRing);
 
     if (m_backend && m_settings) {
         const auto capStr = m_settings->getOr("capture_device_id", "");
@@ -401,31 +400,27 @@ void SettingsController::refreshAudioDevices()
 
 void SettingsController::testRingtone(int durationMs)
 {
-    if (!m_ringtone) return;
-    m_ringtone->start();
-    QTimer::singleShot(durationMs, this, [this] {
-        if (m_ringtone) applyRingtoneState();
-    });
+    if (m_backend) m_backend->playRingtone(m_ringtonePath.toStdString());
+    QTimer::singleShot(durationMs, this, [this] { applyRingtoneState(); });
 }
 
 QString SettingsController::ringtonePath() const
 {
-    return m_ringtone ? QString::fromStdString(m_ringtone->path()) : QString{};
+    return m_ringtonePath;
 }
 
 void SettingsController::setRingtonePath(const QString &p)
 {
-    if (!m_ringtone) return;
     QString path = p;
     if (path.startsWith("file://")) path = QUrl(path).toLocalFile();
     if (path.isEmpty() || !QFile::exists(path)) {
         path = defaultRingtonePath();
     }
-    if (QString::fromStdString(m_ringtone->path()) == path) {
+    if (m_ringtonePath == path) {
         if (m_settings) m_settings->set("ringtone_path", path.toStdString());
         return;
     }
-    m_ringtone->setPath(path.toStdString());
+    m_ringtonePath = path;
     if (m_settings) m_settings->set("ringtone_path", path.toStdString());
     applyRingtoneState();
     emit ringtonePathChanged();
@@ -445,9 +440,11 @@ void SettingsController::setRinging(bool ringing)
 
 void SettingsController::applyRingtoneState()
 {
-    if (!m_ringtone) return;
-    if (m_ringtoneEnabled && m_ringing) m_ringtone->start();
-    else                               m_ringtone->stop();
+    if (!m_backend) return;
+    if (m_ringtoneEnabled && m_ringing)
+        m_backend->playRingtone(m_ringtonePath.toStdString());
+    else
+        m_backend->stopRingtone();
 }
 
 } // namespace compactphone

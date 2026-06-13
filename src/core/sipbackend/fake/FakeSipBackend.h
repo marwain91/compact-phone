@@ -57,6 +57,9 @@ public:
     void refreshAudioDevices() override {}
     bool playRingtone(const std::string &path) override;
     void stopRingtone() override { m_ringtonePath.clear(); }
+    // Test-only: the path passed to the last playRingtone(), or empty after
+    // stopRingtone(). Lets a SettingsController test observe ringtone state.
+    const std::string &ringtonePath() const { return m_ringtonePath; }
     void setLogSink(
         std::function<void(int, const std::string &)> sink) override
     {

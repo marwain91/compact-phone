@@ -112,6 +112,19 @@ protected:
     }
     void TearDown() override
     {
+        // Drain any still-active or lingering calls (e.g. the auto-answered
+        // callee leg, which the test bodies never hang up directly) before
+        // tearing the stack down. backend.reset() below deletes the PjsipCall
+        // wrappers; without the drain it could delete a still-ACTIVE call whose
+        // PJSUA worker is mid-onCallState — a data race TSan catches when this
+        // fixture runs late in the suite. callCount()==0 means every call
+        // reached Disconnected and was released into the adapter's grace map,
+        // so backend.reset() destroys settled (grace-parked) wrappers under the
+        // PJSUA-lock-serialized ~PjsipCall rather than a live call.
+        if (cm) {
+            for (const auto &e : cm->snapshot()) cm->hangup(e.id);
+            pumpUntil([&] { return cm->callCount() == 0; }, 10s);
+        }
         cc.reset();
         sc.reset();
         sm.reset();
