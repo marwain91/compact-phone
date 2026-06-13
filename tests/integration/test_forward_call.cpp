@@ -100,7 +100,7 @@ TEST_F(ForwardCallTest, ForwardsIncomingTo302TargetAndCallEnds)
     ScopedAccountCallbacks guard(am);
     QObject::connect(&cm, &compactphone::sip::CallManager::incomingCall,
                      [&incomingId](int id) { incomingId.store(id); });
-    cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    QObject::connect(&cm, &compactphone::sip::CallManager::callEvent, [&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx);
         observed[id] = s;
     });

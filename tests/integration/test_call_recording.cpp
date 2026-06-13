@@ -86,7 +86,7 @@ TEST_F(CallRecordingTest, RecordsActiveCallToWavFile)
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     auto &cm = smp.calls;
-    cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
+    QObject::connect(&cm, &compactphone::sip::CallManager::callStateChanged, [&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 
@@ -147,7 +147,7 @@ TEST_F(CallRecordingTest, EraseCallCleansUpActiveRecorder)
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     auto &cm = smp.calls;
-    cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
+    QObject::connect(&cm, &compactphone::sip::CallManager::callStateChanged, [&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 

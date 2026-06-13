@@ -8,8 +8,6 @@
 #include <QObject>
 
 #include <cstdint>
-#include <functional>
-#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -22,7 +20,9 @@ struct CallEntry;
 using CallId = std::int32_t;
 constexpr CallId kInvalidCallId = -1;
 
-enum class CallState { Idle, Calling, EarlyMedia, Confirmed, Disconnected };
+// CallManager speaks the boundary call-state enum directly — sip::CallState
+// is an alias, not a parallel type, so there is no value-mapping seam.
+using CallState = sipbackend::CallState;
 
 // CallManager is the stack-neutral call POLICY layer: active-call
 // auto-hold, 486 decline semantics, transfer-NOTIFY outcome handling
@@ -33,8 +33,8 @@ enum class CallState { Idle, Calling, EarlyMedia, Confirmed, Disconnected };
 // thread (boundary rule 1); events arrive queued on the main thread
 // (boundary rule 2). There is no cross-thread state left and no mutex —
 // the locking discipline that used to live here moved into the PJSIP
-// adapter, where it is private. m_callbackMutex below is the one
-// exception, kept for phase-4 removal (see its comment).
+// adapter, where it is private. State changes are published as Qt signals
+// (callEvent/callStateChanged), connected directly on the main thread.
 //
 // CallId values are the backend-minted ids — CallManager performs no id
 // translation. An id is live from makeCall()/onIncomingCall until the
@@ -52,6 +52,14 @@ signals:
     // the adapter wraps the call eagerly inside the PJSIP callback, so by
     // the time this fires, accept()/decline() are valid on the id).
     void incomingCall(int callId);
+    // Emitted on every call state transition. callStateChanged carries the
+    // new state alone (a convenient observer; the integration suite uses it);
+    // callEvent additionally identifies the call. Both fire on the main
+    // thread from notifyStateChange — connect them directly (no metatype
+    // registration needed). Production wiring (CallsController, headless)
+    // uses callEvent.
+    void callStateChanged(CallState s);
+    void callEvent(CallId id, CallState s);
 
 public:
     CallManager(sipbackend::ISipBackend *backend, AccountsManager *am,
@@ -130,9 +138,6 @@ public:
     // if the account is set to DtmfMethod::Info). Returns false if no
     // such call or the backend rejects the request.
     bool sendDtmf(CallId id, const std::string &digits);
-
-    void setOnCallStateChanged(std::function<void(CallState)> cb);
-    void setOnCallEvent(std::function<void(CallId, CallState)> cb);
 
     // Real-time media stats sampled from the backend's RTCP report. All
     // fields are -1 when the call has no active stream or stats are not
@@ -227,16 +232,6 @@ private:
     // Tracks calls to hang up once a REFER/transfer completes.
     TransferTracker m_transfers;
 
-    // Guards m_cb / m_eventCb. PHASE-4 REMOVAL CANDIDATE: since phase 3,
-    // both assignment (controller ctors/dtors) and invocation
-    // (notifyStateChange, now driven by queued main-thread listener
-    // events) happen on the main thread, so this mutex no longer guards
-    // any cross-thread access. It survives only so the controllers'
-    // quiesce idiom (setOnX({}) in destructors) keeps its documented
-    // contract until phase 4 replaces the slots outright.
-    mutable std::mutex m_callbackMutex;
-    std::function<void(CallState)> m_cb;
-    std::function<void(CallId, CallState)> m_eventCb;
     CallId m_activeCallId = kInvalidCallId;
     int m_lingerMs = 2200;
 

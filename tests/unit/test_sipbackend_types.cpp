@@ -10,7 +10,6 @@
 #include "core/sipbackend/Types.h"
 
 #include "core/Account.h"     // sip::Transport, SrtpMode, DtmfMethod; Account defaults
-#include "core/CallManager.h" // sip::CallState
 #include "core/WatchedLine.h" // sip::LineState
 
 #include <gtest/gtest.h>
@@ -19,22 +18,8 @@
 // Parity enforcement — static_asserts so drift breaks the BUILD, not a test
 // ---------------------------------------------------------------------------
 
-// sipbackend::CallState mirrors compactphone::sip::CallState value-for-value.
-static_assert(static_cast<int>(compactphone::sipbackend::CallState::Idle)
-                  == static_cast<int>(compactphone::sip::CallState::Idle),
-              "sipbackend::CallState::Idle drifted from sip::CallState::Idle");
-static_assert(static_cast<int>(compactphone::sipbackend::CallState::Calling)
-                  == static_cast<int>(compactphone::sip::CallState::Calling),
-              "sipbackend::CallState::Calling drifted from sip::CallState::Calling");
-static_assert(static_cast<int>(compactphone::sipbackend::CallState::EarlyMedia)
-                  == static_cast<int>(compactphone::sip::CallState::EarlyMedia),
-              "sipbackend::CallState::EarlyMedia drifted from sip::CallState::EarlyMedia");
-static_assert(static_cast<int>(compactphone::sipbackend::CallState::Confirmed)
-                  == static_cast<int>(compactphone::sip::CallState::Confirmed),
-              "sipbackend::CallState::Confirmed drifted from sip::CallState::Confirmed");
-static_assert(static_cast<int>(compactphone::sipbackend::CallState::Disconnected)
-                  == static_cast<int>(compactphone::sip::CallState::Disconnected),
-              "sipbackend::CallState::Disconnected drifted from sip::CallState::Disconnected");
+// (sip::CallState is now a type alias of sipbackend::CallState — there is no
+// separate enum to keep in parity, so no static_assert is needed for it.)
 
 // sipbackend::Transport mirrors sip::Transport value-for-value.
 static_assert(static_cast<int>(compactphone::sipbackend::Transport::Udp)

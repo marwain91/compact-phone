@@ -179,7 +179,8 @@ CallsController::CallsController(sip::AccountsManager *accounts,
                     publishRingingState();
                 });
 
-        m_calls->setOnCallEvent([this](sip::CallId callId, sip::CallState s) {
+        connect(m_calls, &sip::CallManager::callEvent, this,
+                [this](sip::CallId callId, sip::CallState s) {
             QMetaObject::invokeMethod(this, [this, callId, s] {
                 const auto now = QDateTime::currentMSecsSinceEpoch();
                 // One snapshot shared across this whole handler.
@@ -227,9 +228,9 @@ CallsController::CallsController(sip::AccountsManager *accounts,
 
 CallsController::~CallsController()
 {
-    // The incomingCall connection is severed automatically (this is the
-    // context object). Only the std::function slot needs explicit quiesce.
-    if (m_calls) m_calls->setOnCallEvent({});
+    // All connections to CallManager (incomingCall, callsChanged, callEvent)
+    // are severed automatically: CallsController is the connection context
+    // object, so they disconnect when it is destroyed.
 }
 
 QAbstractListModel *CallsController::model() const

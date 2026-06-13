@@ -87,9 +87,8 @@ void CallManager::onCallState(sipbackend::CallId id, sipbackend::CallState s,
 {
     auto it = m_records.find(id);
     if (it == m_records.end()) return;   // released/unknown id: tolerated
-    // sip::CallState mirrors sipbackend::CallState value-for-value
-    // (static-asserted in tests/unit/test_sipbackend_types.cpp).
-    const auto state = static_cast<CallState>(s);
+    // sip::CallState is an alias of sipbackend::CallState — no conversion.
+    const CallState state = s;
     if (state == CallState::Disconnected) {
         // Record the code BEFORE notifying, preserving the guarantee that
         // an observer seeing Disconnected can immediately read
@@ -559,28 +558,15 @@ std::vector<CallEntry> CallManager::snapshot() const
 }
 
 // ---------------------------------------------------------------------------
-// Callback slots
+// State-change notification
 // ---------------------------------------------------------------------------
-
-void CallManager::setOnCallStateChanged(std::function<void(CallState)> cb)
-{
-    std::lock_guard<std::mutex> lock(m_callbackMutex);
-    m_cb = std::move(cb);
-}
-
-void CallManager::setOnCallEvent(std::function<void(CallId, CallState)> cb)
-{
-    std::lock_guard<std::mutex> lock(m_callbackMutex);
-    m_eventCb = std::move(cb);
-}
 
 void CallManager::notifyStateChange(CallId id, CallState s)
 {
-    // Main thread (queued listener event). See m_callbackMutex's comment
-    // for why the lock survives until phase 4.
-    std::lock_guard<std::mutex> lock(m_callbackMutex);
-    if (m_cb) m_cb(s);
-    if (m_eventCb) m_eventCb(id, s);
+    // Main thread (queued listener event). Direct-connected signals, so no
+    // lock and no metatype registration.
+    emit callStateChanged(s);
+    emit callEvent(id, s);
 }
 
 } // namespace compactphone::sip

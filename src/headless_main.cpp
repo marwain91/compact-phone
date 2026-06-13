@@ -175,9 +175,10 @@ private:
                          &compactphone::sip::CallManager::incomingCall,
                          this, [this](int callId) { onIncomingCall(callId); });
 
-        m_calls->setOnCallEvent(
-            [this](compactphone::sip::CallId id,
-                   compactphone::sip::CallState state) {
+        QObject::connect(m_calls.get(),
+                         &compactphone::sip::CallManager::callEvent,
+                         this, [this](compactphone::sip::CallId id,
+                                      compactphone::sip::CallState state) {
                 QMetaObject::invokeMethod(this, [this, id, state] {
                     onCallEvent(id, state);
                 }, Qt::QueuedConnection);

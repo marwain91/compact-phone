@@ -84,7 +84,7 @@ TEST_F(ConferenceTest, MergesTwoEchoLegsIntoBridge)
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     auto &cm = smp.calls;
-    cm.setOnCallEvent([&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
+    QObject::connect(&cm, &compactphone::sip::CallManager::callEvent, [&](compactphone::sip::CallId id, compactphone::sip::CallState s) {
         std::lock_guard l(mtx); observed[id] = s;
     });
 

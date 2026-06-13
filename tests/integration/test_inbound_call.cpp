@@ -94,7 +94,7 @@ TEST_F(InboundCallTest, ReceivesAndAcceptsCallFromSecondAccount)
     ScopedAccountCallbacks guard(am);
     QObject::connect(&cm, &compactphone::sip::CallManager::incomingCall,
                      [&incomingCallId](int id) { incomingCallId.store(id); });
-    cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
+    QObject::connect(&cm, &compactphone::sip::CallManager::callStateChanged, [&](compactphone::sip::CallState s) {
         observed.store(s);
     });
 

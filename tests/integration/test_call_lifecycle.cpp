@@ -49,9 +49,9 @@ protected:
 
 TEST_F(CallLifecycleTest, MakeAndHangupTenTimes_CountReturnsToZero)
 {
-    // One atomic for all ten cycles (reset per iteration) — re-declaring it
-    // inside the loop would leave the previous iteration's slot dangling in
-    // the callback until the next setOnCallStateChanged.
+    // One atomic for all ten cycles (reset per iteration) — declared before
+    // the manager so the address captured by the connected callStateChanged
+    // slot outlives it; re-declaring inside the loop would dangle.
     std::atomic<compactphone::sip::CallState> observed{
         compactphone::sip::CallState::Idle};
 
@@ -68,7 +68,7 @@ TEST_F(CallLifecycleTest, MakeAndHangupTenTimes_CountReturnsToZero)
         am, {accId}, compactphone::sip::RegistrationState::Registered, 10s));
 
     auto &cm = smp.calls;
-    cm.setOnCallStateChanged([&](compactphone::sip::CallState s) {
+    QObject::connect(&cm, &compactphone::sip::CallManager::callStateChanged, [&](compactphone::sip::CallState s) {
         observed.store(s);
     });
     for (int i = 0; i < 10; ++i) {
