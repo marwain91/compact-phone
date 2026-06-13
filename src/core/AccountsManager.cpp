@@ -2,7 +2,7 @@
 #include "persistence/Database.h"
 #include "persistence/SqliteUtil.h"
 #include "platform/Keychain.h"
-#include "sipbackend/pjsip/PjsipBackend.h"
+#include "sipbackend/ISipBackend.h"
 
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
@@ -711,20 +711,6 @@ AccountId AccountsManager::accountIdForBackend(
         if (kv.second == backendId) return kv.first;
     }
     return kInvalidAccountId;
-}
-
-// ---------------------------------------------------------------------------
-// Presence bridge — pj::Account access for LinesManager (BLF). Removed in
-// phase 5 when presence moves behind ISipBackend.
-// ---------------------------------------------------------------------------
-
-pj::Account *AccountsManager::pjAccountFor(AccountId id)
-{
-    auto *pjsip = dynamic_cast<sipbackend::PjsipBackend *>(m_backend);
-    if (!pjsip) return nullptr;   // non-PJSIP backend (fake / future adapters)
-    const sipbackend::AccountId backendId = backendIdFor(id);
-    if (backendId == sipbackend::kInvalidAccountId) return nullptr;
-    return pjsip->pjAccountFor(backendId);
 }
 
 // ---------------------------------------------------------------------------

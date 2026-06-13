@@ -106,7 +106,8 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     m_messagesModel = std::make_unique<models::MessagesModel>(m_messagesMgr.get(), this);
     m_conversationsModel = std::make_unique<models::ConversationsModel>(m_messagesMgr.get(), this);
 
-    m_linesMgr = std::make_unique<sip::LinesManager>(m_db.get(), m_accounts.get(), this);
+    m_linesMgr = std::make_unique<sip::LinesManager>(
+        m_db.get(), m_accounts.get(), m_backend.get(), this);
     m_linesModel = std::make_unique<models::LinesModel>(m_linesMgr.get(), this);
 
     m_settings = std::make_unique<sip::SettingsManager>(m_db.get());

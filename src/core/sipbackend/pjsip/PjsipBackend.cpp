@@ -114,6 +114,44 @@ public:
 };
 
 // ---------------------------------------------------------------------------
+// PjsipBuddy — pj::Buddy subclass (the relocated LinesManager::BuddyImpl)
+//
+// Threading: onBuddyState fires on the PJSUA worker thread; it maps the pj
+// presence status to a PresenceState and posts onPresence via m_events
+// (thread-safe). watch()/unwatch() create/destroy buddies on the main thread.
+// ---------------------------------------------------------------------------
+
+class PjsipBackend::PjsipBuddy : public pj::Buddy {
+public:
+    PjsipBackend *owner = nullptr;
+    WatchId watchId = kInvalidWatchId;
+
+    void onBuddyState() override
+    {
+        if (!owner) return;
+        try {
+            const auto info = getInfo();
+            PresenceState s = PresenceState::Unknown;
+            if (info.subState == PJSIP_EVSUB_STATE_TERMINATED) {
+                s = PresenceState::Offline;
+            } else if (info.presStatus.status == PJSUA_BUDDY_STATUS_ONLINE) {
+                // PJSIP has no native "ringing"/"on-call" status; the activity
+                // field is set when the watched party is busy.
+                s = (!info.presStatus.activity
+                     || info.presStatus.activity == PJRPID_ACTIVITY_UNKNOWN)
+                        ? PresenceState::Idle
+                        : PresenceState::Busy;
+            } else if (info.presStatus.status == PJSUA_BUDDY_STATUS_OFFLINE) {
+                s = PresenceState::Offline;
+            }
+            owner->postPresence(watchId, s);
+        } catch (const pj::Error &e) {
+            spdlog::warn("PjsipBuddy onBuddyState: {}", e.info());
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------
 // PjsipCall — pj::Call subclass (the relocated CallManager::CallImpl)
 //
 // Threading: all pj::Call callbacks run on the PJSUA worker thread (and,
@@ -281,6 +319,7 @@ PjsipBackend::~PjsipBackend()
     }
     doomed.clear();
     m_graceCalls.clear();
+    clearWatches();   // un-SUBSCRIBE + destroy buddies before their pj::Accounts
     m_accounts.clear();
     // Straggler sweep: an onIncomingCall in flight during the swap above
     // may have inserted a fresh wrapper before the accounts died.
@@ -328,6 +367,10 @@ void PjsipBackend::stop()
     }
     doomed.clear();
     m_graceCalls.clear();
+    // Presence buddies first: each pj::Buddy is attached to a pj::Account, so
+    // they must be destroyed before m_accounts. Cleared on stop so a restarted
+    // backend starts empty (contract: "stop() drops accounts, calls, watches").
+    clearWatches();
     // Accounts next: pj::Account destructors serialize against in-flight
     // callback dispatch via the PJSUA lock — after clear() returns, no
     // PJSIP thread is inside wrapIncomingCall / any post helper.
@@ -339,11 +382,6 @@ void PjsipBackend::stop()
         doomed.swap(m_calls);
     }
     doomed.clear();
-    // Presence watch bookkeeping: cleared on stop so a restarted backend
-    // starts empty (contract rule: "stop() drops all accounts, calls, and
-    // watches"). No real SIP un-SUBSCRIBE here — phase 5 handles teardown
-    // of actual pj::Buddy subscriptions.
-    m_watches.clear();
     // Invalidate the event queue so nothing queued before this fires.
     m_events.invalidate();
     m_engine->stop();
@@ -498,6 +536,14 @@ void PjsipBackend::postMwi(AccountId id, int newMessages,
     m_events.post([this, id, newMessages, oldMessages, active] {
         if (m_listener)
             m_listener->onMwi(id, newMessages, oldMessages, active);
+    });
+}
+
+void PjsipBackend::postPresence(WatchId id, PresenceState state)
+{
+    m_events.post([this, id, state] {
+        if (m_listener)
+            m_listener->onPresence(id, state);
     });
 }
 
@@ -723,6 +769,18 @@ bool PjsipBackend::removeAccount(AccountId id)
     try {
         it->second->setRegistration(false);
     } catch (...) {}
+    // Tear down any presence buddies on this account before the pj::Account
+    // dies — a buddy outliving its account would dangle.
+    for (auto wit = m_watches.begin(); wit != m_watches.end();) {
+        if (wit->second.accountId == id) {
+            if (wit->second.buddy) {
+                try { wit->second.buddy->subscribePresence(false); } catch (...) {}
+            }
+            wit = m_watches.erase(wit);
+        } else {
+            ++wit;
+        }
+    }
     m_accounts.erase(it);
     return true;
 }
@@ -752,34 +810,56 @@ bool PjsipBackend::sendMessage(AccountId id, const std::string &toUri,
 }
 
 // ---------------------------------------------------------------------------
-// Presence — bookkeeping only; SIP SUBSCRIBE/pj::Buddy land in phase 5
+// Presence — one pj::Buddy SUBSCRIBE per watch; onBuddyState -> onPresence
 // ---------------------------------------------------------------------------
 
-WatchId PjsipBackend::watch(AccountId accountId, const std::string & /*uri*/)
+WatchId PjsipBackend::watch(AccountId accountId, const std::string &uri)
 {
-    // Phase 5 will initiate a real SIP SUBSCRIBE / pj::Buddy here; for now
-    // we satisfy the contract's id-lifetime rules with pure bookkeeping:
-    //   - unknown account (not in m_accounts): return kInvalidWatchId
-    //   - known account: mint and store a WatchId, return it
-    // The uri is intentionally not stored — phase 5 stores it in pj::Buddy.
-    if (!m_engine->isRunning() || m_accounts.count(accountId) == 0)
+    const auto accIt = m_accounts.find(accountId);
+    if (!m_engine->isRunning() || accIt == m_accounts.end())
         return kInvalidWatchId;
+    // Mint and store the watch id FIRST so the id-lifetime contract holds even
+    // if buddy creation throws (e.g. an unroutable uri) — presence simply
+    // won't flow for that watch (null buddy).
     const WatchId id = m_nextWatchId++;
-    m_watches[id] = accountId;
-    spdlog::debug("PjsipBackend::watch: id={} account={} (presence phase-5 stub)",
-                  id, accountId);
+    Watch &w = m_watches[id];
+    w.accountId = accountId;
+    try {
+        auto buddy = std::make_unique<PjsipBuddy>();
+        buddy->owner = this;
+        buddy->watchId = id;
+        pj::BuddyConfig bc;
+        bc.uri = uri;
+        bc.subscribe = true;
+        buddy->create(*accIt->second, bc);
+        buddy->subscribePresence(true);
+        w.buddy = std::move(buddy);
+    } catch (const pj::Error &e) {
+        spdlog::error("PjsipBackend::watch: buddy create failed for {}: {}",
+                      uri, e.info());
+    }
     return id;
 }
 
 bool PjsipBackend::unwatch(WatchId id)
 {
-    // Phase 5 will cancel the pj::Buddy subscription here. For now just
-    // prune the bookkeeping entry; return false if already gone (contract
-    // rule: false on double-unwatch).
-    if (m_watches.erase(id) == 0)
-        return false;
-    spdlog::debug("PjsipBackend::unwatch: id={} (presence phase-5 stub)", id);
+    const auto it = m_watches.find(id);
+    if (it == m_watches.end()) return false;  // contract: false on double-unwatch
+    if (it->second.buddy) {
+        try { it->second.buddy->subscribePresence(false); } catch (...) {}
+    }
+    m_watches.erase(it);
     return true;
+}
+
+void PjsipBackend::clearWatches()
+{
+    for (auto &w : m_watches) {
+        if (w.second.buddy) {
+            try { w.second.buddy->subscribePresence(false); } catch (...) {}
+        }
+    }
+    m_watches.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -1279,17 +1359,6 @@ void PjsipBackend::releaseCall(CallId id)
     m_events.postDelayed(kGraceDestroyMs, [this, id] {
         m_graceCalls.erase(id);   // pj::Call dtor — main thread, no lock
     });
-}
-
-// ---------------------------------------------------------------------------
-// Presence bridge — pj::Account access for LinesManager (removed in phase 5)
-// ---------------------------------------------------------------------------
-
-pj::Account *PjsipBackend::pjAccountFor(AccountId id)
-{
-    const auto it = m_accounts.find(id);
-    if (it == m_accounts.end()) return nullptr;
-    return it->second.get();  // PjsipAccount IS-A pj::Account
 }
 
 } // namespace compactphone::sipbackend

@@ -12,11 +12,6 @@
 #include <unordered_map>
 #include <vector>
 
-// pj::Account is still needed by pjAccountFor(), which LinesManager uses to
-// drive presence (BLF) pj::Buddy subscriptions. Presence moves behind the
-// backend in phase 5; pjAccountFor and this forward declaration die then.
-namespace pj { class Account; }
-
 namespace compactphone::persistence { class Database; }
 namespace compactphone::platform { class IKeychain; }
 
@@ -92,6 +87,10 @@ signals:
     // onInstantMessage). Args: (account, fromUri, body).
     void instantMessageReceived(AccountId id, const std::string &fromUri,
                                 const std::string &body);
+    // Fired on the main thread when a watched line's presence state changes
+    // (from onPresence). LinesManager connects to this to drive BLF.
+    void presenceChanged(sipbackend::WatchId watchId,
+                         sipbackend::PresenceState state);
 
 public:
     // The caller (buildCoreSipGraph) must call backend->setListener(this)
@@ -167,13 +166,6 @@ public:
     // Main-thread-only.
     AccountId accountIdForBackend(sipbackend::AccountId backendId) const;
 
-    // For LinesManager presence (BLF): returns the underlying pj::Account for
-    // the given id, or nullptr if not registered or the backend is not the
-    // PJSIP adapter. Resolved via a dynamic_cast on the backend. Removed in
-    // phase 5 when presence moves behind ISipBackend. Lifetime tied to
-    // AccountsManager.
-    pj::Account *pjAccountFor(AccountId id);
-
     // Test hook: returns the keychain reference used for an account's
     // password (so tests can verify deletion).
     std::string passwordRefFor(AccountId id) const;
@@ -195,7 +187,9 @@ public:
     void onMediaState(sipbackend::CallId, bool, bool) override {}
     void onTransferStatus(sipbackend::CallId, int, bool,
                           const std::string &) override {}
-    void onPresence(sipbackend::WatchId, sipbackend::PresenceState) override {}
+    // Presence events feed LinesManager via the presenceChanged signal.
+    void onPresence(sipbackend::WatchId w, sipbackend::PresenceState s) override
+    { emit presenceChanged(w, s); }
 
 private:
     struct Entry;
@@ -214,8 +208,8 @@ private:
     // Maps domain AccountId → backend AccountId. Main-thread-only since
     // phase 3 (the PJSIP-thread incoming hook that needed a mutex is gone):
     // written by registerAccount/unregisterAccount and read by
-    // backendIdFor/accountIdForBackend/sendInstantMessage/pjAccountFor, all
-    // on the main thread.
+    // backendIdFor/accountIdForBackend/sendInstantMessage, all on the main
+    // thread.
     std::map<AccountId, sipbackend::AccountId> m_backendIds;
 
     // Main-thread-only: updated from the queued onRegState listener event.
