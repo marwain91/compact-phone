@@ -272,6 +272,8 @@ PjsipBackend::~PjsipBackend()
     // posting threads) before m_events is destroyed.
     m_recorders.clear();
     m_filePlayers.clear();
+    m_ringtonePlayer.reset();
+    m_ringtonePlaying = false;
     std::map<CallId, std::unique_ptr<PjsipCall>> doomed;
     {
         std::lock_guard<std::mutex> lk(m_callsMutex);
@@ -314,6 +316,8 @@ void PjsipBackend::stop()
 {
     m_recorders.clear();
     m_filePlayers.clear();
+    m_ringtonePlayer.reset();
+    m_ringtonePlaying = false;
     // Swap live calls out under the lock; destroy outside it (destructors
     // call into PJSIP and must not hold m_callsMutex — see the lock
     // discipline note in the header).
@@ -413,19 +417,52 @@ void PjsipBackend::refreshAudioDevices()
 }
 
 // ---------------------------------------------------------------------------
-// Phase 5 stubs — ringtone and log sink
+// Ringtone — loops a WAV to the playback device (absorbs sip::RingtonePlayer)
 // ---------------------------------------------------------------------------
 
-bool PjsipBackend::playRingtone(const std::string & /*path*/)
+bool PjsipBackend::playRingtone(const std::string &path)
 {
-    // phase 5 stub: RingtonePlayer integration not yet wired through the adapter
-    return false;
+    if (path.empty()) return false;
+    try {
+        auto &mgr = pj::Endpoint::instance().audDevManager();
+        // Already looping this exact file — idempotent.
+        if (m_ringtonePlaying && m_ringtonePath == path) return true;
+        if (m_ringtonePlaying) {
+            m_ringtonePlayer->stopTransmit(mgr.getPlaybackDevMedia());
+            m_ringtonePlaying = false;
+        }
+        // (Re)create the looping player when first starting or the path changed.
+        if (!m_ringtonePlayer || m_ringtonePath != path) {
+            m_ringtonePlayer = std::make_unique<pj::AudioMediaPlayer>();
+            m_ringtonePlayer->createPlayer(path, 0);   // 0 = loop
+            m_ringtonePath = path;
+        }
+        m_ringtonePlayer->startTransmit(mgr.getPlaybackDevMedia());
+        m_ringtonePlaying = true;
+        spdlog::info("PjsipBackend: ringtone started <- {}", path);
+        return true;
+    } catch (const pj::Error &e) {
+        spdlog::error("PjsipBackend::playRingtone: {}", e.info());
+        return false;
+    }
 }
 
 void PjsipBackend::stopRingtone()
 {
-    // phase 5 stub
+    if (!m_ringtonePlaying) return;
+    try {
+        auto &mgr = pj::Endpoint::instance().audDevManager();
+        m_ringtonePlayer->stopTransmit(mgr.getPlaybackDevMedia());
+        spdlog::info("PjsipBackend: ringtone stopped");
+    } catch (const pj::Error &e) {
+        spdlog::error("PjsipBackend::stopRingtone: {}", e.info());
+    }
+    m_ringtonePlaying = false;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5 stub — log sink
+// ---------------------------------------------------------------------------
 
 void PjsipBackend::setLogSink(std::function<void(int, const std::string &)> /*sink*/)
 {

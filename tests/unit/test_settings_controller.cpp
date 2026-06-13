@@ -119,6 +119,30 @@ TEST_F(SettingsControllerTest, AudioDevicesRouteThroughBackend)
     EXPECT_EQ(controller.playbackDeviceId(), 1);
 }
 
+TEST_F(SettingsControllerTest, RingtonePlaysAndStopsThroughBackend)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    compactphone::sipbackend::FakeSipBackend backend;
+    ASSERT_TRUE(backend.start(compactphone::sipbackend::EngineConfig{}));
+    compactphone::sip::SettingsManager settings(&db);
+    compactphone::SettingsController controller(&backend, &settings, tmp.path());
+
+    // Ringtone enabled by default; not ringing yet -> backend not playing.
+    EXPECT_TRUE(controller.ringtoneEnabled());
+    EXPECT_TRUE(backend.ringtonePath().empty());
+
+    // Ringing while enabled -> the backend plays the resolved ringtone path
+    // (policy in the controller, playback in the backend).
+    controller.setRinging(true);
+    EXPECT_FALSE(backend.ringtonePath().empty());
+    EXPECT_EQ(backend.ringtonePath(), controller.ringtonePath().toStdString());
+
+    // Disabling the ringtone while ringing stops playback through the backend.
+    controller.setRingtoneEnabled(false);
+    EXPECT_TRUE(backend.ringtonePath().empty());
+}
+
 TEST_F(SettingsControllerTest, PersistsCallPolicySettingsAndClampsTimeouts)
 {
     QTemporaryDir tmp;

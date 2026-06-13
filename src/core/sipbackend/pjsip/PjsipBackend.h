@@ -3,8 +3,8 @@
 // PJSIP/PJSUA2 implementation of ISipBackend. Scope: accounts,
 // registration, MWI, instant messages, and the full call layer
 // (PjsipCall, hold/unhold re-INVITEs, mute bridge wiring, recording,
-// file playback, transfers, the grace-destruction dance). Presence,
-// ringtone, and log-sink remain phase-5 stubs.
+// file playback, transfers, the grace-destruction dance, ringtone).
+// Presence and log-sink remain phase-5 stubs.
 //
 // Engine-level methods delegate to the borrowed SipEngine (engine
 // ownership migrates in a later phase).
@@ -53,9 +53,9 @@ public:
     bool setCaptureDevice(int id) override;
     bool setPlaybackDevice(int id) override;
     void refreshAudioDevices() override;
-    // phase 5 stub: ringtone playback is not yet implemented in the adapter
-    bool playRingtone(const std::string &path) override;   // phase 5 stub: returns false
-    void stopRingtone() override;                          // phase 5 stub: no-op
+    // Loops a WAV to the playback device (absorbs sip::RingtonePlayer).
+    bool playRingtone(const std::string &path) override;
+    void stopRingtone() override;
     void setLogSink(std::function<void(int, const std::string &)> sink) override; // phase 5 stub: no-op
 
     // --- accounts ---
@@ -191,6 +191,14 @@ private:
     // and CallManager::m_players.
     std::map<CallId, std::unique_ptr<pj::AudioMediaRecorder>> m_recorders;
     std::map<CallId, std::unique_ptr<pj::AudioMediaPlayer>> m_filePlayers;
+
+    // Device-level ringtone: loops a WAV to the playback device. Absorbs the
+    // former sip::RingtonePlayer. Main-thread-only (playRingtone/stopRingtone
+    // are main-thread commands); the player is reset in stop()/dtor before the
+    // endpoint dies, like the per-call file players above.
+    std::unique_ptr<pj::AudioMediaPlayer> m_ringtonePlayer;
+    std::string m_ringtonePath;
+    bool m_ringtonePlaying = false;
 
     // Declared LAST: EventDispatch's internal QObject is the invokeMethod
     // context — destroying it cancels undelivered lambdas and pending timers —
