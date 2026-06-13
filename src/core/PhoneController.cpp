@@ -112,7 +112,7 @@ PhoneController::PhoneController(QObject *parent) : QObject(parent)
     m_settings = std::make_unique<sip::SettingsManager>(m_db.get());
 
     m_settingsController = std::make_unique<SettingsController>(
-        m_engine.get(), m_settings.get(), dataPath, this);
+        m_backend.get(), m_settings.get(), dataPath, this);
     connect(m_settingsController.get(),
             &SettingsController::launchOnStartupFailed,
             this,

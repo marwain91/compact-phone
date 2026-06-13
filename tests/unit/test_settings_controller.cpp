@@ -3,6 +3,7 @@
 #include "core/SettingsController.h"
 #include "core/SettingsManager.h"
 #include "core/platform/Autostart_memory.h"
+#include "core/sipbackend/fake/FakeSipBackend.h"
 #include "persistence/Database.h"
 
 #include <QTemporaryDir>
@@ -82,6 +83,40 @@ TEST_F(SettingsControllerTest, MissingRingtonePathFallsBackToDefault)
     EXPECT_EQ(controller.ringtonePath(), controller.defaultRingtonePath());
     EXPECT_EQ(settings.getOr("ringtone_path", ""),
               controller.defaultRingtonePath().toStdString());
+}
+
+TEST_F(SettingsControllerTest, AudioDevicesRouteThroughBackend)
+{
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    compactphone::sipbackend::FakeSipBackend backend;
+    compactphone::sip::SettingsManager settings(&db);
+    compactphone::SettingsController controller(&backend, &settings, tmp.path());
+
+    // The fake backend exposes one input (id 0) and one output (id 1) — the
+    // first time the audio-device path is exercised in a unit test (it was
+    // dead behind a null engine before the ISipBackend reroute).
+    const auto inputs = controller.audioInputs();
+    ASSERT_EQ(inputs.size(), 1);
+    EXPECT_EQ(inputs[0].toMap().value("id").toInt(), 0);
+    EXPECT_EQ(inputs[0].toMap().value("name").toString(),
+              QStringLiteral("Fake Microphone"));
+    const auto outputs = controller.audioOutputs();
+    ASSERT_EQ(outputs.size(), 1);
+    EXPECT_EQ(outputs[0].toMap().value("id").toInt(), 1);
+
+    // A valid selection is applied through the backend and persisted.
+    controller.setCaptureDeviceId(0);
+    EXPECT_EQ(controller.captureDeviceId(), 0);
+    EXPECT_EQ(settings.getOr("capture_device_id", ""), "0");
+    controller.setPlaybackDeviceId(1);
+    EXPECT_EQ(controller.playbackDeviceId(), 1);
+    EXPECT_EQ(settings.getOr("playback_device_id", ""), "1");
+
+    // An invalid selection (an output-only device offered as capture) is
+    // rejected by the backend and leaves the current selection untouched.
+    controller.setPlaybackDeviceId(0);
+    EXPECT_EQ(controller.playbackDeviceId(), 1);
 }
 
 TEST_F(SettingsControllerTest, PersistsCallPolicySettingsAndClampsTimeouts)
