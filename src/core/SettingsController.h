@@ -9,8 +9,9 @@
 namespace compactphone::sip {
 class RingtonePlayer;
 class SettingsManager;
-class SipEngine;
 }
+
+namespace compactphone::sipbackend { class ISipBackend; }
 
 namespace compactphone::platform {
 class IAutostart;
@@ -51,14 +52,14 @@ class SettingsController : public QObject {
     Q_PROPERTY(bool autoUpdateCheckEnabled READ autoUpdateCheckEnabled WRITE setAutoUpdateCheckEnabled NOTIFY autoUpdateCheckEnabledChanged)
     Q_PROPERTY(QString skippedUpdateVersion READ skippedUpdateVersion NOTIFY skippedUpdateVersionChanged)
 public:
-    explicit SettingsController(sip::SipEngine *engine,
+    explicit SettingsController(sipbackend::ISipBackend *backend,
                                 sip::SettingsManager *settings,
                                 QString appDataPath,
                                 QObject *parent = nullptr);
     // Test seam: inject a specific autostart backend. Production uses the
     // 4-arg overload above, which selects the platform backend itself — so
     // call sites never need IAutostart to be a complete type.
-    SettingsController(sip::SipEngine *engine,
+    SettingsController(sipbackend::ISipBackend *backend,
                        sip::SettingsManager *settings,
                        QString appDataPath,
                        std::unique_ptr<platform::IAutostart> autostart,
@@ -196,7 +197,7 @@ signals:
     void skippedUpdateVersionChanged();
 
 private:
-    sip::SipEngine *m_engine = nullptr;
+    sipbackend::ISipBackend *m_backend = nullptr;
     sip::SettingsManager *m_settings = nullptr;
     QString m_appDataPath;
     QString m_logLevel = QStringLiteral("info");

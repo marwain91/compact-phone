@@ -102,7 +102,7 @@ protected:
         historyModel = std::make_unique<compactphone::models::HistoryModel>(hm.get());
         sm = std::make_unique<compactphone::sip::SettingsManager>(&db);
         sc = std::make_unique<compactphone::SettingsController>(
-            &engine, sm.get(), QStringLiteral("/tmp"));
+            backend.get(), sm.get(), QStringLiteral("/tmp"));
         cc = std::make_unique<compactphone::CallsController>(
             am.get(), cm.get(), callsModel.get(),
             hm.get(), historyModel.get(),

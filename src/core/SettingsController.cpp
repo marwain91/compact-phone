@@ -3,7 +3,7 @@
 #include "CrashReporting.h"
 #include "RingtonePlayer.h"
 #include "SettingsManager.h"
-#include "SipEngine.h"
+#include "sipbackend/ISipBackend.h"
 #include "platform/Autostart.h"
 #include "platform/Autostart_factory.h"
 
@@ -32,22 +32,22 @@ void applyLogLevel(const QString &lvl)
 
 } // namespace
 
-SettingsController::SettingsController(sip::SipEngine *engine,
+SettingsController::SettingsController(sipbackend::ISipBackend *backend,
                                        sip::SettingsManager *settings,
                                        QString appDataPath,
                                        QObject *parent)
-    : SettingsController(engine, settings, std::move(appDataPath),
+    : SettingsController(backend, settings, std::move(appDataPath),
                          platform::makeAutostart(), parent)
 {
 }
 
-SettingsController::SettingsController(sip::SipEngine *engine,
+SettingsController::SettingsController(sipbackend::ISipBackend *backend,
                                        sip::SettingsManager *settings,
                                        QString appDataPath,
                                        std::unique_ptr<platform::IAutostart> autostart,
                                        QObject *parent)
     : QObject(parent),
-      m_engine(engine),
+      m_backend(backend),
       m_settings(settings),
       m_appDataPath(std::move(appDataPath)),
       m_autostart(std::move(autostart))
@@ -96,15 +96,15 @@ SettingsController::SettingsController(sip::SipEngine *engine,
     }
     m_ringtone = std::make_unique<sip::RingtonePlayer>(storedRing);
 
-    if (m_engine && m_settings) {
+    if (m_backend && m_settings) {
         const auto capStr = m_settings->getOr("capture_device_id", "");
         if (!capStr.empty()) {
-            try { m_engine->setCaptureDevice(std::stoi(capStr)); }
+            try { m_backend->setCaptureDevice(std::stoi(capStr)); }
             catch (...) { spdlog::warn("SettingsController: bad stored capture_device_id"); }
         }
         const auto pbStr = m_settings->getOr("playback_device_id", "");
         if (!pbStr.empty()) {
-            try { m_engine->setPlaybackDevice(std::stoi(pbStr)); }
+            try { m_backend->setPlaybackDevice(std::stoi(pbStr)); }
             catch (...) { spdlog::warn("SettingsController: bad stored playback_device_id"); }
         }
     }
@@ -342,8 +342,8 @@ void SettingsController::setLastUpdateCheckMs(qint64 ms)
 QVariantList SettingsController::audioInputs() const
 {
     QVariantList out;
-    if (!m_engine) return out;
-    for (const auto &d : m_engine->audioDevices()) {
+    if (!m_backend) return out;
+    for (const auto &d : m_backend->audioDevices()) {
         if (d.inputCount <= 0) continue;
         QVariantMap m;
         m["id"] = d.id;
@@ -356,8 +356,8 @@ QVariantList SettingsController::audioInputs() const
 QVariantList SettingsController::audioOutputs() const
 {
     QVariantList out;
-    if (!m_engine) return out;
-    for (const auto &d : m_engine->audioDevices()) {
+    if (!m_backend) return out;
+    for (const auto &d : m_backend->audioDevices()) {
         if (d.outputCount <= 0) continue;
         QVariantMap m;
         m["id"] = d.id;
@@ -369,31 +369,31 @@ QVariantList SettingsController::audioOutputs() const
 
 int SettingsController::captureDeviceId() const
 {
-    return m_engine ? m_engine->captureDevice() : -1;
+    return m_backend ? m_backend->captureDevice() : -1;
 }
 
 int SettingsController::playbackDeviceId() const
 {
-    return m_engine ? m_engine->playbackDevice() : -1;
+    return m_backend ? m_backend->playbackDevice() : -1;
 }
 
 void SettingsController::setCaptureDeviceId(int id)
 {
-    if (!m_engine || !m_engine->setCaptureDevice(id)) return;
+    if (!m_backend || !m_backend->setCaptureDevice(id)) return;
     if (m_settings) m_settings->set("capture_device_id", std::to_string(id));
     emit captureDeviceIdChanged();
 }
 
 void SettingsController::setPlaybackDeviceId(int id)
 {
-    if (!m_engine || !m_engine->setPlaybackDevice(id)) return;
+    if (!m_backend || !m_backend->setPlaybackDevice(id)) return;
     if (m_settings) m_settings->set("playback_device_id", std::to_string(id));
     emit playbackDeviceIdChanged();
 }
 
 void SettingsController::refreshAudioDevices()
 {
-    if (m_engine) m_engine->refreshAudioDevices();
+    if (m_backend) m_backend->refreshAudioDevices();
     emit audioDevicesChanged();
     emit captureDeviceIdChanged();
     emit playbackDeviceIdChanged();
