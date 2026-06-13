@@ -125,6 +125,45 @@ Do not switch back to `gitleaks/gitleaks-action@v2`; it still declares
 doesn't scan twice. It's a cheap check, so it (unlike the release
 workflows) is allowed on PR/push and uses `cancel-in-progress: true`.
 
+### PJSIP containment gate — all `pj::` stays behind `ISipBackend`
+
+The SIP-stack abstraction's load-bearing invariant: every PJSIP/PJSUA2
+symbol and every `<pjsua2>`/`<pj*>` include lives in
+`src/core/sipbackend/pjsip/` (the adapter) or `cmake/FindPJSIP.cmake`.
+Nothing above the `ISipBackend` boundary may name `pj::`. Phases 1–5 of the
+abstraction cleared the tree; `.github/workflows/pjsip-containment.yml`
+enforces it going forward so a change can't quietly reach around the
+interface to the SIP stack (which would also block the eventual baresip
+swap).
+
+The gate is `tools/ci/check-pjsip-containment.sh` — a small **lexer-lite**
+(run it locally with `make check-containment`). It is comment- and
+string-aware on purpose: the codebase legitimately *mentions* `pj::` in
+comments (`// pj::Account destructor serializes …`), so an awk state machine
+strips `//` and `/* */` comments AND blanks `"…"`/`'…'` literal contents
+(preserving line numbers) before matching. Blanking the literals matters:
+otherwise a comment-marker sitting *inside* a string (`"sip://x"`,
+`"a /* b"`) would truncate the line / open a phantom block comment and hide a
+real `pjsua_*` call after it. Only real code usage (`#include <pjsua2…>`,
+`pj::`, `pjsua_`, `PJ[A-Z0-9]*_` macros incl. `PJSUA2_*`, `using namespace
+pj`, …) trips it. Our CamelCase adapter types (`PjsipBackend`, `PjsipCall`,
+`PjsipBuddy`) and namespaces (`sip::`, `sipbackend::`) deliberately do NOT
+match the lowercase-`pj_`/all-caps-`PJ_` patterns, and the include regex
+matches only `<…>` system headers (PJSIP is always angle-bracket-included),
+so a non-adapter file `#include`-ing the adapter's relocated
+`"core/sipbackend/pjsip/SipEngine.h"` does not trip (it isn't a pj header).
+Don't hand-edit the regexes without re-running the red-proof in
+`tools/ci/check-pjsip-containment.sh`'s own history (it's been bypass-tested:
+string-smuggled symbols, `using namespace pj`, `PJSUA2_*`). Like the secret
+scan it's cheap, runs on PR + `push: [main]`, and uses
+`cancel-in-progress: true`.
+
+Note (deferred, not a gate violation): `PhoneController`/`headless` still
+construct and own `sip::SipEngine` (now an adapter-internal header) and pass
+it to `PjsipBackend` — they don't *use* `pj::`, so the gate is green, but the
+fully clean end state is the backend owning the engine. That migration (and
+making `setCaTrust`/`setLogSink` functional through it) is a follow-up.
+
 ### gitleaks `generic-api-key` fires on GitHub Actions cache keys
 
 A workflow line like `key: pjsip-macos-2.17-v1` (the `key:` field of an

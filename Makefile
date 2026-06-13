@@ -72,6 +72,10 @@ test-unit: build ## run unit tests only
 test-integration: build ## run integration tests only (against Asterisk)
 	$(DEV) bash -c "cd /workspace/build/linux && ctest --output-on-failure -L integration"
 
+.PHONY: check-containment
+check-containment: ## fail if pj::/pjsua2 is used outside the PJSIP adapter
+	bash tools/ci/check-pjsip-containment.sh
+
 # Runs the whole integration suite under TSan. Tests observing PJSIP-thread
 # callbacks must follow the patterns in tests/integration/test_support.h —
 # never a condition_variable whose mutex the callback also locks (pjsua can
