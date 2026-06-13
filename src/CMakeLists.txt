@@ -32,10 +32,10 @@ add_library(compactphone_core STATIC
     core/SettingsController.h
     core/SettingsController.cpp
     core/NoticeDuration.h
-    core/SipLog.h
-    core/SipLog.cpp
-    core/SipEngine.h
-    core/SipEngine.cpp
+    core/sipbackend/pjsip/SipLog.h
+    core/sipbackend/pjsip/SipLog.cpp
+    core/sipbackend/pjsip/SipEngine.h
+    core/sipbackend/pjsip/SipEngine.cpp
     core/SipUri.h
     core/SipUri.cpp
     core/sipbackend/Types.h

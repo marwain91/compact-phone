@@ -2,7 +2,7 @@
 #include "MwiSummary.h"
 #include "RemoteInfo.h"
 
-#include "core/SipEngine.h"
+#include "core/sipbackend/pjsip/SipEngine.h"
 
 #include <pjsua-lib/pjsua.h>
 #include <pjsua2.hpp>

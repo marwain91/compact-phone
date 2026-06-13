@@ -2,7 +2,7 @@
 
 #include "core/Account.h"
 #include "core/AccountsManager.h"
-#include "core/SipEngine.h"
+#include "core/sipbackend/pjsip/SipEngine.h"
 #include "core/platform/Keychain_memory.h"
 #include "persistence/Database.h"
 
