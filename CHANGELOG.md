@@ -6,6 +6,23 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-06-14
+
+### Changed
+- Rejected incoming calls now return "486 Busy Here" instead of "603 Decline",
+  which callers and PBXs treat as a standard busy response.
+
+### Fixed
+- The system tray icon no longer renders distorted.
+- Mute now stays in effect across media re-activation (for example after
+  hold/unhold) instead of being dropped when the audio stream restarts.
+- A failed call transfer no longer hangs up the original call — it stays
+  connected, with cleanup driven by the final transfer NOTIFY.
+- Improved call stability: fixed races and occasional crashes on the SIP
+  worker thread during call setup and teardown.
+- The "update available" check no longer mishandles versions with pre-release
+  suffixes when deciding whether a newer build is available.
+
 ## [0.1.9] - 2026-06-09
 
 ### Fixed
