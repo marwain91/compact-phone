@@ -18,9 +18,9 @@ standard config path:
 
 | Platform | Path |
 |---|---|
-| macOS   | `~/Library/Application Support/Compact Phone/provisioning.json` |
-| Windows | `%APPDATA%\Compact Phone\provisioning.json` |
-| Linux   | `~/.config/Compact Phone/provisioning.json` |
+| macOS   | `~/Library/Application Support/Havliczech/Compact Phone/provisioning.json` |
+| Windows | `%APPDATA%\Havliczech\Compact Phone\provisioning.json` |
+| Linux   | `~/.local/share/Havliczech/Compact Phone/provisioning.json` |
 
 Or pointed at explicitly via the `--provisioning` CLI flag.
 
@@ -30,7 +30,7 @@ Example file:
 {
   "accounts": [
     {
-      "username": "1001",
+      "user": "1001",
       "password": "secret",
       "server": "sip.example.com:5060",
       "transport": "tls",
@@ -81,11 +81,11 @@ reference implementation.
 For deploying to many machines (managed-device fleets):
 
 - **macOS** — drop `provisioning.json` into
-  `~/Library/Application Support/Compact Phone/` via your MDM. JAMF /
+  `~/Library/Application Support/Havliczech/Compact Phone/` via your MDM. JAMF /
   Kandji have file-deploy primitives that work here.
-- **Windows** — same, into `%APPDATA%\Compact Phone\`. Group Policy
+- **Windows** — same, into `%APPDATA%\Havliczech\Compact Phone\`. Group Policy
   Preferences can place files per-user.
-- **Linux** — same, into `~/.config/Compact Phone/`. Configuration
+- **Linux** — same, into `~/.local/share/Havliczech/Compact Phone/`. Configuration
   management (Ansible, Salt, Puppet) handles this trivially.
 
 Per-user credentials should come from your identity provider, not be
