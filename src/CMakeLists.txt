@@ -309,7 +309,7 @@ qt_add_qml_module(compactphone
         ui/qml/components/AppSwitch.qml
         ui/qml/components/BrandMark.qml
         ui/qml/components/DaktelaMark.qml
-        ui/qml/components/ThemeCard.qml
+        ui/qml/components/ThemeSelect.qml
     SOURCES
         core/PhoneController.h
         core/PhoneController.cpp

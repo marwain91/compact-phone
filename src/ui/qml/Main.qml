@@ -212,7 +212,7 @@ ApplicationWindow {
                     }
                     NavItem {
                         Layout.alignment: Qt.AlignHCenter
-                        iconPath: Icons.server
+                        iconPath: Icons.circleUser
                         label: qsTr("Accounts")
                         active: stack.currentIndex === 5
                         onClicked: stack.currentIndex = 5
