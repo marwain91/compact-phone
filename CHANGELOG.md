@@ -6,6 +6,19 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-06-26
+
+### Changed
+- The Accounts sidebar tab now uses a clearer account icon.
+- The theme picker is now a compact select box with colour swatches, so every
+  theme fits the window instead of overflowing and clipping the last card.
+
+### Fixed
+- Pressing Enter in the dialer no longer triggers an unrelated button (such as
+  "Check for updates") when the Call button is disabled. The number field now
+  reliably holds keyboard focus, so Enter dials when possible and does nothing
+  otherwise.
+
 ## [0.1.10] - 2026-06-14
 
 ### Changed

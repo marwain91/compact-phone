@@ -93,30 +93,33 @@ TEST(DaktelaBrandingLayout, DaktelaMarkUsesBundledBrandingAssets)
     EXPECT_TRUE(qml.contains(QStringLiteral("Image")));
 }
 
-TEST(DaktelaBrandingLayout, ThemeSelectorUsesReadableRadioChips)
+TEST(DaktelaBrandingLayout, ThemeSelectorIsReadableAndAccessible)
 {
-    const auto cardQml = readQml(QStringLiteral("/src/ui/qml/components/ThemeCard.qml"));
-    ASSERT_FALSE(cardQml.isEmpty());
+    // The theme picker is a select box (ThemeSelect) instead of a wrapping row
+    // of chips, so all themes fit the 380px window without clipping. It must
+    // still be readable (body-size label, real palette swatch) and accessible
+    // (each row exposes a name for screen readers).
+    const auto selectQml = readQml(QStringLiteral("/src/ui/qml/components/ThemeSelect.qml"));
+    ASSERT_FALSE(selectQml.isEmpty());
 
-    EXPECT_GE(firstCapturedInt(cardQml, QStringLiteral("implicitHeight:\\s*(\\d+)")), 34);
+    EXPECT_GE(firstCapturedInt(selectQml, QStringLiteral("implicitHeight:\\s*(\\d+)")), 34);
 
     const auto swatch = firstMatch(
-        cardQml,
+        selectQml,
         QStringLiteral("width:\\s*(\\d+)\\s*;\\s*height:\\s*(\\d+)\\s*;\\s*radius:\\s*(\\d+)"));
     ASSERT_TRUE(swatch.hasMatch());
     EXPECT_GE(swatch.captured(1).toInt(), 28);
     EXPECT_GE(swatch.captured(2).toInt(), 18);
     EXPECT_GE(swatch.captured(3).toInt(), 5);
 
-    EXPECT_TRUE(cardQml.contains(QStringLiteral("font.pixelSize: Theme.fbody")));
-    EXPECT_FALSE(cardQml.contains(QStringLiteral("font.pixelSize: Theme.fsm")));
-    EXPECT_TRUE(cardQml.contains(QStringLiteral("Accessible.role: Accessible.RadioButton")));
-    EXPECT_TRUE(cardQml.contains(QStringLiteral("Accessible.checked: root.isCurrent")));
+    EXPECT_TRUE(selectQml.contains(QStringLiteral("font.pixelSize: Theme.fbody")));
+    EXPECT_FALSE(selectQml.contains(QStringLiteral("font.pixelSize: Theme.fsm")));
+    // Each theme row carries an accessible name (the ItemDelegate's text).
+    EXPECT_TRUE(selectQml.contains(QStringLiteral("text: modelData.name")));
 
     const auto settingsQml = readQml(QStringLiteral("/src/ui/qml/GeneralSettings.qml"));
     ASSERT_FALSE(settingsQml.isEmpty());
-    EXPECT_TRUE(settingsQml.contains(QRegularExpression(
-        QStringLiteral("Flow\\s*\\{\\s*Layout\\.fillWidth:\\s*true\\s*spacing:\\s*Theme\\.s10"))));
+    EXPECT_TRUE(settingsQml.contains(QStringLiteral("ThemeSelect {")));
 }
 
 TEST(DaktelaBrandingLayout, TrayIconUsesTheBrandPhoneGlyph)

@@ -29,18 +29,8 @@ ScrollView {
                     font.weight: Font.Bold
                     font.letterSpacing: 1.2
                 }
-                Flow {
+                ThemeSelect {
                     Layout.fillWidth: true
-                    spacing: Theme.s10
-                    Repeater {
-                        model: Theme.themes
-                        delegate: ThemeCard {
-                            themeId: modelData.id
-                            name: modelData.name
-                            isCurrent: PhoneController.settings.themeId === modelData.id
-                            onClicked: PhoneController.settings.themeId = modelData.id
-                        }
-                    }
                 }
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }

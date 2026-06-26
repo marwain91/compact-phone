@@ -26,6 +26,11 @@ ColumnLayout {
     function appendKey(k) {
         dialTarget = dialTarget + k
         syncDialField()
+        // Tapping the on-screen pad is a MouseArea click, which does not move
+        // keyboard focus. Pull focus into the number field so a subsequent
+        // Enter is handled here (dial) instead of activating whatever control
+        // was last keyboard-focused on another pane. See idleView below.
+        dialField.forceActiveFocus()
     }
 
     function clearDialTarget() {
@@ -166,6 +171,16 @@ ColumnLayout {
         visible: callsRep.count === 0
         Layout.fillWidth: true
         Layout.fillHeight: true
+
+        // The dialer owns no focusable chrome — every key/nav/favorite is a
+        // MouseArea — so without this it never claims keyboard focus, and Enter
+        // gets delivered to whatever was last focused elsewhere (e.g. the
+        // "Check for updates" button on the Settings pane), firing it instead
+        // of dialing. Claim focus for the number field whenever the dialer
+        // becomes the visible pane or a call ends and we return to idle.
+        // visibleChanged tracks *effective* visibility, so it fires on
+        // StackLayout page switches and on the initial window show.
+        onVisibleChanged: if (visible) dialField.forceActiveFocus()
 
         ColumnLayout {
             id: dialerContent
