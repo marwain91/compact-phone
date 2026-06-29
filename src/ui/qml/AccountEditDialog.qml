@@ -18,6 +18,10 @@ Window {
     title: editingAccountId === -1 ? qsTr("Add SIP Account") : qsTr("Edit Account")
 
     property int editingAccountId: -1
+    // Set by the save handler (via reportSaveError) when persistence fails so
+    // _accept keeps the dialog open and the banner explains what went wrong,
+    // instead of closing on a save that silently stored nothing.
+    property string _saveError: ""
 
     signal accountSaved(var params)
     signal accountEdited(int accountId, var params)
@@ -453,6 +457,29 @@ Window {
             }
         }
 
+        Rectangle {
+            Layout.fillWidth: true
+            visible: dialog._saveError.length > 0
+            Layout.preferredHeight: visible ? errorLabel.implicitHeight + Theme.s10 * 2 : 0
+            radius: Theme.r8
+            color: Theme.dangerSoft
+            border.color: Theme.danger
+            border.width: 1
+            Text {
+                id: errorLabel
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Theme.s12
+                anchors.rightMargin: Theme.s12
+                text: dialog._saveError
+                color: Theme.danger
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fsm
+                wrapMode: Text.WordWrap
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.s8
@@ -500,12 +527,21 @@ Window {
         return p
     }
 
+    // Called synchronously from the save handler when persistence fails. The
+    // signal emission in _accept is a direct connection, so by the time the
+    // emit returns this has already run and _saveError is set.
+    function reportSaveError(message) {
+        dialog._saveError = message
+    }
+
     function _accept() {
+        dialog._saveError = ""
         if (editingAccountId === -1) {
             dialog.accountSaved(_params())
         } else {
             dialog.accountEdited(editingAccountId, _params())
         }
+        if (dialog._saveError.length > 0) return
         dialog.close()
     }
 
@@ -536,6 +572,7 @@ Window {
     }
 
     function _reset() {
+        dialog._saveError = ""
         tabs.currentIndex = 0
         labelField.text = ""
         displayNameField.text = ""

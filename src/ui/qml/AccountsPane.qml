@@ -321,8 +321,17 @@ ColumnLayout {
 
     AccountEditDialog {
         id: editDialog
-        onAccountSaved: (params) => PhoneController.addAccount(params)
-        onAccountEdited: (accountId, params) => PhoneController.updateAccount(accountId, params)
+        onAccountSaved: (params) => {
+            // addAccount returns the new id, or -1 (kInvalidAccountId) when the
+            // keychain or database write fails. Surface that instead of letting
+            // the dialog close on an account that was never stored.
+            if (PhoneController.addAccount(params) <= 0)
+                editDialog.reportSaveError(qsTr("Couldn't save the account. The password may have been rejected by the system keychain. See Settings → Advanced → View log… for details."))
+        }
+        onAccountEdited: (accountId, params) => {
+            if (!PhoneController.updateAccount(accountId, params))
+                editDialog.reportSaveError(qsTr("Couldn't save your changes. See Settings → Advanced → View log… for details."))
+        }
     }
 
     ProviderSignInDialog {

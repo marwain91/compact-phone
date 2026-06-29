@@ -700,6 +700,40 @@ Gotchas, in the order they will bite you:
   barrier in `SipManagerPair`/`PhoneController` stops any late emit. New
   integration tests must follow these patterns or the gate halts on them.
 
+### Schema changes — NEVER edit the baseline; always append a migration
+
+`src/persistence/Database.cpp` versions the schema: `kBaselineSchema`
+(version 1, for fresh installs) plus an ordered `kMigrations[]` array whose
+length is the latest version, tracked in the `schema_version` table.
+
+The trap (it shipped, in #67): the `provider` column was added to
+`kBaselineSchema` **without** appending a migration. Fresh installs were
+fine, but every database created by an earlier release stayed at
+`schema_version=1` with no `provider` column, so `loadFromDatabase` and
+`insertRow` (which `SELECT`/`INSERT` `provider`) failed with
+`no such column: provider`. Symptom for the user: **clicking Add does
+nothing — the account silently isn't saved** (`AccountsManager::add` bailed
+on the failed insert and returned `kInvalidAccountId`), and the Accounts
+pane shows its empty state ("Add your first SIP account", server icon).
+Fixed by migration v2 (`addProviderColumn`), an `ALTER TABLE ... ADD COLUMN`
+guarded by a `columnExists` `PRAGMA table_info` check so it's a safe no-op
+on fresh installs that already carry the column at version 1.
+
+Rules going forward:
+- To add/change a column, **append a `kMigrations[]` entry** (`ALTER TABLE`),
+  don't only edit the baseline. Editing the baseline upgrades nothing.
+- A column-adding migration must be **idempotent** — guard the `ALTER` with
+  `columnExists`, because post-#67 baselines already create the column at
+  version 1, so an unconditional `ALTER` would hit "duplicate column".
+- Migration tests must cover the **upgrade-from-prior-version** path, not just
+  fresh `openInMemory()` installs — see
+  `Database.UpgradesPreProviderDatabaseByAddingColumn` in
+  `tests/unit/test_database.cpp` (build an old-shape table at version 1, run
+  migrations, assert the column appears and existing rows survive).
+- Persistence failures must surface to the user, not vanish: the Add dialog
+  now checks `addAccount`'s return (`<= 0` = failure) and keeps itself open
+  with an error banner instead of closing on a save that stored nothing.
+
 ## Branch + PR conventions
 
 - **`main` is protected** — direct pushes blocked, force-push blocked,
