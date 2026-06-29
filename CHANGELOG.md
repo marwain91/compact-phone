@@ -6,6 +6,17 @@ project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-06-29
+
+### Fixed
+- Adding a SIP account no longer silently fails on installations upgraded from
+  an earlier version. Databases created before the `provider` column was
+  introduced were missing it, so saving an account failed with "no such column:
+  provider" and the account simply never appeared. A schema migration now adds
+  the column to existing databases (existing accounts are preserved).
+- The account editor now keeps itself open and shows an error if a save can't be
+  stored, instead of closing as though it succeeded.
+
 ## [0.1.11] - 2026-06-26
 
 ### Changed

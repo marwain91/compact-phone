@@ -3,15 +3,21 @@
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
 
+#include <cstring>
+
 namespace compactphone::persistence {
 
 namespace {
 
-// Single baseline schema. The app has not shipped, so there is no installed
-// database to migrate from — everything lives in version 1. When the app is
-// released and the schema needs to change, add a new entry to kMigrations
-// below; the array length is the latest version, so there is no separate
-// counter to drift out of sync.
+// Baseline schema for a fresh install (version 1). Existing databases are
+// brought forward by the entries in kMigrations below; the array length is the
+// latest version, so there is no separate counter to drift out of sync.
+//
+// Caution learned the hard way: do NOT add a column to this baseline without
+// also appending a migration that adds it to already-installed databases. The
+// `provider` column was added here in #67 with no migration, so every database
+// created by an earlier release stayed at version 1 without the column and hit
+// "no such column: provider" on load and on add. Migration v2 repairs those.
 constexpr const char *kBaselineSchema = R"SQL(
 CREATE TABLE accounts (
     id INTEGER PRIMARY KEY,
@@ -111,11 +117,46 @@ bool execSql(sqlite3 *db, const char *sql)
     return true;
 }
 
+// Whether `table` already has a column named `column`. Used to make a column-
+// adding migration idempotent: a fresh install whose baseline already declares
+// the column (recorded at version 1) must skip the ALTER rather than fail with
+// "duplicate column name".
+bool columnExists(sqlite3 *db, const char *table, const char *column)
+{
+    const std::string sql = std::string("PRAGMA table_info(") + table + ")";
+    sqlite3_stmt *stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    bool found = false;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const auto *name =
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+        if (name && std::strcmp(name, column) == 0) {
+            found = true;
+            break;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return found;
+}
+
+// v2: add the `provider` column to databases that predate it (see the note on
+// kBaselineSchema). Guarded by columnExists so it is a no-op on fresh installs
+// whose baseline already created the column at version 1.
+bool addProviderColumn(sqlite3 *db)
+{
+    if (columnExists(db, "accounts", "provider")) return true;
+    return execSql(
+        db, "ALTER TABLE accounts ADD COLUMN provider TEXT NOT NULL DEFAULT ''");
+}
+
 // One entry per schema version, applied in order: index i upgrades the
 // database to version i + 1. The array length defines the latest version.
 using MigrationFn = bool (*)(sqlite3 *db);
 const MigrationFn kMigrations[] = {
     [](sqlite3 *db) { return execSql(db, kBaselineSchema); }, // v1
+    [](sqlite3 *db) { return addProviderColumn(db); },        // v2
 };
 constexpr int kLatestVersion =
     static_cast<int>(sizeof(kMigrations) / sizeof(kMigrations[0]));

@@ -3,6 +3,7 @@
 #include "core/AccountsController.h"
 #include "core/AccountsManager.h"
 #include "core/sipbackend/fake/FakeSipBackend.h"
+#include "core/platform/Keychain.h"
 #include "core/platform/Keychain_memory.h"
 #include "models/AccountsModel.h"
 #include "persistence/Database.h"
@@ -14,6 +15,16 @@ protected:
     compactphone::platform::MemoryKeychain kc;
 
     void SetUp() override { ASSERT_TRUE(db.openInMemory()); }
+};
+
+// A keychain whose writes always fail, modelling a system keychain that
+// rejects the password (e.g. a cancelled Touch ID prompt or a missing
+// entitlement on macOS). Used to prove addAccount surfaces the failure.
+class FailingKeychain : public compactphone::platform::IKeychain {
+public:
+    std::optional<std::string> get(const std::string &) override { return std::nullopt; }
+    bool set(const std::string &, const std::string &) override { return false; }
+    bool erase(const std::string &) override { return true; }
 };
 
 TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
@@ -78,6 +89,29 @@ TEST_F(AccountsControllerTest, AddAccountMapsEveryEditableField)
     EXPECT_TRUE(snapshot["isDefault"].toBool());
     EXPECT_EQ(snapshot["sortOrder"].toInt(), 7);
     EXPECT_EQ(controller.activeAccountId(), -1);
+}
+
+TEST_F(AccountsControllerTest, AddAccountReportsFailureWhenKeychainRejectsPassword)
+{
+    // Contract the Add dialog relies on: when persistence fails (here the
+    // keychain refuses to store the password), addAccount must return
+    // kInvalidAccountId and add nothing to the model, so the UI can keep the
+    // dialog open and show an error instead of closing on a phantom success.
+    FailingKeychain failing;
+    compactphone::sip::AccountsManager manager(&fake, &db, &failing);
+    compactphone::models::AccountsModel model(&manager);
+    compactphone::AccountsController controller(&manager, &model);
+
+    QVariantMap params;
+    params["displayName"] = "Jane Agent";
+    params["username"] = "1001";
+    params["domain"] = "pbx.example.com";
+    params["password"] = "secret";
+    params["registerOnStartup"] = false;
+
+    const auto id = controller.addAccount(params);
+    EXPECT_EQ(id, compactphone::sip::kInvalidAccountId);
+    EXPECT_EQ(model.rowCount(), 0);
 }
 
 TEST_F(AccountsControllerTest, UpdateDefaultEnableAndRemoveRefreshModel)
