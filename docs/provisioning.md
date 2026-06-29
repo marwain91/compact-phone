@@ -14,8 +14,8 @@ appended, not replaced.
 
 1. `/etc/compactphone/provisioning.json` (Linux/macOS system-wide)
 2. The user's `AppDataLocation` provisioning file:
-   - macOS: `~/Library/Application Support/Compact Phone/provisioning.json`
-   - Linux: `~/.local/share/Compact Phone/provisioning.json`
+   - macOS: `~/Library/Application Support/Havliczech/Compact Phone/provisioning.json`
+   - Linux: `~/.local/share/Havliczech/Compact Phone/provisioning.json`
    - Windows: `%APPDATA%\Havliczech\Compact Phone\provisioning.json`
 3. `$COMPACTPHONE_CONFIG` environment variable (path)
 4. `--config <path>` command-line flag
