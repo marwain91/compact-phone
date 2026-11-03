@@ -1,45 +1,33 @@
-name: Trigger MyWebs docs deploy
-
-# Fire a repository_dispatch at the MyWebs repo whenever the docs source
-# under web/docs/ changes on main. MyWebs handles the actual rsync to the
-# VPS — see https://github.com/marwain91/my-webs/blob/main/.github/workflows/deploy.yml
-# (the "Stage CompactPhone docs" step + the redeploy-site event).
-#
-# Required secret: MYWEBS_DEPLOY_TOKEN
-#   Fine-grained PAT scoped to repo marwain91/my-webs with the
-#   "Contents: write" permission (minimum needed for POST /dispatches).
-#   Generate at https://github.com/settings/personal-access-tokens.
+name: Trigger MyWebs docs build
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'web/docs/**'
+    paths: ['web/docs/**']
   workflow_dispatch: {}
 
-# The job authenticates with the MYWEBS_DEPLOY_TOKEN PAT, not GITHUB_TOKEN,
-# and never checks out code — so the workflow's own token needs nothing.
-permissions:
-  contents: read
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+permissions: {}
 
 jobs:
   trigger:
-    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Dispatch redeploy-site to MyWebs
+      - name: Request the CompactPhone main build
         env:
-          GH_TOKEN:  ${{ secrets.MYWEBS_DEPLOY_TOKEN }}
-          FROM_REPO: ${{ github.repository }}
-          FROM_SHA:  ${{ github.sha }}
+          DEPLOY_HOOK: ${{ secrets.MYWEBS_DOCS_DEPLOY_HOOK }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::MYWEBS_DEPLOY_TOKEN secret is not set" >&2
+          if [[ ! "$DEPLOY_HOOK" =~ ^https://api\.cloudflare\.com/client/v4/workers/builds/deploy_hooks/[A-Za-z0-9_-]+$ ]]; then
+            echo '::error::MYWEBS_DOCS_DEPLOY_HOOK is missing or invalid'
             exit 1
           fi
-          gh api repos/marwain91/my-webs/dispatches \
-            -f event_type=redeploy-site \
-            -F 'client_payload[site]=compactphone.app' \
-            -F "client_payload[from]=${FROM_REPO}@${FROM_SHA}"
+          response="$RUNNER_TEMP/deploy-hook-response.json"
+          printf 'url = "%s"\n' "$DEPLOY_HOOK" |
+            curl -4 --config - --request POST --fail --silent --show-error \
+              --connect-timeout 10 --max-time 60 \
+              --output "$response"
+          jq -e '.success == true
+            and (.result.build_uuid | test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))
+            and (.result.branch == null or .result.branch == "main")' "$response" > /dev/null
+          jq -r '"Workers build accepted: " + .result.build_uuid' "$response"
